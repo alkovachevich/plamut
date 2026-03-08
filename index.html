@@ -284,6 +284,7 @@
       }
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -403,6 +404,13 @@
   </div>
 
   <script>
+    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+const SUPABASE_ANON_KEY = "sb_secret_doi__lUpH-1R1AcFRv5LVA_C6AQvnBh";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
     const translations = {
       en: {
         subtitle: "Personal Library and Media Universe Tracker",
