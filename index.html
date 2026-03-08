@@ -146,6 +146,7 @@
       align-items:center;
       justify-content:center;
       padding:20px;
+      z-index:1000;
     }
 
     .modal-box{
@@ -364,7 +365,6 @@
         id="search-input"
         class="input"
         type="text"
-        placeholder="Enter title"
         oninput="renderSearchResults()"
       >
 
@@ -377,23 +377,6 @@
   </div>
 
   <div id="status-modal" class="modal hidden">
-    <div id="progress-modal" class="modal hidden">
-  <div class="modal-box">
-
-    <h3 id="progress-title"></h3>
-
-    <div class="modal-actions" style="flex-direction:column;align-items:stretch">
-
-      <button class="button" onclick="openNextWork()" id="progress-next"></button>
-
-      <button class="button" onclick="openUniverse()" id="progress-universe"></button>
-
-      <button class="button" onclick="closeProgressModal()" id="progress-close"></button>
-
-    </div>
-
-  </div>
-</div>
     <div class="modal-box">
       <h3 id="status-modal-title"></h3>
 
@@ -403,6 +386,18 @@
         <button class="button" onclick="setStatus('Done')" id="status-done"></button>
         <button class="button" onclick="setStatus('Dropped')" id="status-dropped"></button>
         <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="progress-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="progress-title"></h3>
+
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch">
+        <button class="button" onclick="openNextWork()" id="progress-next"></button>
+        <button class="button" onclick="openUniverseFromModal()" id="progress-universe"></button>
+        <button class="button" onclick="closeProgressModal()" id="progress-close"></button>
       </div>
     </div>
   </div>
@@ -429,9 +424,9 @@
           changeStatus: "Change status",
           open: "Open",
           add: "Add",
-          cancel: "Cancel"
+          cancel: "Cancel",
           nextWork: "Open next work in series",
-          closeSuggestion: "Close"    
+          closeSuggestion: "Close"
         },
         modals: {
           searchTitle: "Search and add",
@@ -448,8 +443,9 @@
           itemNotFound: "Item not found on shelf.",
           noRelated: "No related works yet.",
           universeLater: "Universe view will be here later.",
-          relatedOpenLater: "Later this button can open a real related card."
-          progressTitle: "Finished this work",
+          relatedOpenLater: "Later this button can open a real related card.",
+          statusLabel: "Status",
+          progressTitle: "Finished this work"
         },
         statuses: {
           Planned: "Planned",
@@ -488,7 +484,7 @@
           changeStatus: "Изменить статус",
           open: "Открыть",
           add: "Добавить",
-          cancel: "Отмена"
+          cancel: "Отмена",
           nextWork: "Открыть следующее произведение",
           closeSuggestion: "Закрыть"
         },
@@ -507,8 +503,9 @@
           itemNotFound: "Произведение не найдено на полке.",
           noRelated: "Пока нет связанных произведений.",
           universeLater: "Просмотр вселенной будет добавлен позже.",
-          relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку."
-          progressTitle: "Вы завершили произведение",
+          relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку.",
+          statusLabel: "Статус",
+          progressTitle: "Вы завершили произведение"
         },
         statuses: {
           Planned: "Запланировано",
@@ -649,6 +646,16 @@
       }
     };
 
+    const nextWorksMap = {
+      "Dune": "Dune Messiah",
+      "Foundation": "Foundation and Empire",
+      "Neuromancer": "Count Zero",
+      "Dune (2021)": "Dune Part Two",
+      "Blade Runner": "Blade Runner 2049",
+      "Cyberpunk 2077": "Cyberpunk Edgerunners",
+      "Berserk": "Berserk anime"
+    };
+
     let currentCategory = null;
     let currentStatusIndex = null;
     let currentOpenTitle = null;
@@ -695,15 +702,16 @@
       document.getElementById("status-done").textContent = t().statuses.Done;
       document.getElementById("status-dropped").textContent = t().statuses.Dropped;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
-      document.getElementById("progress-title").textContent = t().labels.progressTitle
-      document.getElementById("progress-next").textContent = t().buttons.nextWork
-      document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse
-      document.getElementById("progress-close").textContent = t().buttons.closeSuggestion
+
+      document.getElementById("progress-title").textContent = t().labels.progressTitle;
+      document.getElementById("progress-next").textContent = t().buttons.nextWork;
+      document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse;
+      document.getElementById("progress-close").textContent = t().buttons.closeSuggestion;
     }
 
     function rerenderCurrentScreen() {
-      if (!document.getElementById("category-screen").classList.contains("hidden")) {
-        document.getElementById("category-title").textContent = t().categoryNames[currentCategory] || currentCategory;
+      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
+        document.getElementById("category-title").textContent = translateCategory(currentCategory);
         renderShelf();
       }
 
@@ -746,7 +754,7 @@
           <div class="media-cover">${t().labels.cover}</div>
           <div class="media-info">
             <h3 class="media-title">${item.title}</h3>
-            <div class="media-status">${t().buttons.changeStatus.replace("Изменить статус", "Статус").replace("Change status", "Status")}: ${translateStatus(item.status)}</div>
+            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
             <div class="media-actions">
               <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
               <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
@@ -858,16 +866,21 @@
 
       if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
         openCard(currentOpenTitle);
-        if(status === "Done"){
-  setTimeout(() => {
-    document.getElementById("progress-modal").classList.remove("hidden")
-  }, 300)
+      }
 
+      if(status === "Done"){
+        setTimeout(() => {
+          document.getElementById("progress-modal").classList.remove("hidden");
+        }, 200);
       }
     }
 
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
+    }
+
+    function closeProgressModal(){
+      document.getElementById("progress-modal").classList.add("hidden");
     }
 
     function openCard(title){
@@ -914,18 +927,37 @@
     function openUniverse(){
       alert(t().labels.universeLater);
     }
-    function closeProgressModal(){
-  document.getElementById("progress-modal").classList.add("hidden")
-}
 
-function openNextWork(){
-  closeProgressModal()
-  alert("Next work suggestion will appear here later.")
-}
+    function openUniverseFromModal(){
+      closeProgressModal();
+      openUniverse();
+    }
+
+    function openNextWork(){
+      closeProgressModal();
+
+      const nextTitle = nextWorksMap[currentOpenTitle];
+
+      if(!nextTitle){
+        alert("No next work mapped yet.");
+        return;
+      }
+
+      const exists = (demoData[currentCategory] || []).some(item => item.title === nextTitle);
+
+      if(!exists){
+        demoData[currentCategory].unshift({
+          title: nextTitle,
+          status: "Planned"
+        });
+        renderShelf();
+      }
+
+      openCard(nextTitle);
+    }
 
     applyTranslations();
   </script>
-  
 
 </body>
 </html>
