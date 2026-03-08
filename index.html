@@ -1,370 +1,453 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plamut</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
 
-<style>
-body{
-  font-family: Arial, sans-serif;
-  background:#111;
-  color:white;
-  margin:0;
-  padding:30px;
-}
+  <style>
+    body{
+      font-family: Arial, sans-serif;
+      background:#111;
+      color:white;
+      margin:0;
+      padding:30px;
+    }
 
-h1,h2,h3{
-  margin-top:0;
-}
+    h1,h2,h3{
+      margin-top:0;
+    }
 
-.subtitle{
-  color:#888;
-  margin-bottom:30px;
-}
+    .subtitle{
+      color:#888;
+      margin-bottom:30px;
+    }
 
-.hidden{
-  display:none !important;
+    .hidden{
+      display:none !important;
+    }
 
-}
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:20px;
+      max-width:1000px;
+    }
 
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-  gap:20px;
-  max-width:1000px;
-}
+    .card{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:14px;
+      padding:20px;
+      text-align:center;
+      cursor:pointer;
+      transition:.2s;
+    }
 
-.card{
-  background:#1a1a1a;
-  border:1px solid #333;
-  border-radius:14px;
-  padding:20px;
-  text-align:center;
-  cursor:pointer;
-  transition:.2s;
-}
+    .card:hover{
+      background:#222;
+    }
 
-.card:hover{
-  background:#222;
-}
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-bottom:24px;
+      flex-wrap:wrap;
+    }
 
-.topbar{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  margin-bottom:24px;
-  flex-wrap:wrap;
-}
+    .button{
+      background:#2a2a2a;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:10px 14px;
+      cursor:pointer;
+    }
 
-.button{
-  background:#2a2a2a;
-  color:white;
-  border:1px solid #444;
-  border-radius:10px;
-  padding:10px 14px;
-  cursor:pointer;
-}
+    .button:hover{
+      background:#333;
+    }
 
-.button:hover{
-  background:#333;
-}
+    .shelf{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:18px;
+      max-width:1100px;
+    }
 
-.shelf{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
-  gap:18px;
-  max-width:1100px;
-}
+    .media-card{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:14px;
+      overflow:hidden;
+    }
 
-.media-card{
-  background:#1a1a1a;
-  border:1px solid #333;
-  border-radius:14px;
-  overflow:hidden;
-}
+    .media-cover{
+      height:220px;
+      background:#2b2b2b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#999;
+      font-size:14px;
+    }
 
-.media-cover{
-  height:220px;
-  background:#2b2b2b;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#999;
-  font-size:14px;
-}
+    .media-info{
+      padding:14px;
+    }
 
-.media-info{
-  padding:14px;
-}
+    .media-title{
+      font-size:16px;
+      margin:0 0 8px 0;
+    }
 
-.media-title{
-  font-size:16px;
-  margin:0 0 8px 0;
-}
+    .media-status{
+      font-size:13px;
+      color:#aaa;
+      margin-bottom:12px;
+    }
 
-.media-status{
-  font-size:13px;
-  color:#aaa;
-  margin-bottom:12px;
-}
+    .media-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
 
-.media-actions{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-}
+    .add-btn{
+      background:#3a3a3a;
+      color:white;
+      border:none;
+      border-radius:8px;
+      padding:8px 10px;
+      cursor:pointer;
+    }
 
-.add-btn{
-  background:#3a3a3a;
-  color:white;
-  border:none;
-  border-radius:8px;
-  padding:8px 10px;
-  cursor:pointer;
-}
+    .add-btn:hover{
+      background:#4a4a4a;
+    }
 
-.add-btn:hover{
-  background:#4a4a4a;
-}
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.7);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
 
-.modal{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.7);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:20px;
-}
+    .modal-box{
+      width:100%;
+      max-width:420px;
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      padding:20px;
+    }
 
-.modal-box{
-  width:100%;
-  max-width:420px;
-  background:#1a1a1a;
-  border:1px solid #333;
-  border-radius:16px;
-  padding:20px;
-}
+    .modal-box h3{
+      margin-top:0;
+    }
 
-.modal-box h3{
-  margin-top:0;
-}
+    .input{
+      width:100%;
+      box-sizing:border-box;
+      background:#111;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:12px;
+      margin-bottom:12px;
+    }
 
-.input{
-  width:100%;
-  box-sizing:border-box;
-  background:#111;
-  color:white;
-  border:1px solid #444;
-  border-radius:10px;
-  padding:12px;
-  margin-bottom:12px;
-}
+    .modal-actions{
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      margin-top:8px;
+    }
 
-.modal-actions{
-  display:flex;
-  gap:10px;
-  justify-content:flex-end;
-  margin-top:8px;
-}
+    .small{
+      color:#888;
+      font-size:13px;
+      margin-bottom:14px;
+    }
 
-.small{
-  color:#888;
-  font-size:13px;
-  margin-bottom:14px;
-}
-</style>
+    .search-item{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      border:1px solid #333;
+      border-radius:10px;
+      margin-bottom:10px;
+      background:#141414;
+    }
+
+    .search-item-title{
+      font-size:14px;
+    }
+
+    .search-item-meta{
+      font-size:12px;
+      color:#888;
+      margin-top:4px;
+    }
+  </style>
 </head>
 
 <body>
 
-<div id="home-screen">
-  <h1>Plamut</h1>
-  <div class="subtitle">Personal Library and Media Universe Tracker</div>
+  <div id="home-screen">
+    <h1>Plamut</h1>
+    <div class="subtitle">Personal Library and Media Universe Tracker</div>
 
-  <div class="grid">
-    <div class="card" onclick="openCategory('Books')">📚 Books</div>
-    <div class="card" onclick="openCategory('Movies')">🎬 Movies</div>
-    <div class="card" onclick="openCategory('Series')">📺 Series</div>
-    <div class="card" onclick="openCategory('Games')">🎮 Games</div>
-    <div class="card" onclick="openCategory('Anime')">🍥 Anime</div>
-    <div class="card" onclick="openCategory('Manga')">📖 Manga</div>
-    <div class="card" onclick="openCategory('Blacklist')">🚫 Blacklist</div>
-  </div>
-</div>
-
-<div id="category-screen" class="hidden">
-  <div class="topbar">
-    <button class="button" onclick="goHome()">← Back</button>
-    <h2 id="category-title" style="margin:0;"></h2>
-    <button class="button" onclick="addNew()">+ Add new</button>
-  </div>
-
-  <div class="shelf" id="shelf"></div>
-</div>
-
-<div id="add-modal" class="modal hidden">
-  <div class="modal-box">
-    <h3>Add new item</h3>
-    <div class="small">Prototype mode: manual quick add</div>
-    <input id="new-title" class="input" type="text" placeholder="Enter title">
-    <div class="modal-actions">
-      <button class="button" onclick="closeAddModal()">Cancel</button>
-      <button class="button" onclick="saveNewItem()">Add</button>
+    <div class="grid">
+      <div class="card" onclick="openCategory('Books')">📚 Books</div>
+      <div class="card" onclick="openCategory('Movies')">🎬 Movies</div>
+      <div class="card" onclick="openCategory('Series')">📺 Series</div>
+      <div class="card" onclick="openCategory('Games')">🎮 Games</div>
+      <div class="card" onclick="openCategory('Anime')">🍥 Anime</div>
+      <div class="card" onclick="openCategory('Manga')">📖 Manga</div>
+      <div class="card" onclick="openCategory('Blacklist')">🚫 Blacklist</div>
     </div>
   </div>
-</div>
-  <div id="status-modal" class="modal hidden">
-  <div class="modal-box">
-    <h3>Select status</h3>
 
-    <div class="modal-actions" style="flex-direction:column;align-items:stretch">
-
-      <button class="button" onclick="setStatus('Planned')">
-        Planned
-      </button>
-
-      <button class="button" onclick="setStatus('In progress')">
-        In progress
-      </button>
-
-      <button class="button" onclick="setStatus('Done')">
-        Done
-      </button>
-
-      <button class="button" onclick="setStatus('Dropped')">
-        Dropped
-      </button>
-
-      <button class="button" onclick="closeStatusModal()">
-        Cancel
-      </button>
-
+  <div id="category-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="goHome()">← Back</button>
+      <h2 id="category-title" style="margin:0;"></h2>
+      <button class="button" onclick="addNew()">+ Add new</button>
     </div>
+
+    <div class="shelf" id="shelf"></div>
   </div>
-</div>
 
-<script>
-const demoData = {
-  Books: [
-    { title: "Dune", status: "Planned" },
-    { title: "Foundation", status: "In progress" },
-    { title: "Neuromancer", status: "Done" }
-  ],
-  Movies: [
-    { title: "Dune (2021)", status: "Done" },
-    { title: "Blade Runner", status: "Planned" },
-    { title: "Arrival", status: "Done" }
-  ],
-  Series: [
-    { title: "Severance", status: "In progress" },
-    { title: "Dark", status: "Done" }
-  ],
-  Games: [
-    { title: "Cyberpunk 2077", status: "In progress" },
-    { title: "The Witcher 3", status: "Done" }
-  ],
-  Anime: [
-    { title: "Cowboy Bebop", status: "Done" },
-    { title: "Monster", status: "Planned" }
-  ],
-  Manga: [
-    { title: "Berserk", status: "In progress" },
-    { title: "20th Century Boys", status: "Planned" }
-  ],
-  Blacklist: [
-    { title: "Ignored creators will be here", status: "Info" }
-  ]
-};
+  <div id="add-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Search and add</h3>
+      <div class="small">Prototype mode: local search results</div>
 
-let currentCategory = null;
-  let currentStatusIndex = null;
+      <input
+        id="search-input"
+        class="input"
+        type="text"
+        placeholder="Enter title"
+        oninput="renderSearchResults()"
+      >
 
-function openCategory(name){
-  currentCategory = name;
-  document.getElementById("home-screen").classList.add("hidden");
-  document.getElementById("category-screen").classList.remove("hidden");
-  document.getElementById("category-title").textContent = name;
-  renderShelf();
-}
+      <div id="search-results"></div>
 
-function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  shelf.innerHTML = "";
-
-  const items = demoData[currentCategory] || [];
-
-  items.forEach((item, index) => {
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = `
-      <div class="media-cover">Cover</div>
-      <div class="media-info">
-        <h3 class="media-title">${item.title}</h3>
-        <div class="media-status">Status: ${item.status}</div>
-        <div class="media-actions">
-          <button class="add-btn" onclick="changeStatus(${index})">Change status</button>
-          <button class="add-btn" onclick="openCard('${item.title.replace(/'/g, "\\'")}')">Open</button>
-        </div>
+      <div class="modal-actions">
+        <button class="button" onclick="closeAddModal()">Close</button>
       </div>
-    `;
-    shelf.appendChild(card);
-  });
-}
+    </div>
+  </div>
 
-function goHome(){
-  document.getElementById("category-screen").classList.add("hidden");
-  document.getElementById("home-screen").classList.remove("hidden");
-}
+  <div id="status-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Select status</h3>
 
-function addNew(){
-  document.getElementById("add-modal").classList.remove("hidden");
-  document.getElementById("new-title").value = "";
-  document.getElementById("new-title").focus();
-}
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch">
+        <button class="button" onclick="setStatus('Planned')">Planned</button>
+        <button class="button" onclick="setStatus('In progress')">In progress</button>
+        <button class="button" onclick="setStatus('Done')">Done</button>
+        <button class="button" onclick="setStatus('Dropped')">Dropped</button>
+        <button class="button" onclick="closeStatusModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
 
-function closeAddModal(){
-  document.getElementById("add-modal").classList.add("hidden");
-}
+  <script>
+    const demoData = {
+      Books: [
+        { title: "Dune", status: "Planned" },
+        { title: "Foundation", status: "In progress" },
+        { title: "Neuromancer", status: "Done" }
+      ],
+      Movies: [
+        { title: "Dune (2021)", status: "Done" },
+        { title: "Blade Runner", status: "Planned" },
+        { title: "Arrival", status: "Done" }
+      ],
+      Series: [
+        { title: "Severance", status: "In progress" },
+        { title: "Dark", status: "Done" }
+      ],
+      Games: [
+        { title: "Cyberpunk 2077", status: "In progress" },
+        { title: "The Witcher 3", status: "Done" }
+      ],
+      Anime: [
+        { title: "Cowboy Bebop", status: "Done" },
+        { title: "Monster", status: "Planned" }
+      ],
+      Manga: [
+        { title: "Berserk", status: "In progress" },
+        { title: "20th Century Boys", status: "Planned" }
+      ],
+      Blacklist: [
+        { title: "Ignored creators will be here", status: "Info" }
+      ]
+    };
 
-function saveNewItem(){
-  const input = document.getElementById("new-title");
-  const title = input.value.trim();
+    const searchDatabase = {
+      Books: [
+        { title: "Hyperion", status: "Planned" },
+        { title: "Snow Crash", status: "Planned" },
+        { title: "The Left Hand of Darkness", status: "Planned" },
+        { title: "A Fire Upon the Deep", status: "Planned" }
+      ],
+      Movies: [
+        { title: "Interstellar", status: "Planned" },
+        { title: "Solaris", status: "Planned" },
+        { title: "Gattaca", status: "Planned" }
+      ],
+      Series: [
+        { title: "The Expanse", status: "Planned" },
+        { title: "Silo", status: "Planned" },
+        { title: "Battlestar Galactica", status: "Planned" }
+      ],
+      Games: [
+        { title: "Mass Effect", status: "Planned" },
+        { title: "Deus Ex", status: "Planned" },
+        { title: "Disco Elysium", status: "Planned" }
+      ],
+      Anime: [
+        { title: "Steins;Gate", status: "Planned" },
+        { title: "Ghost in the Shell", status: "Planned" },
+        { title: "Ergo Proxy", status: "Planned" }
+      ],
+      Manga: [
+        { title: "Blame!", status: "Planned" },
+        { title: "Pluto", status: "Planned" },
+        { title: "Ajin", status: "Planned" }
+      ],
+      Blacklist: []
+    };
 
-  if(!title){
-    alert("Enter a title.");
-    return;
-  }
+    let currentCategory = null;
+    let currentStatusIndex = null;
 
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned"
-  });
+    function openCategory(name){
+      currentCategory = name;
+      document.getElementById("home-screen").classList.add("hidden");
+      document.getElementById("category-screen").classList.remove("hidden");
+      document.getElementById("category-title").textContent = name;
+      renderShelf();
+    }
 
-  closeAddModal();
-  renderShelf();
-}
+    function renderShelf(){
+      const shelf = document.getElementById("shelf");
+      shelf.innerHTML = "";
 
-function changeStatus(index){
-  currentStatusIndex = index;
-  document.getElementById("status-modal").classList.remove("hidden");
+      const items = demoData[currentCategory] || [];
 
-}
+      items.forEach((item, index) => {
+        const safeTitle = item.title.replace(/'/g, "\\'");
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">Cover</div>
+          <div class="media-info">
+            <h3 class="media-title">${item.title}</h3>
+            <div class="media-status">Status: ${item.status}</div>
+            <div class="media-actions">
+              <button class="add-btn" onclick="changeStatus(${index})">Change status</button>
+              <button class="add-btn" onclick="openCard('${safeTitle}')">Open</button>
+            </div>
+          </div>
+        `;
+        shelf.appendChild(card);
+      });
+    }
 
-function openCard(title){
-  alert("Open media card: " + title);
-}
-  function setStatus(status){
-  demoData[currentCategory][currentStatusIndex].status = status;
-  closeStatusModal();
-  renderShelf();
-}
+    function goHome(){
+      document.getElementById("category-screen").classList.add("hidden");
+      document.getElementById("home-screen").classList.remove("hidden");
+    }
 
-function closeStatusModal(){
-  document.getElementById("status-modal").classList.add("hidden");
-}
-</script>
+    function addNew(){
+      document.getElementById("add-modal").classList.remove("hidden");
+      document.getElementById("search-input").value = "";
+      renderSearchResults();
+      document.getElementById("search-input").focus();
+    }
+
+    function closeAddModal(){
+      document.getElementById("add-modal").classList.add("hidden");
+    }
+
+    function renderSearchResults(){
+      const container = document.getElementById("search-results");
+      const query = document.getElementById("search-input").value.trim().toLowerCase();
+
+      container.innerHTML = "";
+
+      const items = searchDatabase[currentCategory] || [];
+
+      const filtered = items.filter(item =>
+        item.title.toLowerCase().includes(query)
+      );
+
+      if(filtered.length === 0){
+        container.innerHTML = `<div class="small">No results found</div>`;
+        return;
+      }
+
+      filtered.forEach(item => {
+        const safeTitle = item.title.replace(/'/g, "\\'");
+        const row = document.createElement("div");
+        row.className = "search-item";
+        row.innerHTML = `
+          <div>
+            <div class="search-item-title">${item.title}</div>
+            <div class="search-item-meta">${currentCategory}</div>
+          </div>
+          <button class="button" onclick="addSearchResult('${safeTitle}')">Add</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function addSearchResult(title){
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+
+      if(exists){
+        alert("This item is already on the shelf.");
+        return;
+      }
+
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned"
+      });
+
+      closeAddModal();
+      renderShelf();
+    }
+
+    function changeStatus(index){
+      currentStatusIndex = index;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    function setStatus(status){
+      demoData[currentCategory][currentStatusIndex].status = status;
+      closeStatusModal();
+      renderShelf();
+    }
+
+    function closeStatusModal(){
+      document.getElementById("status-modal").classList.add("hidden");
+    }
+
+    function openCard(title){
+      alert("Open media card: " + title);
+    }
+  </script>
 
 </body>
 </html>
