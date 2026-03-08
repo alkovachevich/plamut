@@ -740,13 +740,16 @@ const supabaseClient = supabase.createClient(
       return t().categoryNames[category] || category;
     }
 
-    function openCategory(name){
-      currentCategory = name;
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-      document.getElementById("category-title").textContent = translateCategory(name);
-      renderShelf();
-    }
+    async function openCategory(name){
+  currentCategory = name;
+
+  hideAllScreens();
+
+  document.getElementById("category-screen").classList.remove("hidden");
+  document.getElementById("category-title").textContent = translateCategory(name);
+
+  await loadCategoryFromSupabase(name);
+}
 
     function renderShelf(){
       const shelf = document.getElementById("shelf");
@@ -987,6 +990,29 @@ async function saveItemToSupabase(title, category, status){
   }
 
   return true;
+}
+    async function loadCategoryFromSupabase(category){
+
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("category", category);
+
+  if(error){
+    console.error("Supabase load error:", error);
+    return;
+  }
+
+  demoData[category] = [];
+
+  data.forEach(item => {
+    demoData[category].push({
+      title: item.title,
+      status: item.status
+    });
+  });
+
+  renderShelf();
 }
     applyTranslations();
   </script>
