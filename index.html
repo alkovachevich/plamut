@@ -854,18 +854,8 @@ const supabaseClient = supabase.createClient(
   closeAddModal();
   renderShelf();
 }
-  
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned"
-      });
-
-      closeAddModal();
-      renderShelf();
-    }
-
-    function changeStatus(index){
+function changeStatus(index){
       currentStatusIndex = index;
       currentOpenTitle = demoData[currentCategory][index].title;
       document.getElementById("status-modal").classList.remove("hidden");
