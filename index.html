@@ -279,6 +279,7 @@ const demoData = {
 };
 
 let currentCategory = null;
+  let currentStatusIndex = null;
 
 function openCategory(name){
   currentCategory = name;
@@ -346,16 +347,22 @@ function saveNewItem(){
 }
 
 function changeStatus(index){
-  const item = demoData[currentCategory][index];
-  const statuses = ["Planned", "In progress", "Done", "Dropped"];
-  const currentIndex = statuses.indexOf(item.status);
-  const nextIndex = (currentIndex + 1) % statuses.length;
-  item.status = statuses[nextIndex];
-  renderShelf();
+  currentStatusIndex = index;
+  document.getElementById("status-modal").classList.remove("hidden");
+
 }
 
 function openCard(title){
   alert("Open media card: " + title);
+}
+  function setStatus(status){
+  demoData[currentCategory][currentStatusIndex].status = status;
+  closeStatusModal();
+  renderShelf();
+}
+
+function closeStatusModal(){
+  document.getElementById("status-modal").classList.add("hidden");
 }
 </script>
 
