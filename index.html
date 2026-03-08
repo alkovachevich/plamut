@@ -1,51 +1,94 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Plamut</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #111;
-      color: #fff;
-      margin: 0;
-      padding: 40px;
-    }
-    h1 {
-      margin-bottom: 8px;
-    }
-    p {
-      color: #bbb;
-      margin-bottom: 24px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 16px;
-      max-width: 900px;
-    }
-    .card {
-      background: #1b1b1b;
-      border: 1px solid #2a2a2a;
-      border-radius: 14px;
-      padding: 20px;
-      text-align: center;
-    }
-  </style>
-</head>
-<body>
-  <h1>Plamut</h1>
-  <p>Personal Library and Media Universe Tracker</p>
+<meta charset="UTF-8">
+<title>Plamut</title>
 
-  <div class="grid">
-    <div class="card">Books</div>
-    <div class="card">Movies</div>
-    <div class="card">Series</div>
-    <div class="card">Games</div>
-    <div class="card">Anime</div>
-    <div class="card">Manga</div>
-    <div class="card">Blacklist</div>
-  </div>
+<style>
+body{
+  font-family: Arial;
+  background:#111;
+  color:white;
+  padding:40px;
+}
+
+h1{
+  margin-bottom:6px;
+}
+
+.subtitle{
+  color:#888;
+  margin-bottom:40px;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:20px;
+  max-width:900px;
+}
+
+.card{
+  background:#1a1a1a;
+  border:1px solid #333;
+  border-radius:14px;
+  padding:25px;
+  text-align:center;
+  cursor:pointer;
+  transition:.2s;
+}
+
+.card:hover{
+  background:#222;
+}
+</style>
+
+</head>
+
+<body>
+
+<h1>Plamut</h1>
+<div class="subtitle">
+Personal Library and Media Universe Tracker
+</div>
+
+<div class="grid">
+
+<div class="card" onclick="openCategory('books')">
+📚 Books
+</div>
+
+<div class="card" onclick="openCategory('movies')">
+🎬 Movies
+</div>
+
+<div class="card" onclick="openCategory('series')">
+📺 Series
+</div>
+
+<div class="card" onclick="openCategory('games')">
+🎮 Games
+</div>
+
+<div class="card" onclick="openCategory('anime')">
+🍥 Anime
+</div>
+
+<div class="card" onclick="openCategory('manga')">
+📖 Manga
+</div>
+
+<div class="card" onclick="openCategory('blacklist')">
+🚫 Blacklist
+</div>
+
+</div>
+
+<script>
+function openCategory(name){
+  alert("Category: " + name + " (prototype)");
+}
+</script>
+
 </body>
 </html>
