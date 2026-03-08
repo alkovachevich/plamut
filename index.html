@@ -982,7 +982,7 @@ async function saveItemToSupabase(title, category, status){
 
   if(error){
     console.error("Supabase insert error:", error);
-    alert("Error saving item to database");
+    alert("Error saving item to database: " + error.message);
     return false;
   }
 
