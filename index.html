@@ -195,6 +195,82 @@
       color:#888;
       margin-top:4px;
     }
+
+    .details-layout{
+      display:grid;
+      grid-template-columns:minmax(220px, 280px) 1fr;
+      gap:24px;
+      max-width:1100px;
+    }
+
+    .details-cover{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      overflow:hidden;
+    }
+
+    .details-cover-box{
+      height:380px;
+      background:#2b2b2b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#999;
+    }
+
+    .details-panel{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      padding:20px;
+    }
+
+    .badge{
+      display:inline-block;
+      padding:6px 10px;
+      border:1px solid #444;
+      border-radius:999px;
+      color:#bbb;
+      font-size:12px;
+      margin-right:8px;
+      margin-bottom:8px;
+    }
+
+    .section{
+      margin-top:24px;
+    }
+
+    .related-list{
+      display:grid;
+      gap:10px;
+      margin-top:10px;
+    }
+
+    .related-item{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      border:1px solid #333;
+      border-radius:12px;
+      padding:12px;
+      background:#141414;
+    }
+
+    .muted{
+      color:#999;
+    }
+
+    @media (max-width: 800px){
+      .details-layout{
+        grid-template-columns:1fr;
+      }
+
+      .details-cover-box{
+        height:260px;
+      }
+    }
   </style>
 </head>
 
@@ -223,6 +299,44 @@
     </div>
 
     <div class="shelf" id="shelf"></div>
+  </div>
+
+  <div id="details-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="backToCategory()">← Back to shelf</button>
+      <button class="button" onclick="openUniverse()">Explore universe</button>
+    </div>
+
+    <div class="details-layout">
+      <div class="details-cover">
+        <div class="details-cover-box">Cover</div>
+      </div>
+
+      <div class="details-panel">
+        <h2 id="details-title">Title</h2>
+
+        <div>
+          <span class="badge" id="details-category">Category</span>
+          <span class="badge" id="details-status">Status</span>
+        </div>
+
+        <div class="section">
+          <h3>Description</h3>
+          <div class="muted" id="details-description">
+            Description will appear here.
+          </div>
+        </div>
+
+        <div class="section">
+          <button class="button" onclick="changeStatusFromDetails()">Change status</button>
+        </div>
+
+        <div class="section">
+          <h3>Related works</h3>
+          <div class="related-list" id="related-list"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="add-modal" class="modal hidden">
@@ -328,12 +442,64 @@
       Blacklist: []
     };
 
+    const detailsDatabase = {
+      "Dune": {
+        description: "Science fiction novel and the root of a large media universe.",
+        related: ["Dune Messiah", "Dune (2021)", "Dune: Spice Wars"]
+      },
+      "Foundation": {
+        description: "Classic science fiction series by Isaac Asimov.",
+        related: ["Foundation and Empire", "Second Foundation", "Foundation TV series"]
+      },
+      "Neuromancer": {
+        description: "Cyberpunk novel that shaped an entire genre.",
+        related: ["Count Zero", "Mona Lisa Overdrive", "Ghost in the Shell"]
+      },
+      "Dune (2021)": {
+        description: "Film adaptation of Frank Herbert's novel.",
+        related: ["Dune Part Two", "Dune (1984)", "Dune book"]
+      },
+      "Blade Runner": {
+        description: "Science fiction film based on Philip K. Dick's work.",
+        related: ["Blade Runner 2049", "Do Androids Dream of Electric Sheep?", "Cyberpunk 2077"]
+      },
+      "Arrival": {
+        description: "Science fiction film based on a short story.",
+        related: ["Story of Your Life", "Interstellar", "Contact"]
+      },
+      "Cyberpunk 2077": {
+        description: "Open world RPG set in the Cyberpunk universe.",
+        related: ["Cyberpunk Edgerunners", "Cyberpunk 2020", "Blade Runner"]
+      },
+      "The Witcher 3": {
+        description: "RPG based on The Witcher books.",
+        related: ["The Witcher books", "The Witcher Netflix", "The Witcher 2"]
+      },
+      "Cowboy Bebop": {
+        description: "Anime series blending noir, sci-fi and western themes.",
+        related: ["Cowboy Bebop movie", "Samurai Champloo", "Trigun"]
+      },
+      "Monster": {
+        description: "Psychological thriller anime adaptation of the manga.",
+        related: ["Monster manga", "Pluto", "20th Century Boys"]
+      },
+      "Berserk": {
+        description: "Dark fantasy manga with multiple adaptations.",
+        related: ["Berserk anime", "Berserk movies", "Claymore"]
+      },
+      "20th Century Boys": {
+        description: "Mystery manga by Naoki Urasawa.",
+        related: ["21st Century Boys", "Monster", "Pluto"]
+      }
+    };
+
     let currentCategory = null;
     let currentStatusIndex = null;
+    let currentOpenTitle = null;
 
     function openCategory(name){
       currentCategory = name;
-      document.getElementById("home-screen").classList.add("hidden");
+      hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
       document.getElementById("category-title").textContent = name;
       renderShelf();
@@ -364,9 +530,20 @@
       });
     }
 
-    function goHome(){
+    function hideAllScreens(){
+      document.getElementById("home-screen").classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
+      document.getElementById("details-screen").classList.add("hidden");
+    }
+
+    function goHome(){
+      hideAllScreens();
       document.getElementById("home-screen").classList.remove("hidden");
+    }
+
+    function backToCategory(){
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
     }
 
     function addNew(){
@@ -431,6 +608,19 @@
 
     function changeStatus(index){
       currentStatusIndex = index;
+      currentOpenTitle = demoData[currentCategory][index].title;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    function changeStatusFromDetails(){
+      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
+
+      if(index === -1){
+        alert("Item not found on shelf.");
+        return;
+      }
+
+      currentStatusIndex = index;
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
@@ -438,6 +628,10 @@
       demoData[currentCategory][currentStatusIndex].status = status;
       closeStatusModal();
       renderShelf();
+
+      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+        openCard(currentOpenTitle);
+      }
     }
 
     function closeStatusModal(){
@@ -445,7 +639,48 @@
     }
 
     function openCard(title){
-      alert("Open media card: " + title);
+      currentOpenTitle = title;
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const details = detailsDatabase[title] || {
+        description: "No detailed description yet. This is a prototype card.",
+        related: []
+      };
+
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
+
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-category").textContent = currentCategory;
+      document.getElementById("details-status").textContent = item ? item.status : "Unknown";
+      document.getElementById("details-description").textContent = details.description;
+
+      const relatedList = document.getElementById("related-list");
+      relatedList.innerHTML = "";
+
+      if(!details.related.length){
+        relatedList.innerHTML = `<div class="muted">No related works yet.</div>`;
+        return;
+      }
+
+      details.related.forEach(name => {
+        const safeName = name.replace(/'/g, "\\'");
+        const row = document.createElement("div");
+        row.className = "related-item";
+        row.innerHTML = `
+          <div>${name}</div>
+          <button class="button" onclick="openRelatedPrototype('${safeName}')">Open</button>
+        `;
+        relatedList.appendChild(row);
+      });
+    }
+
+    function openRelatedPrototype(title){
+      alert("Related work: " + title + "\\n\\nLater this button can open a real related card.");
+    }
+
+    function openUniverse(){
+      alert("Universe view will be here later.");
     }
   </script>
 
