@@ -832,12 +832,28 @@ const supabaseClient = supabase.createClient(
       });
     }
 
-    function addSearchResult(title){
-      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+    async function addSearchResult(title){
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-      if(exists){
-        alert(t().labels.alreadyExists);
-        return;
+  if(exists){
+    alert(t().labels.alreadyExists);
+    return;
+  }
+
+  const saved = await saveItemToSupabase(title, currentCategory, "Planned");
+
+  if(!saved){
+    return;
+  }
+
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned"
+  });
+
+  closeAddModal();
+  renderShelf();
+}
       }
 
       demoData[currentCategory].unshift({
@@ -963,7 +979,25 @@ const supabaseClient = supabase.createClient(
 
       openCard(nextTitle);
     }
+async function saveItemToSupabase(title, category, status){
+  const { error } = await supabaseClient
+    .from("user_media")
+    .insert([
+      {
+        title: title,
+        category: category,
+        status: status
+      }
+    ]);
 
+  if(error){
+    console.error("Supabase insert error:", error);
+    alert("Error saving item to database");
+    return false;
+  }
+
+  return true;
+}
     applyTranslations();
   </script>
 
