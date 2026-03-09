@@ -838,11 +838,9 @@ function backToCategory(){
 }
 
 function addNew(){
-  alert("Current category: " + currentCategory);
-  
   document.getElementById("add-modal").classList.remove("hidden");
   document.getElementById("search-input").value = "";
-  renderSearchResults();
+  document.getElementById("search-results").innerHTML = "";
   document.getElementById("search-input").focus();
 }
 
@@ -865,15 +863,9 @@ async function renderSearchResults(){
     container.innerHTML = <div class="small">Searching...</div>;
 
     try {
-      const url = https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10;
-      console.log("Google Books URL:", url);
-
+      const url = "https://www.googleapis.com/books/v1/volumes?q=" + encodeURIComponent(query) + "&maxResults=10";
       const response = await fetch(url);
-      console.log("Google Books response:", response);
-
       const data = await response.json();
-      console.log("Google Books data:", data);
-
       const items = data.items || [];
 
       if(items.length === 0){
@@ -883,7 +875,7 @@ async function renderSearchResults(){
 
       container.innerHTML = "";
 
-      items.forEach(book => {
+      items.forEach(function(book){
         const info = book.volumeInfo || {};
         const title = info.title || "Untitled";
         const authors = (info.authors || []).join(", ");
@@ -911,16 +903,16 @@ async function renderSearchResults(){
 
   const items = searchDatabase[currentCategory] || [];
 
-  const filtered = items.filter(item =>
-    item.title.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = items.filter(function(item){
+    return item.title.toLowerCase().includes(query.toLowerCase());
+  });
 
   if(filtered.length === 0){
     container.innerHTML = <div class="small">${t().labels.noResults}</div>;
     return;
   }
 
-  filtered.forEach(item => {
+  filtered.forEach(function(item){
     const safeTitle = item.title.replace(/'/g, "\\'");
     const row = document.createElement("div");
     row.className = "search-item";
@@ -933,28 +925,6 @@ async function renderSearchResults(){
     ;
     container.appendChild(row);
   });
-}
-async function addSearchResult(title){
-  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
-
-  if(exists){
-    alert(t().labels.alreadyExists);
-    return;
-  }
-
-  const saved = await saveItemToSupabase(title, currentCategory, "Planned");
-
-  if(!saved){
-    return;
-  }
-
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned"
-  });
-
-  closeAddModal();
-  renderShelf();
 }
 
 function changeStatus(index){
