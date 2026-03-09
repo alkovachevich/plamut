@@ -877,16 +877,21 @@ function changeStatus(index){
     }
 
     async function setStatus(status){
-
   const item = demoData[currentCategory][currentStatusIndex];
+  const oldStatus = item.status;
 
   item.status = status;
-
   renderShelf();
-
-  await updateStatusInSupabase(item.title, currentCategory, status);
-
   closeStatusModal();
+
+  const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+
+  if(!updated){
+    item.status = oldStatus;
+    renderShelf();
+    alert("Status was not saved to database");
+    return;
+  }
 
   if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
     openCard(currentOpenTitle);
@@ -898,6 +903,7 @@ function changeStatus(index){
     }, 200);
   }
 }
+
 
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
@@ -990,7 +996,6 @@ async function saveItemToSupabase(title, category, status){
       }
     ]);
   async function updateStatusInSupabase(title, category, status){
-
   const { error } = await supabaseClient
     .from("user_media")
     .update({ status: status })
@@ -999,15 +1004,7 @@ async function saveItemToSupabase(title, category, status){
 
   if(error){
     console.error("Supabase update error:", error);
-    return false;
-  }
-
-  return true;
-}
-
-  if(error){
-    console.error("Supabase insert error:", error);
-    alert("Error saving item to database: " + error.message);
+    alert("Supabase update error: " + error.message);
     return false;
   }
 
