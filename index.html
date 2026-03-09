@@ -850,29 +850,36 @@ function closeAddModal(){
 
 async function renderSearchResults(){
   const container = document.getElementById("search-results");
-  const query = document.getElementById("search-input").value.trim().toLowerCase();
+  const query = document.getElementById("search-input").value.trim();
 
   container.innerHTML = "";
 
   if(!query){
-    container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
     return;
   }
 
-  // Для книг используем реальный API
   if(currentCategory === "Books"){
+    container.innerHTML = <div class="small">Searching...</div>;
+
     try {
-      const response = await fetch(
-        `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10`
-      );
+      const url = https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10;
+      console.log("Google Books URL:", url);
+
+      const response = await fetch(url);
+      console.log("Google Books response:", response);
 
       const data = await response.json();
+      console.log("Google Books data:", data);
+
       const items = data.items || [];
 
       if(items.length === 0){
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+        container.innerHTML = <div class="small">No books found</div>;
         return;
       }
+
+      container.innerHTML = "";
 
       items.forEach(book => {
         const info = book.volumeInfo || {};
@@ -882,33 +889,32 @@ async function renderSearchResults(){
 
         const row = document.createElement("div");
         row.className = "search-item";
-        row.innerHTML = `
+        row.innerHTML = 
           <div>
             <div class="search-item-title">${title}</div>
-            <div class="search-item-meta">${authors || translateCategory(currentCategory)}</div>
+            <div class="search-item-meta">${authors || "Book"}</div>
           </div>
           <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-        `;
+        ;
         container.appendChild(row);
       });
 
       return;
     } catch (error) {
       console.error("Google Books API error:", error);
-      container.innerHTML = `<div class="small">API error</div>`;
+      container.innerHTML = <div class="small">API error: ${error.message}</div>;
       return;
     }
   }
 
-  // Для остальных категорий пока оставляем локальный поиск
   const items = searchDatabase[currentCategory] || [];
 
   const filtered = items.filter(item =>
-    item.title.toLowerCase().includes(query)
+    item.title.toLowerCase().includes(query.toLowerCase())
   );
 
   if(filtered.length === 0){
-    container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
     return;
   }
 
@@ -916,13 +922,13 @@ async function renderSearchResults(){
     const safeTitle = item.title.replace(/'/g, "\\'");
     const row = document.createElement("div");
     row.className = "search-item";
-    row.innerHTML = `
+    row.innerHTML = 
       <div>
         <div class="search-item-title">${item.title}</div>
         <div class="search-item-meta">${translateCategory(currentCategory)}</div>
       </div>
       <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-    `;
+    ;
     container.appendChild(row);
   });
 }
