@@ -342,11 +342,12 @@
 
       <div class="details-panel">
         <h2 id="details-title"></h2>
+<div class="muted" id="details-creator" style="margin-bottom:10px;"></div>
 
-        <div>
-          <span class="badge" id="details-category"></span>
-          <span class="badge" id="details-status"></span>
-        </div>
+<div>
+  <span class="badge" id="details-category"></span>
+  <span class="badge" id="details-status"></span>
+</div>
 
         <div class="section">
           <h3 id="description-label"></h3>
@@ -655,33 +656,39 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      shelf.innerHTML = "";
+  const shelf = document.getElementById("shelf");
+  shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+  const items = demoData[currentCategory] || [];
 
-      items.forEach((item, index) => {
-        const safeTitle = item.title.replace(/'/g, "\\'");
-        const coverHtml = item.cover
-          ? `<img src="${item.cover}" alt="${item.title}">`
-          : t().labels.cover;
+  items.forEach((item, index) => {
+    const safeTitle = item.title.replace(/'/g, "\\'");
+    const coverHtml = item.cover
+      ? <img src="${item.cover}" alt="${item.title}">
+      : t().labels.cover;
 
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
-          <div class="media-info">
-            <h3 class="media-title">${item.title}</h3>
-            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-            <div class="media-actions">
-              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-            </div>
-          </div>
-        `;
-        shelf.appendChild(card);
-      });
-    }
+    const creatorLine = item.creator
+      ? <div class="media-status">${item.creator}</div>
+      : "";
+
+    const card = document.createElement("div");
+    card.className = "media-card";
+    card.innerHTML = 
+      <div class="media-cover">${coverHtml}</div>
+      <div class="media-info">
+        <h3 class="media-title">${item.title}</h3>
+        ${creatorLine}
+        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+        <div class="media-actions">
+          <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+          <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+        </div>
+      </div>
+    ;
+    shelf.appendChild(card);
+  });
+}
+
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
@@ -889,6 +896,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     status: "Planned",
     cover: cover,
     description: description,
+    creator: authors,
     work_key: workKey,
     edition_key: editionKey,
     source: "open_library"
@@ -940,6 +948,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     status: "Planned",
     cover: cover,
     description: description,
+    creator: creator,
     work_key: "",
     edition_key: "",
     source: "manual"
@@ -949,6 +958,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
   closeAddModal();
   renderShelf();
 }
+
 
 
     function changeStatus(index){
@@ -996,28 +1006,30 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     function openCard(title){
-      currentOpenTitle = title;
+  currentOpenTitle = title;
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      const details = detailsDatabase[title] || {
-        description: item?.description || "No description available."
-      };
+  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+  const details = detailsDatabase[title] || {
+    description: item?.description || "No description available."
+  };
 
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
 
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-      document.getElementById("details-description").textContent = details.description || "No description available.";
+  document.getElementById("details-title").textContent = title;
+  document.getElementById("details-creator").textContent = item?.creator || "";
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+  document.getElementById("details-description").textContent = details.description || "No description available.";
 
-      const coverBox = document.getElementById("details-cover-box");
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
-      }
-    }
+  const coverBox = document.getElementById("details-cover-box");
+  if(item && item.cover){
+    coverBox.innerHTML = <img src="${item.cover}" alt="${title}">;
+  } else {
+    coverBox.textContent = t().labels.cover;
+  }
+}
+
 
     async function saveItemToSupabase(
   title,
@@ -1092,6 +1104,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
       status: item.status,
       cover: item.cover_url || "",
       description: item.description || "",
+      creator: item.creator || "",
       work_key: item.work_key || "",
       edition_key: item.edition_key || "",
       source: item.source || "manual"
@@ -1104,6 +1117,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
 
   renderShelf();
 }
+
 
 
     applyTranslations();
