@@ -787,88 +787,107 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function renderSearchResults() {
-      const container = document.getElementById("search-results");
-      const input = document.getElementById("search-input");
+  const container = document.getElementById("search-results");
+  const input = document.getElementById("search-input");
 
-      if (!container || !input) return;
+  if (!container || !input) return;
 
-      const query = input.value.trim();
-      container.innerHTML = "";
+  const query = input.value.trim();
+  container.innerHTML = "";
 
-      if (!query) {
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+  if (!query) {
+    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
+    return;
+  }
+
+  if (currentCategory === "Books") {
+    container.innerHTML = <div class="loading">${t().labels.searching}</div>;
+
+    try {
+      let items = [];
+
+      const url1 =
+        "https://www.googleapis.com/books/v1/volumes?q=" +
+        encodeURIComponent("intitle:" + query) +
+        "&maxResults=10";
+
+      const response1 = await fetch(url1);
+      const data1 = await response1.json();
+      items = data1.items || [];
+
+      if (items.length === 0) {
+        const url2 =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&maxResults=10";
+
+        const response2 = await fetch(url2);
+        const data2 = await response2.json();
+        items = data2.items || [];
+      }
+
+      if (items.length === 0) {
+        currentBookResults = [];
+        container.innerHTML = 
+          <div class="small">${t().labels.noBooksFound}</div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+            <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+          </div>
+        ;
         return;
       }
 
-      if (currentCategory === "Books") {
-        container.innerHTML = `<div class="loading">${t().labels.searching}</div>`;
+      currentBookResults = items;
+      container.innerHTML = "";
 
-        try {
-          const url = "https://www.googleapis.com/books/v1/volumes?q=" + encodeURIComponent(query) + "&maxResults=10";
-          const response = await fetch(url);
-          const data = await response.json();
+      items.forEach(function (book, index) {
+        const info = book.volumeInfo || {};
+        const title = info.title || "Untitled";
+        const authors = (info.authors || []).join(", ");
 
-          if (!data.items || data.items.length === 0) {
-            currentBookResults = [];
-            container.innerHTML = `
-              <div class="small">${t().labels.noBooksFound}</div>
-              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-              </div>
-            `;
-            return;
-          }
+        const row = document.createElement("div");
+        row.className = "search-item";
+        row.innerHTML = 
+          <div class="search-item-left">
+            <div class="search-item-title">${title}</div>
+            <div class="search-item-meta">${authors || "Book"}</div>
+          </div>
+          <button class="button" onclick="addGoogleBookResult(${index})">${t().buttons.add}</button>
+        ;
+        container.appendChild(row);
+      });
 
-          currentBookResults = data.items;
-          container.innerHTML = "";
-
-          data.items.forEach(function (book, index) {
-            const info = book.volumeInfo || {};
-            const title = info.title || "Untitled";
-            const authors = (info.authors || []).join(", ");
-
-            const row = document.createElement("div");
-            row.className = "search-item";
-            row.innerHTML = `
-              <div class="search-item-left">
-                <div class="search-item-title">${title}</div>
-                <div class="search-item-meta">${authors || "Book"}</div>
-              </div>
-              <button class="button" onclick="addGoogleBookResult(${index})">${t().buttons.add}</button>
-            `;
-            container.appendChild(row);
-          });
-
-          container.insertAdjacentHTML(
-            "beforeend",
-            `
-            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-            </div>
-            `
-          );
-
-          return;
-        } catch (error) {
-          console.error("Google Books API error:", error);
-          currentBookResults = [];
-          container.innerHTML = `
-            <div class="small">${t().labels.apiError}</div>
-            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-            </div>
-          `;
-          return;
-        }
-      }
-
-      container.innerHTML = `
-        <div class="small">${t().labels.noResults}</div>
+      container.insertAdjacentHTML(
+        "beforeend",
+        
         <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
           <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
         </div>
-      `;
+        
+      );
+
+      return;
+    } catch (error) {
+      console.error("Google Books API error:", error);
+      currentBookResults = [];
+      container.innerHTML = 
+        <div class="small">${t().labels.apiError}</div>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+        </div>
+      ;
+      return;
     }
+  }
+
+  container.innerHTML = 
+    <div class="small">${t().labels.noResults}</div>
+    <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+      <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+    </div>
+  ;
+}
+
 
     async function addGoogleBookResult(index){
       const book = currentBookResults[index];
