@@ -876,7 +876,7 @@ function changeStatus(index){
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
-    async function setStatus(status){
+   async function setStatus(status){
   const item = demoData[currentCategory][currentStatusIndex];
   const oldStatus = item.status;
 
@@ -903,8 +903,6 @@ function changeStatus(index){
     }, 200);
   }
 }
-
-
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
     }
