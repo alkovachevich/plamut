@@ -876,21 +876,28 @@ function changeStatus(index){
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
-    function setStatus(status){
-      demoData[currentCategory][currentStatusIndex].status = status;
-      closeStatusModal();
-      renderShelf();
+    async function setStatus(status){
 
-      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
-        openCard(currentOpenTitle);
-      }
+  const item = demoData[currentCategory][currentStatusIndex];
 
-      if(status === "Done"){
-        setTimeout(() => {
-          document.getElementById("progress-modal").classList.remove("hidden");
-        }, 200);
-      }
-    }
+  item.status = status;
+
+  renderShelf();
+
+  await updateStatusInSupabase(item.title, currentCategory, status);
+
+  closeStatusModal();
+
+  if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+    openCard(currentOpenTitle);
+  }
+
+  if(status === "Done"){
+    setTimeout(() => {
+      document.getElementById("progress-modal").classList.remove("hidden");
+    }, 200);
+  }
+}
 
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
@@ -982,6 +989,21 @@ async function saveItemToSupabase(title, category, status){
         status: status
       }
     ]);
+  async function updateStatusInSupabase(title, category, status){
+
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update({ status: status })
+    .eq("title", title)
+    .eq("category", category);
+
+  if(error){
+    console.error("Supabase update error:", error);
+    return false;
+  }
+
+  return true;
+}
 
   if(error){
     console.error("Supabase insert error:", error);
