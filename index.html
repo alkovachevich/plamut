@@ -838,6 +838,7 @@ function backToCategory(){
 }
 
 function addNew(){
+  alert("Current category: " + currentCategory);
   document.getElementById("add-modal").classList.remove("hidden");
   document.getElementById("search-input").value = "";
   renderSearchResults();
