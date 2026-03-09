@@ -122,6 +122,12 @@
       margin:0 0 8px 0;
     }
 
+    .media-meta{
+      font-size:13px;
+      color:#aaa;
+      margin-bottom:8px;
+    }
+
     .media-status{
       font-size:13px;
       color:#aaa;
@@ -342,12 +348,12 @@
 
       <div class="details-panel">
         <h2 id="details-title"></h2>
-<div class="muted" id="details-creator" style="margin-bottom:10px;"></div>
+        <div class="muted" id="details-creator" style="margin-bottom:10px;"></div>
 
-<div>
-  <span class="badge" id="details-category"></span>
-  <span class="badge" id="details-status"></span>
-</div>
+        <div>
+          <span class="badge" id="details-category"></span>
+          <span class="badge" id="details-status"></span>
+        </div>
 
         <div class="section">
           <h3 id="description-label"></h3>
@@ -414,8 +420,7 @@
   </div>
 
   <script>
-    
-const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
 
     const supabaseClient = supabase.createClient(
@@ -471,7 +476,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
           creator: "Author / Director / Studio",
           coverUrl: "Cover URL",
           descriptionPlaceholder: "Description",
-          manualNameRequired: "Title is required"
+          manualNameRequired: "Title is required",
+          noDescription: "No description available."
         },
         statuses: {
           Planned: "Planned",
@@ -536,7 +542,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
           creator: "Автор / Режиссёр / Студия",
           coverUrl: "Ссылка на обложку",
           descriptionPlaceholder: "Описание",
-          manualNameRequired: "Название обязательно"
+          manualNameRequired: "Название обязательно",
+          noDescription: "Описание отсутствует."
         },
         statuses: {
           Planned: "Запланировано",
@@ -656,39 +663,38 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  shelf.innerHTML = "";
+      const shelf = document.getElementById("shelf");
+      shelf.innerHTML = "";
 
-  const items = demoData[currentCategory] || [];
+      const items = demoData[currentCategory] || [];
 
-  items.forEach((item, index) => {
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const coverHtml = item.cover
-      ? <img src="${item.cover}" alt="${item.title}">
-      : t().labels.cover;
+      items.forEach((item, index) => {
+        const safeTitle = item.title.replace(/'/g, "\\'");
+        const coverHtml = item.cover
+          ? `<img src="${item.cover}" alt="${item.title}">`
+          : t().labels.cover;
 
-    const creatorLine = item.creator
-      ? <div class="media-status">${item.creator}</div>
-      : "";
+        const creatorLine = item.creator
+          ? `<div class="media-meta">${item.creator}</div>`
+          : "";
 
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = 
-      <div class="media-cover">${coverHtml}</div>
-      <div class="media-info">
-        <h3 class="media-title">${item.title}</h3>
-        ${creatorLine}
-        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-        <div class="media-actions">
-          <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-          <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-        </div>
-      </div>
-    ;
-    shelf.appendChild(card);
-  });
-}
-
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${item.title}</h3>
+            ${creatorLine}
+            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+            <div class="media-actions">
+              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+            </div>
+          </div>
+        `;
+        shelf.appendChild(card);
+      });
+    }
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
@@ -732,234 +738,188 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function renderSearchResults() {
-  const container = document.getElementById("search-results");
-  const input = document.getElementById("search-input");
+      const container = document.getElementById("search-results");
+      const input = document.getElementById("search-input");
 
-  if (!container || !input) return;
+      if (!container || !input) return;
 
-  const query = input.value.trim();
-  container.innerHTML = "";
+      const query = input.value.trim();
+      container.innerHTML = "";
 
-  if (!query) {
-    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
-    return;
-  }
-
-  if (currentCategory === "Books") {
-    container.innerHTML = <div class="small">${t().labels.searching}</div>;
-
-    try {
-      let items = [];
-
-      const fields = [
-        "key",
-        "title",
-        "author_name",
-        "first_publish_year",
-        "cover_i",
-        "editions",
-        "editions.key",
-        "editions.title"
-      ].join(",");
-
-      const url1 =
-        "https://openlibrary.org/search.json?title=" +
-        encodeURIComponent(query) +
-        "&lang=" + encodeURIComponent(currentLanguage) +
-        "&limit=10" +
-        "&fields=" + encodeURIComponent(fields);
-
-      const response1 = await fetch(url1);
-      const data1 = await response1.json();
-      items = data1.docs || [];
-
-      if (items.length === 0) {
-        const url2 =
-          "https://openlibrary.org/search.json?q=" +
-          encodeURIComponent(query) +
-          "&lang=" + encodeURIComponent(currentLanguage) +
-          "&limit=10" +
-          "&fields=" + encodeURIComponent(fields);
-
-        const response2 = await fetch(url2);
-        const data2 = await response2.json();
-        items = data2.docs || [];
-      }
-
-      if (items.length === 0) {
-        currentBookResults = [];
-        container.innerHTML = 
-          <div class="small">${t().labels.noBooksFound}</div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-            <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-          </div>
-        ;
+      if (!query) {
+        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
         return;
       }
 
-      currentBookResults = items;
-      container.innerHTML = "";
+      if (currentCategory === "Books") {
+        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
 
-      items.forEach(function (book, index) {
-        const title = book.title || "Untitled";
-        const authors = (book.author_name || []).join(", ");
-        const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+        try {
+          let items = [];
 
-        const row = document.createElement("div");
-        row.className = "search-item";
-        row.innerHTML = 
-          <div class="search-item-left">
-            <div class="search-item-title">${title}</div>
-            <div class="search-item-meta">${authors || "Book"}${year}</div>
-          </div>
-          <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
-        ;
-        container.appendChild(row);
-      });
+          const url1 =
+            "https://openlibrary.org/search.json?title=" +
+            encodeURIComponent(query) +
+            "&lang=" + encodeURIComponent(currentLanguage) +
+            "&limit=10";
 
-      container.insertAdjacentHTML(
-        "beforeend",
-        
+          const response1 = await fetch(url1);
+          const data1 = await response1.json();
+          items = data1.docs || [];
+
+          if (items.length === 0) {
+            const url2 =
+              "https://openlibrary.org/search.json?q=" +
+              encodeURIComponent(query) +
+              "&lang=" + encodeURIComponent(currentLanguage) +
+              "&limit=10";
+
+            const response2 = await fetch(url2);
+            const data2 = await response2.json();
+            items = data2.docs || [];
+          }
+
+          if (items.length === 0) {
+            currentBookResults = [];
+            container.innerHTML = `
+              <div class="small">${t().labels.noBooksFound}</div>
+              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+              </div>
+            `;
+            return;
+          }
+
+          currentBookResults = items;
+          container.innerHTML = "";
+
+          items.forEach(function (book, index) {
+            const title = book.title || "Untitled";
+            const authors = (book.author_name || []).join(", ");
+            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+
+            const row = document.createElement("div");
+            row.className = "search-item";
+            row.innerHTML = `
+              <div class="search-item-left">
+                <div class="search-item-title">${title}</div>
+                <div class="search-item-meta">${authors || "Book"}${year}</div>
+              </div>
+              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+            `;
+            container.appendChild(row);
+          });
+
+          return;
+        } catch (error) {
+          console.error("Open Library API error:", error);
+          currentBookResults = [];
+          container.innerHTML = `
+            <div class="small">${t().labels.apiError}</div>
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+            </div>
+          `;
+          return;
+        }
+      }
+
+      container.innerHTML = `
+        <div class="small">${t().labels.noResults}</div>
         <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
           <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
         </div>
-        
-      );
-
-      return;
-    } catch (error) {
-      console.error("Open Library API error:", error);
-      currentBookResults = [];
-      container.innerHTML = 
-        <div class="small">${t().labels.apiError}</div>
-        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-        </div>
-      ;
-      return;
+      `;
     }
-  }
-
-  container.innerHTML = 
-    <div class="small">${t().labels.noResults}</div>
-    <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-      <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-    </div>
-  ;
-}
 
     async function addOpenLibraryBookResult(index){
-  const book = currentBookResults[index];
-  if(!book) return;
+      const book = currentBookResults[index];
+      if(!book) return;
 
-  const title = book.title || "Untitled";
-  const description = "";
-  const cover = getOpenLibraryCoverUrl(book.cover_i);
-  const authors = (book.author_name || []).join(", ");
+      const title = book.title || "Untitled";
+      const description = "";
+      const cover = getOpenLibraryCoverUrl(book.cover_i);
+      const authors = (book.author_name || []).join(", ");
 
-  const workKey = book.key || "";
-  const editionKey =
-    book.editions &&
-    book.editions.docs &&
-    book.editions.docs.length > 0 &&
-    book.editions.docs[0].key
-      ? book.editions.docs[0].key
-      : "";
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+      if(exists){
+        alert(t().labels.alreadyExists);
+        return;
+      }
 
-  if(exists){
-    alert(t().labels.alreadyExists);
-    return;
-  }
+      detailsDatabase[title] = {
+        description: description || t().labels.noDescription
+      };
 
-  detailsDatabase[title] = {
-    description: description || "No description available."
-  };
+      const saved = await saveItemToSupabase(
+        title,
+        currentCategory,
+        "Planned",
+        cover,
+        description,
+        authors
+      );
 
-  const saved = await saveItemToSupabase(
-    title,
-    currentCategory,
-    "Planned",
-    cover,
-    description,
-    authors,
-    workKey,
-    editionKey,
-    "open_library"
-  );
+      if(!saved) return;
 
-  if(!saved) return;
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description,
+        creator: authors
+      });
 
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned",
-    cover: cover,
-    description: description,
-    creator: authors,
-    work_key: workKey,
-    edition_key: editionKey,
-    source: "open_library"
-  });
-
-  closeAddModal();
-  renderShelf();
-}
-
+      closeAddModal();
+      renderShelf();
+    }
 
     async function saveManualItem(){
-  const title = document.getElementById("manual-name").value.trim();
-  const creator = document.getElementById("manual-creator").value.trim();
-  const cover = document.getElementById("manual-cover").value.trim();
-  const description = document.getElementById("manual-description").value.trim();
+      const title = document.getElementById("manual-name").value.trim();
+      const creator = document.getElementById("manual-creator").value.trim();
+      const cover = document.getElementById("manual-cover").value.trim();
+      const description = document.getElementById("manual-description").value.trim();
 
-  if(!title){
-    alert(t().labels.manualNameRequired);
-    return;
-  }
+      if(!title){
+        alert(t().labels.manualNameRequired);
+        return;
+      }
 
-  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-  if(exists){
-    alert(t().labels.alreadyExists);
-    return;
-  }
+      if(exists){
+        alert(t().labels.alreadyExists);
+        return;
+      }
 
-  detailsDatabase[title] = {
-    description: description || "No description available."
-  };
+      detailsDatabase[title] = {
+        description: description || t().labels.noDescription
+      };
 
-  const saved = await saveItemToSupabase(
-    title,
-    currentCategory,
-    "Planned",
-    cover,
-    description,
-    creator,
-    "",
-    "",
-    "manual"
-  );
+      const saved = await saveItemToSupabase(
+        title,
+        currentCategory,
+        "Planned",
+        cover,
+        description,
+        creator
+      );
 
-  if(!saved) return;
+      if(!saved) return;
 
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned",
-    cover: cover,
-    description: description,
-    creator: creator,
-    work_key: "",
-    edition_key: "",
-    source: "manual"
-  });
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description,
+        creator: creator
+      });
 
-  closeManualModal();
-  closeAddModal();
-  renderShelf();
-}
-
-
+      closeManualModal();
+      closeAddModal();
+      renderShelf();
+    }
 
     function changeStatus(index){
       currentStatusIndex = index;
@@ -1006,67 +966,52 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     function openCard(title){
-  currentOpenTitle = title;
+      currentOpenTitle = title;
 
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
-  const details = detailsDatabase[title] || {
-    description: item?.description || "No description available."
-  };
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const details = detailsDatabase[title] || {
+        description: item?.description || t().labels.noDescription
+      };
 
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
 
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-  document.getElementById("details-description").textContent = details.description || "No description available.";
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-description").textContent = details.description || t().labels.noDescription;
 
-  const coverBox = document.getElementById("details-cover-box");
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${item.cover}" alt="${title}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
-  }
-}
-
-
-    async function saveItemToSupabase(
-  title,
-  category,
-  status,
-  cover = "",
-  description = "",
-  creator = "",
-  workKey = "",
-  editionKey = "",
-  source = "manual"
-){
-  const { error } = await supabaseClient
-    .from("user_media")
-    .insert([
-      {
-        title: title,
-        category: category,
-        status: status,
-        cover_url: cover,
-        description: description,
-        creator: creator,
-        work_key: workKey,
-        edition_key: editionKey,
-        source: source
+      const coverBox = document.getElementById("details-cover-box");
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
       }
-    ]);
+    }
 
-  if(error){
-    console.error("Supabase insert error:", error);
-    alert(t().labels.dbSaveError + ": " + error.message);
-    return false;
-  }
+    async function saveItemToSupabase(title, category, status, cover = "", description = "", creator = ""){
+      const { error } = await supabaseClient
+        .from("user_media")
+        .insert([
+          {
+            title: title,
+            category: category,
+            status: status,
+            cover_url: cover,
+            description: description,
+            creator: creator
+          }
+        ]);
 
-  return true;
-}
+      if(error){
+        console.error("Supabase insert error:", error);
+        alert(t().labels.dbSaveError + ": " + error.message);
+        return false;
+      }
 
+      return true;
+    }
 
     async function updateStatusInSupabase(title, category, status){
       const { error } = await supabaseClient
@@ -1085,40 +1030,35 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function loadCategoryFromSupabase(category){
-  const { data, error } = await supabaseClient
-    .from("user_media")
-    .select("*")
-    .eq("category", category)
-    .order("id", { ascending: false });
+      const { data, error } = await supabaseClient
+        .from("user_media")
+        .select("*")
+        .eq("category", category)
+        .order("id", { ascending: false });
 
-  if(error){
-    console.error("Supabase load error:", error);
-    return;
-  }
+      if(error){
+        console.error("Supabase load error:", error);
+        return;
+      }
 
-  demoData[category] = [];
+      demoData[category] = [];
 
-  data.forEach(item => {
-    demoData[category].push({
-      title: item.title,
-      status: item.status,
-      cover: item.cover_url || "",
-      description: item.description || "",
-      creator: item.creator || "",
-      work_key: item.work_key || "",
-      edition_key: item.edition_key || "",
-      source: item.source || "manual"
-    });
+      data.forEach(item => {
+        demoData[category].push({
+          title: item.title,
+          status: item.status,
+          cover: item.cover_url || "",
+          description: item.description || "",
+          creator: item.creator || ""
+        });
 
-    detailsDatabase[item.title] = {
-      description: item.description || "No description available."
-    };
-  });
+        detailsDatabase[item.title] = {
+          description: item.description || t().labels.noDescription
+        };
+      });
 
-  renderShelf();
-}
-
-
+      renderShelf();
+    }
 
     applyTranslations();
   </script>
