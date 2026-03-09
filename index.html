@@ -725,99 +725,121 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function renderSearchResults() {
-      const container = document.getElementById("search-results");
-      const input = document.getElementById("search-input");
+  const container = document.getElementById("search-results");
+  const input = document.getElementById("search-input");
 
-      if (!container || !input) return;
+  if (!container || !input) return;
 
-      const query = input.value.trim();
-      container.innerHTML = "";
+  const query = input.value.trim();
+  container.innerHTML = "";
 
-      if (!query) {
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+  if (!query) {
+    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
+    return;
+  }
+
+  if (currentCategory === "Books") {
+    container.innerHTML = <div class="small">${t().labels.searching}</div>;
+
+    try {
+      let items = [];
+
+      const fields = [
+        "key",
+        "title",
+        "author_name",
+        "first_publish_year",
+        "cover_i",
+        "editions",
+        "editions.key",
+        "editions.title"
+      ].join(",");
+
+      const url1 =
+        "https://openlibrary.org/search.json?title=" +
+        encodeURIComponent(query) +
+        "&lang=" + encodeURIComponent(currentLanguage) +
+        "&limit=10" +
+        "&fields=" + encodeURIComponent(fields);
+
+      const response1 = await fetch(url1);
+      const data1 = await response1.json();
+      items = data1.docs || [];
+
+      if (items.length === 0) {
+        const url2 =
+          "https://openlibrary.org/search.json?q=" +
+          encodeURIComponent(query) +
+          "&lang=" + encodeURIComponent(currentLanguage) +
+          "&limit=10" +
+          "&fields=" + encodeURIComponent(fields);
+
+        const response2 = await fetch(url2);
+        const data2 = await response2.json();
+        items = data2.docs || [];
+      }
+
+      if (items.length === 0) {
+        currentBookResults = [];
+        container.innerHTML = 
+          <div class="small">${t().labels.noBooksFound}</div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+            <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+          </div>
+        ;
         return;
       }
 
-      if (currentCategory === "Books") {
-        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
+      currentBookResults = items;
+      container.innerHTML = "";
 
-        try {
-          let items = [];
+      items.forEach(function (book, index) {
+        const title = book.title || "Untitled";
+        const authors = (book.author_name || []).join(", ");
+        const year = book.first_publish_year ? " • " + book.first_publish_year : "";
 
-          const url1 =
-            "https://openlibrary.org/search.json?title=" +
-            encodeURIComponent(query) +
-            "&lang=" + encodeURIComponent(currentLanguage) +
-            "&limit=10";
+        const row = document.createElement("div");
+        row.className = "search-item";
+        row.innerHTML = 
+          <div class="search-item-left">
+            <div class="search-item-title">${title}</div>
+            <div class="search-item-meta">${authors || "Book"}${year}</div>
+          </div>
+          <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+        ;
+        container.appendChild(row);
+      });
 
-          const response1 = await fetch(url1);
-          const data1 = await response1.json();
-          items = data1.docs || [];
-
-          if (items.length === 0) {
-            const url2 =
-              "https://openlibrary.org/search.json?q=" +
-              encodeURIComponent(query) +
-              "&lang=" + encodeURIComponent(currentLanguage) +
-              "&limit=10";
-
-            const response2 = await fetch(url2);
-            const data2 = await response2.json();
-            items = data2.docs || [];
-          }
-
-          if (items.length === 0) {
-            currentBookResults = [];
-            container.innerHTML = `
-              <div class="small">${t().labels.noBooksFound}</div>
-              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-              </div>
-            `;
-            return;
-          }
-
-          currentBookResults = items;
-          container.innerHTML = "";
-
-          items.forEach(function (book, index) {
-            const title = book.title || "Untitled";
-            const authors = (book.author_name || []).join(", ");
-            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
-
-            const row = document.createElement("div");
-            row.className = "search-item";
-            row.innerHTML = `
-              <div class="search-item-left">
-                <div class="search-item-title">${title}</div>
-                <div class="search-item-meta">${authors || "Book"}${year}</div>
-              </div>
-              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
-            `;
-            container.appendChild(row);
-          });
-
-          return;
-        } catch (error) {
-          console.error("Open Library API error:", error);
-          currentBookResults = [];
-          container.innerHTML = `
-            <div class="small">${t().labels.apiError}</div>
-            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-            </div>
-          `;
-          return;
-        }
-      }
-
-      container.innerHTML = `
-        <div class="small">${t().labels.noResults}</div>
+      container.insertAdjacentHTML(
+        "beforeend",
+        
         <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
           <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
         </div>
-      `;
+        
+      );
+
+      return;
+    } catch (error) {
+      console.error("Open Library API error:", error);
+      currentBookResults = [];
+      container.innerHTML = 
+        <div class="small">${t().labels.apiError}</div>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+        </div>
+      ;
+      return;
     }
+  }
+
+  container.innerHTML = 
+    <div class="small">${t().labels.noResults}</div>
+    <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+      <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+    </div>
+  ;
+}
 
     async function addOpenLibraryBookResult(index){
   const book = currentBookResults[index];
@@ -829,13 +851,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
   const authors = (book.author_name || []).join(", ");
 
   const workKey = book.key || "";
-  const editionKey = Array.isArray(book.edition_key) && book.edition_key.length > 0
-    ? book.edition_key[0]
-    : "";
+  const editionKey =
+    book.editions &&
+    book.editions.docs &&
+    book.editions.docs.length > 0 &&
+    book.editions.docs[0].key
+      ? book.editions.docs[0].key
+      : "";
 
-  const exists = (demoData[currentCategory] || []).some(item =>
-    item.title === title
-  );
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
   if(exists){
     alert(t().labels.alreadyExists);
