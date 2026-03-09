@@ -411,431 +411,476 @@ const supabaseClient = supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY
 );
-    const translations = {
-      en: {
-        subtitle: "Personal Library and Media Universe Tracker",
-        categories: {
-          Books: "📚 Books",
-          Movies: "🎬 Movies",
-          Series: "📺 Series",
-          Games: "🎮 Games",
-          Anime: "🍥 Anime",
-          Manga: "📖 Manga",
-          Blacklist: "🚫 Blacklist"
-        },
-        buttons: {
-          backHome: "← Back",
-          addNew: "+ Add new",
-          backShelf: "← Back to shelf",
-          exploreUniverse: "Explore universe",
-          close: "Close",
-          changeStatus: "Change status",
-          open: "Open",
-          add: "Add",
-          cancel: "Cancel",
-          nextWork: "Open next work in series",
-          closeSuggestion: "Close"
-        },
-        modals: {
-          searchTitle: "Search and add",
-          searchSubtitle: "Prototype mode: local search results",
-          searchPlaceholder: "Enter title",
-          statusTitle: "Select status"
-        },
-        labels: {
-          cover: "Cover",
-          description: "Description",
-          relatedWorks: "Related works",
-          noResults: "No results found",
-          alreadyExists: "This item is already on the shelf.",
-          itemNotFound: "Item not found on shelf.",
-          noRelated: "No related works yet.",
-          universeLater: "Universe view will be here later.",
-          relatedOpenLater: "Later this button can open a real related card.",
-          statusLabel: "Status",
-          progressTitle: "Finished this work"
-        },
-        statuses: {
-          Planned: "Planned",
-          "In progress": "In progress",
-          Done: "Done",
-          Dropped: "Dropped",
-          Info: "Info"
-        },
-        categoryNames: {
-          Books: "Books",
-          Movies: "Movies",
-          Series: "Series",
-          Games: "Games",
-          Anime: "Anime",
-          Manga: "Manga",
-          Blacklist: "Blacklist"
-        }
-      },
-      ru: {
-        subtitle: "Персональная библиотека и трекер медиа-вселенных",
-        categories: {
-          Books: "📚 Книги",
-          Movies: "🎬 Фильмы",
-          Series: "📺 Сериалы",
-          Games: "🎮 Игры",
-          Anime: "🍥 Аниме",
-          Manga: "📖 Манга",
-          Blacklist: "🚫 Чёрный список"
-        },
-        buttons: {
-          backHome: "← Назад",
-          addNew: "+ Добавить",
-          backShelf: "← Назад к полке",
-          exploreUniverse: "Открыть вселенную",
-          close: "Закрыть",
-          changeStatus: "Изменить статус",
-          open: "Открыть",
-          add: "Добавить",
-          cancel: "Отмена",
-          nextWork: "Открыть следующее произведение",
-          closeSuggestion: "Закрыть"
-        },
-        modals: {
-          searchTitle: "Поиск и добавление",
-          searchSubtitle: "Режим прототипа: локальные результаты поиска",
-          searchPlaceholder: "Введите название",
-          statusTitle: "Выберите статус"
-        },
-        labels: {
-          cover: "Обложка",
-          description: "Описание",
-          relatedWorks: "Связанные произведения",
-          noResults: "Ничего не найдено",
-          alreadyExists: "Это произведение уже есть на полке.",
-          itemNotFound: "Произведение не найдено на полке.",
-          noRelated: "Пока нет связанных произведений.",
-          universeLater: "Просмотр вселенной будет добавлен позже.",
-          relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку.",
-          statusLabel: "Статус",
-          progressTitle: "Вы завершили произведение"
-        },
-        statuses: {
-          Planned: "Запланировано",
-          "In progress": "В процессе",
-          Done: "Завершено",
-          Dropped: "Брошено",
-          Info: "Инфо"
-        },
-        categoryNames: {
-          Books: "Книги",
-          Movies: "Фильмы",
-          Series: "Сериалы",
-          Games: "Игры",
-          Anime: "Аниме",
-          Manga: "Манга",
-          Blacklist: "Чёрный список"
-        }
-      }
-    };
 
-    let currentLanguage = "en";
-
-    const demoData = {
-      Books: [
-        { title: "Dune", status: "Planned" },
-        { title: "Foundation", status: "In progress" },
-        { title: "Neuromancer", status: "Done" }
-      ],
-      Movies: [
-        { title: "Dune (2021)", status: "Done" },
-        { title: "Blade Runner", status: "Planned" },
-        { title: "Arrival", status: "Done" }
-      ],
-      Series: [
-        { title: "Severance", status: "In progress" },
-        { title: "Dark", status: "Done" }
-      ],
-      Games: [
-        { title: "Cyberpunk 2077", status: "In progress" },
-        { title: "The Witcher 3", status: "Done" }
-      ],
-      Anime: [
-        { title: "Cowboy Bebop", status: "Done" },
-        { title: "Monster", status: "Planned" }
-      ],
-      Manga: [
-        { title: "Berserk", status: "In progress" },
-        { title: "20th Century Boys", status: "Planned" }
-      ],
-      Blacklist: [
-        { title: "Ignored creators will be here", status: "Info" }
-      ]
-    };
-
-    const searchDatabase = {
-      Books: [
-        { title: "Hyperion", status: "Planned" },
-        { title: "Snow Crash", status: "Planned" },
-        { title: "The Left Hand of Darkness", status: "Planned" },
-        { title: "A Fire Upon the Deep", status: "Planned" }
-      ],
-      Movies: [
-        { title: "Interstellar", status: "Planned" },
-        { title: "Solaris", status: "Planned" },
-        { title: "Gattaca", status: "Planned" }
-      ],
-      Series: [
-        { title: "The Expanse", status: "Planned" },
-        { title: "Silo", status: "Planned" },
-        { title: "Battlestar Galactica", status: "Planned" }
-      ],
-      Games: [
-        { title: "Mass Effect", status: "Planned" },
-        { title: "Deus Ex", status: "Planned" },
-        { title: "Disco Elysium", status: "Planned" }
-      ],
-      Anime: [
-        { title: "Steins;Gate", status: "Planned" },
-        { title: "Ghost in the Shell", status: "Planned" },
-        { title: "Ergo Proxy", status: "Planned" }
-      ],
-      Manga: [
-        { title: "Blame!", status: "Planned" },
-        { title: "Pluto", status: "Planned" },
-        { title: "Ajin", status: "Planned" }
-      ],
-      Blacklist: []
-    };
-
-    const detailsDatabase = {
-      "Dune": {
-        description: "Science fiction novel and the root of a large media universe.",
-        related: ["Dune Messiah", "Dune (2021)", "Dune: Spice Wars"]
-      },
-      "Foundation": {
-        description: "Classic science fiction series by Isaac Asimov.",
-        related: ["Foundation and Empire", "Second Foundation", "Foundation TV series"]
-      },
-      "Neuromancer": {
-        description: "Cyberpunk novel that shaped an entire genre.",
-        related: ["Count Zero", "Mona Lisa Overdrive", "Ghost in the Shell"]
-      },
-      "Dune (2021)": {
-        description: "Film adaptation of Frank Herbert's novel.",
-        related: ["Dune Part Two", "Dune (1984)", "Dune book"]
-      },
-      "Blade Runner": {
-        description: "Science fiction film based on Philip K. Dick's work.",
-        related: ["Blade Runner 2049", "Do Androids Dream of Electric Sheep?", "Cyberpunk 2077"]
-      },
-      "Arrival": {
-        description: "Science fiction film based on a short story.",
-        related: ["Story of Your Life", "Interstellar", "Contact"]
-      },
-      "Cyberpunk 2077": {
-        description: "Open world RPG set in the Cyberpunk universe.",
-        related: ["Cyberpunk Edgerunners", "Cyberpunk 2020", "Blade Runner"]
-      },
-      "The Witcher 3": {
-        description: "RPG based on The Witcher books.",
-        related: ["The Witcher books", "The Witcher Netflix", "The Witcher 2"]
-      },
-      "Cowboy Bebop": {
-        description: "Anime series blending noir, sci-fi and western themes.",
-        related: ["Cowboy Bebop movie", "Samurai Champloo", "Trigun"]
-      },
-      "Monster": {
-        description: "Psychological thriller anime adaptation of the manga.",
-        related: ["Monster manga", "Pluto", "20th Century Boys"]
-      },
-      "Berserk": {
-        description: "Dark fantasy manga with multiple adaptations.",
-        related: ["Berserk anime", "Berserk movies", "Claymore"]
-      },
-      "20th Century Boys": {
-        description: "Mystery manga by Naoki Urasawa.",
-        related: ["21st Century Boys", "Monster", "Pluto"]
-      }
-    };
-
-    const nextWorksMap = {
-      "Dune": "Dune Messiah",
-      "Foundation": "Foundation and Empire",
-      "Neuromancer": "Count Zero",
-      "Dune (2021)": "Dune Part Two",
-      "Blade Runner": "Blade Runner 2049",
-      "Cyberpunk 2077": "Cyberpunk Edgerunners",
-      "Berserk": "Berserk anime"
-    };
-
-    let currentCategory = null;
-    let currentStatusIndex = null;
-    let currentOpenTitle = null;
-
-    function t() {
-      return translations[currentLanguage];
+const translations = {
+  en: {
+    subtitle: "Personal Library and Media Universe Tracker",
+    categories: {
+      Books: "📚 Books",
+      Movies: "🎬 Movies",
+      Series: "📺 Series",
+      Games: "🎮 Games",
+      Anime: "🍥 Anime",
+      Manga: "📖 Manga",
+      Blacklist: "🚫 Blacklist"
+    },
+    buttons: {
+      backHome: "← Back",
+      addNew: "+ Add new",
+      backShelf: "← Back to shelf",
+      exploreUniverse: "Explore universe",
+      close: "Close",
+      changeStatus: "Change status",
+      open: "Open",
+      add: "Add",
+      cancel: "Cancel",
+      nextWork: "Open next work in series",
+      closeSuggestion: "Close"
+    },
+    modals: {
+      searchTitle: "Search and add",
+      searchSubtitle: "Prototype mode: local search results",
+      searchPlaceholder: "Enter title",
+      statusTitle: "Select status"
+    },
+    labels: {
+      cover: "Cover",
+      description: "Description",
+      relatedWorks: "Related works",
+      noResults: "No results found",
+      alreadyExists: "This item is already on the shelf.",
+      itemNotFound: "Item not found on shelf.",
+      noRelated: "No related works yet.",
+      universeLater: "Universe view will be here later.",
+      relatedOpenLater: "Later this button can open a real related card.",
+      statusLabel: "Status",
+      progressTitle: "Finished this work",
+      noCategoryFound: "Category for this work is not mapped yet."
+    },
+    statuses: {
+      Planned: "Planned",
+      "In progress": "In progress",
+      Done: "Done",
+      Dropped: "Dropped",
+      Info: "Info"
+    },
+    categoryNames: {
+      Books: "Books",
+      Movies: "Movies",
+      Series: "Series",
+      Games: "Games",
+      Anime: "Anime",
+      Manga: "Manga",
+      Blacklist: "Blacklist"
     }
-
-    function setLanguage(lang) {
-      currentLanguage = lang;
-      document.documentElement.lang = lang;
-      applyTranslations();
-      rerenderCurrentScreen();
+  },
+  ru: {
+    subtitle: "Персональная библиотека и трекер медиа-вселенных",
+    categories: {
+      Books: "📚 Книги",
+      Movies: "🎬 Фильмы",
+      Series: "📺 Сериалы",
+      Games: "🎮 Игры",
+      Anime: "🍥 Аниме",
+      Manga: "📖 Манга",
+      Blacklist: "🚫 Чёрный список"
+    },
+    buttons: {
+      backHome: "← Назад",
+      addNew: "+ Добавить",
+      backShelf: "← Назад к полке",
+      exploreUniverse: "Открыть вселенную",
+      close: "Закрыть",
+      changeStatus: "Изменить статус",
+      open: "Открыть",
+      add: "Добавить",
+      cancel: "Отмена",
+      nextWork: "Открыть следующее произведение",
+      closeSuggestion: "Закрыть"
+    },
+    modals: {
+      searchTitle: "Поиск и добавление",
+      searchSubtitle: "Режим прототипа: локальные результаты поиска",
+      searchPlaceholder: "Введите название",
+      statusTitle: "Выберите статус"
+    },
+    labels: {
+      cover: "Обложка",
+      description: "Описание",
+      relatedWorks: "Связанные произведения",
+      noResults: "Ничего не найдено",
+      alreadyExists: "Это произведение уже есть на полке.",
+      itemNotFound: "Произведение не найдено на полке.",
+      noRelated: "Пока нет связанных произведений.",
+      universeLater: "Просмотр вселенной будет добавлен позже.",
+      relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку.",
+      statusLabel: "Статус",
+      progressTitle: "Вы завершили произведение",
+      noCategoryFound: "Для этого произведения пока не указана категория."
+    },
+    statuses: {
+      Planned: "Запланировано",
+      "In progress": "В процессе",
+      Done: "Завершено",
+      Dropped: "Брошено",
+      Info: "Инфо"
+    },
+    categoryNames: {
+      Books: "Книги",
+      Movies: "Фильмы",
+      Series: "Сериалы",
+      Games: "Игры",
+      Anime: "Аниме",
+      Manga: "Манга",
+      Blacklist: "Чёрный список"
     }
+  }
+};
 
-    function applyTranslations() {
-      document.getElementById("home-subtitle").textContent = t().subtitle;
+let currentLanguage = "en";
 
-      document.getElementById("cat-books").textContent = t().categories.Books;
-      document.getElementById("cat-movies").textContent = t().categories.Movies;
-      document.getElementById("cat-series").textContent = t().categories.Series;
-      document.getElementById("cat-games").textContent = t().categories.Games;
-      document.getElementById("cat-anime").textContent = t().categories.Anime;
-      document.getElementById("cat-manga").textContent = t().categories.Manga;
-      document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+const demoData = {
+  Books: [
+    { title: "Dune", status: "Planned" },
+    { title: "Foundation", status: "In progress" },
+    { title: "Neuromancer", status: "Done" }
+  ],
+  Movies: [
+    { title: "Dune (2021)", status: "Done" },
+    { title: "Blade Runner", status: "Planned" },
+    { title: "Arrival", status: "Done" }
+  ],
+  Series: [
+    { title: "Severance", status: "In progress" },
+    { title: "Dark", status: "Done" }
+  ],
+  Games: [
+    { title: "Cyberpunk 2077", status: "In progress" },
+    { title: "The Witcher 3", status: "Done" }
+  ],
+  Anime: [
+    { title: "Cowboy Bebop", status: "Done" },
+    { title: "Monster", status: "Planned" }
+  ],
+  Manga: [
+    { title: "Berserk", status: "In progress" },
+    { title: "20th Century Boys", status: "Planned" }
+  ],
+  Blacklist: [
+    { title: "Ignored creators will be here", status: "Info" }
+  ]
+};
 
-      document.getElementById("back-home-btn").textContent = t().buttons.backHome;
-      document.getElementById("add-new-btn").textContent = t().buttons.addNew;
-      document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
-      document.getElementById("explore-universe-btn").textContent = t().buttons.exploreUniverse;
-      document.getElementById("cover-label").textContent = t().labels.cover;
-      document.getElementById("description-label").textContent = t().labels.description;
-      document.getElementById("related-label").textContent = t().labels.relatedWorks;
-      document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
+const searchDatabase = {
+  Books: [
+    { title: "Hyperion", status: "Planned" },
+    { title: "Snow Crash", status: "Planned" },
+    { title: "The Left Hand of Darkness", status: "Planned" },
+    { title: "A Fire Upon the Deep", status: "Planned" }
+  ],
+  Movies: [
+    { title: "Interstellar", status: "Planned" },
+    { title: "Solaris", status: "Planned" },
+    { title: "Gattaca", status: "Planned" }
+  ],
+  Series: [
+    { title: "The Expanse", status: "Planned" },
+    { title: "Silo", status: "Planned" },
+    { title: "Battlestar Galactica", status: "Planned" }
+  ],
+  Games: [
+    { title: "Mass Effect", status: "Planned" },
+    { title: "Deus Ex", status: "Planned" },
+    { title: "Disco Elysium", status: "Planned" }
+  ],
+  Anime: [
+    { title: "Steins;Gate", status: "Planned" },
+    { title: "Ghost in the Shell", status: "Planned" },
+    { title: "Ergo Proxy", status: "Planned" }
+  ],
+  Manga: [
+    { title: "Blame!", status: "Planned" },
+    { title: "Pluto", status: "Planned" },
+    { title: "Ajin", status: "Planned" }
+  ],
+  Blacklist: []
+};
 
-      document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
-      document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
-      document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
-      document.getElementById("close-search-btn").textContent = t().buttons.close;
+const detailsDatabase = {
+  "Dune": {
+    description: "Science fiction novel and the root of a large media universe.",
+    related: ["Dune Messiah", "Dune (2021)", "Dune: Spice Wars"]
+  },
+  "Foundation": {
+    description: "Classic science fiction series by Isaac Asimov.",
+    related: ["Foundation and Empire", "Second Foundation", "Foundation TV series"]
+  },
+  "Neuromancer": {
+    description: "Cyberpunk novel that shaped an entire genre.",
+    related: ["Count Zero", "Mona Lisa Overdrive", "Ghost in the Shell"]
+  },
+  "Dune (2021)": {
+    description: "Film adaptation of Frank Herbert's novel.",
+    related: ["Dune Part Two", "Dune (1984)", "Dune book"]
+  },
+  "Blade Runner": {
+    description: "Science fiction film based on Philip K. Dick's work.",
+    related: ["Blade Runner 2049", "Do Androids Dream of Electric Sheep?", "Cyberpunk 2077"]
+  },
+  "Arrival": {
+    description: "Science fiction film based on a short story.",
+    related: ["Story of Your Life", "Interstellar", "Contact"]
+  },
+  "Cyberpunk 2077": {
+    description: "Open world RPG set in the Cyberpunk universe.",
+    related: ["Cyberpunk Edgerunners", "Cyberpunk 2020", "Blade Runner"]
+  },
+  "The Witcher 3": {
+    description: "RPG based on The Witcher books.",
+    related: ["The Witcher books", "The Witcher Netflix", "The Witcher 2"]
+  },
+  "Cowboy Bebop": {
+    description: "Anime series blending noir, sci-fi and western themes.",
+    related: ["Cowboy Bebop movie", "Samurai Champloo", "Trigun"]
+  },
+  "Monster": {
+    description: "Psychological thriller anime adaptation of the manga.",
+    related: ["Monster manga", "Pluto", "20th Century Boys"]
+  },
+  "Berserk": {
+    description: "Dark fantasy manga with multiple adaptations.",
+    related: ["Berserk anime", "Berserk movies", "Claymore"]
+  },
+  "20th Century Boys": {
+    description: "Mystery manga by Naoki Urasawa.",
+    related: ["21st Century Boys", "Monster", "Pluto"]
+  }
+};
 
-      document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
-      document.getElementById("status-planned").textContent = t().statuses.Planned;
-      document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
-      document.getElementById("status-done").textContent = t().statuses.Done;
-      document.getElementById("status-dropped").textContent = t().statuses.Dropped;
-      document.getElementById("status-cancel").textContent = t().buttons.cancel;
+const nextWorksMap = {
+  "Dune": "Dune Messiah",
+  "Foundation": "Foundation and Empire",
+  "Neuromancer": "Count Zero",
+  "Dune (2021)": "Dune Part Two",
+  "Blade Runner": "Blade Runner 2049",
+  "Cyberpunk 2077": "Cyberpunk Edgerunners",
+  "Berserk": "Berserk anime"
+};
 
-      document.getElementById("progress-title").textContent = t().labels.progressTitle;
-      document.getElementById("progress-next").textContent = t().buttons.nextWork;
-      document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse;
-      document.getElementById("progress-close").textContent = t().buttons.closeSuggestion;
-    }
+const mediaCategoryMap = {
+  "Dune": "Books",
+  "Dune Messiah": "Books",
+  "Foundation": "Books",
+  "Foundation and Empire": "Books",
+  "Second Foundation": "Books",
+  "Neuromancer": "Books",
+  "Count Zero": "Books",
+  "Mona Lisa Overdrive": "Books",
+  "The Witcher books": "Books",
+  "Do Androids Dream of Electric Sheep?": "Books",
+  "Story of Your Life": "Books",
 
-    function rerenderCurrentScreen() {
-      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
-        document.getElementById("category-title").textContent = translateCategory(currentCategory);
-        renderShelf();
-      }
+  "Dune (2021)": "Movies",
+  "Dune Part Two": "Movies",
+  "Dune (1984)": "Movies",
+  "Blade Runner": "Movies",
+  "Blade Runner 2049": "Movies",
+  "Arrival": "Movies",
 
-      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
-        openCard(currentOpenTitle);
-      }
+  "Foundation TV series": "Series",
+  "Cyberpunk Edgerunners": "Anime",
 
-      if (!document.getElementById("add-modal").classList.contains("hidden")) {
-        renderSearchResults();
-      }
-    }
+  "Dune: Spice Wars": "Games",
+  "Cyberpunk 2077": "Games",
+  "The Witcher 3": "Games",
+  "The Witcher 2": "Games",
 
-    function translateStatus(status) {
-      return t().statuses[status] || status;
-    }
+  "Ghost in the Shell": "Anime",
+  "Cowboy Bebop": "Anime",
+  "Cowboy Bebop movie": "Anime",
+  "Monster": "Anime",
+  "Samurai Champloo": "Anime",
+  "Trigun": "Anime",
+  "Berserk anime": "Anime",
 
-    function translateCategory(category) {
-      return t().categoryNames[category] || category;
-    }
+  "Monster manga": "Manga",
+  "Berserk": "Manga",
+  "Berserk movies": "Manga",
+  "20th Century Boys": "Manga",
+  "21st Century Boys": "Manga",
+  "Pluto": "Manga",
+  "Claymore": "Manga"
+};
 
-    async function openCategory(name){
+let currentCategory = null;
+let currentStatusIndex = null;
+let currentOpenTitle = null;
+
+function t() {
+  return translations[currentLanguage];
+}
+
+function setLanguage(lang) {
+  currentLanguage = lang;
+  document.documentElement.lang = lang;
+  applyTranslations();
+  rerenderCurrentScreen();
+}
+
+function applyTranslations() {
+  document.getElementById("home-subtitle").textContent = t().subtitle;
+
+  document.getElementById("cat-books").textContent = t().categories.Books;
+  document.getElementById("cat-movies").textContent = t().categories.Movies;
+  document.getElementById("cat-series").textContent = t().categories.Series;
+  document.getElementById("cat-games").textContent = t().categories.Games;
+  document.getElementById("cat-anime").textContent = t().categories.Anime;
+  document.getElementById("cat-manga").textContent = t().categories.Manga;
+  document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+
+  document.getElementById("back-home-btn").textContent = t().buttons.backHome;
+  document.getElementById("add-new-btn").textContent = t().buttons.addNew;
+  document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
+  document.getElementById("explore-universe-btn").textContent = t().buttons.exploreUniverse;
+  document.getElementById("cover-label").textContent = t().labels.cover;
+  document.getElementById("description-label").textContent = t().labels.description;
+  document.getElementById("related-label").textContent = t().labels.relatedWorks;
+  document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
+
+  document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
+  document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
+  document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
+  document.getElementById("close-search-btn").textContent = t().buttons.close;
+
+  document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
+  document.getElementById("status-planned").textContent = t().statuses.Planned;
+  document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
+  document.getElementById("status-done").textContent = t().statuses.Done;
+  document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+  document.getElementById("status-cancel").textContent = t().buttons.cancel;
+
+  document.getElementById("progress-title").textContent = t().labels.progressTitle;
+  document.getElementById("progress-next").textContent = t().buttons.nextWork;
+  document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse;
+  document.getElementById("progress-close").textContent = t().buttons.closeSuggestion;
+}
+
+function rerenderCurrentScreen() {
+  if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
+    document.getElementById("category-title").textContent = translateCategory(currentCategory);
+    renderShelf();
+  }
+
+  if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
+    openCard(currentOpenTitle);
+  }
+
+  if (!document.getElementById("add-modal").classList.contains("hidden")) {
+    renderSearchResults();
+  }
+}
+
+function translateStatus(status) {
+  return t().statuses[status] || status;
+}
+
+function translateCategory(category) {
+  return t().categoryNames[category] || category;
+}
+
+async function openCategory(name){
   currentCategory = name;
-
   hideAllScreens();
-
   document.getElementById("category-screen").classList.remove("hidden");
   document.getElementById("category-title").textContent = translateCategory(name);
-
   await loadCategoryFromSupabase(name);
 }
 
-    function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      shelf.innerHTML = "";
+function renderShelf(){
+  const shelf = document.getElementById("shelf");
+  shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+  const items = demoData[currentCategory] || [];
 
-      items.forEach((item, index) => {
-        const safeTitle = item.title.replace(/'/g, "\\'");
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${t().labels.cover}</div>
-          <div class="media-info">
-            <h3 class="media-title">${item.title}</h3>
-            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-            <div class="media-actions">
-              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-            </div>
-          </div>
-        `;
-        shelf.appendChild(card);
-      });
-    }
+  items.forEach((item, index) => {
+    const safeTitle = item.title.replace(/'/g, "\\'");
+    const card = document.createElement("div");
+    card.className = "media-card";
+    card.innerHTML = `
+      <div class="media-cover">${t().labels.cover}</div>
+      <div class="media-info">
+        <h3 class="media-title">${item.title}</h3>
+        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+        <div class="media-actions">
+          <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+          <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+        </div>
+      </div>
+    `;
+    shelf.appendChild(card);
+  });
+}
 
-    function hideAllScreens(){
-      document.getElementById("home-screen").classList.add("hidden");
-      document.getElementById("category-screen").classList.add("hidden");
-      document.getElementById("details-screen").classList.add("hidden");
-    }
+function hideAllScreens(){
+  document.getElementById("home-screen").classList.add("hidden");
+  document.getElementById("category-screen").classList.add("hidden");
+  document.getElementById("details-screen").classList.add("hidden");
+}
 
-    function goHome(){
-      hideAllScreens();
-      document.getElementById("home-screen").classList.remove("hidden");
-    }
+function goHome(){
+  hideAllScreens();
+  document.getElementById("home-screen").classList.remove("hidden");
+}
 
-    function backToCategory(){
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-    }
+function backToCategory(){
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+}
 
-    function addNew(){
-      document.getElementById("add-modal").classList.remove("hidden");
-      document.getElementById("search-input").value = "";
-      renderSearchResults();
-      document.getElementById("search-input").focus();
-    }
+function addNew(){
+  document.getElementById("add-modal").classList.remove("hidden");
+  document.getElementById("search-input").value = "";
+  renderSearchResults();
+  document.getElementById("search-input").focus();
+}
 
-    function closeAddModal(){
-      document.getElementById("add-modal").classList.add("hidden");
-    }
+function closeAddModal(){
+  document.getElementById("add-modal").classList.add("hidden");
+}
 
-    function renderSearchResults(){
-      const container = document.getElementById("search-results");
-      const query = document.getElementById("search-input").value.trim().toLowerCase();
+function renderSearchResults(){
+  const container = document.getElementById("search-results");
+  const query = document.getElementById("search-input").value.trim().toLowerCase();
 
-      container.innerHTML = "";
+  container.innerHTML = "";
 
-      const items = searchDatabase[currentCategory] || [];
+  const items = searchDatabase[currentCategory] || [];
 
-      const filtered = items.filter(item =>
-        item.title.toLowerCase().includes(query)
-      );
+  const filtered = items.filter(item =>
+    item.title.toLowerCase().includes(query)
+  );
 
-      if(filtered.length === 0){
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
-        return;
-      }
+  if(filtered.length === 0){
+    container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+    return;
+  }
 
-      filtered.forEach(item => {
-        const safeTitle = item.title.replace(/'/g, "\\'");
-        const row = document.createElement("div");
-        row.className = "search-item";
-        row.innerHTML = `
-          <div>
-            <div class="search-item-title">${item.title}</div>
-            <div class="search-item-meta">${translateCategory(currentCategory)}</div>
-          </div>
-          <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-        `;
-        container.appendChild(row);
-      });
-    }
+  filtered.forEach(item => {
+    const safeTitle = item.title.replace(/'/g, "\\'");
+    const row = document.createElement("div");
+    row.className = "search-item";
+    row.innerHTML = `
+      <div>
+        <div class="search-item-title">${item.title}</div>
+        <div class="search-item-meta">${translateCategory(currentCategory)}</div>
+      </div>
+      <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
+    `;
+    container.appendChild(row);
+  });
+}
 
-    async function addSearchResult(title){
+async function addSearchResult(title){
   const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
   if(exists){
@@ -859,24 +904,24 @@ const supabaseClient = supabase.createClient(
 }
 
 function changeStatus(index){
-      currentStatusIndex = index;
-      currentOpenTitle = demoData[currentCategory][index].title;
-      document.getElementById("status-modal").classList.remove("hidden");
-    }
+  currentStatusIndex = index;
+  currentOpenTitle = demoData[currentCategory][index].title;
+  document.getElementById("status-modal").classList.remove("hidden");
+}
 
-    function changeStatusFromDetails(){
-      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
+function changeStatusFromDetails(){
+  const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
 
-      if(index === -1){
-        alert(t().labels.itemNotFound);
-        return;
-      }
+  if(index === -1){
+    alert(t().labels.itemNotFound);
+    return;
+  }
 
-      currentStatusIndex = index;
-      document.getElementById("status-modal").classList.remove("hidden");
-    }
+  currentStatusIndex = index;
+  document.getElementById("status-modal").classList.remove("hidden");
+}
 
-   async function setStatus(status){
+async function setStatus(status){
   const item = demoData[currentCategory][currentStatusIndex];
   const oldStatus = item.status;
 
@@ -933,7 +978,7 @@ function openCard(title){
   relatedList.innerHTML = "";
 
   if(!details.related.length){
-    relatedList.innerHTML = <div class="muted">${t().labels.noRelated}</div>;
+    relatedList.innerHTML = `<div class="muted">${t().labels.noRelated}</div>`;
     return;
   }
 
@@ -941,16 +986,34 @@ function openCard(title){
     const safeName = name.replace(/'/g, "\\'");
     const row = document.createElement("div");
     row.className = "related-item";
-    row.innerHTML = 
+    row.innerHTML = `
       <div>${name}</div>
       <button class="button" onclick="openRelatedPrototype('${safeName}')">${t().buttons.open}</button>
-    ;
+    `;
     relatedList.appendChild(row);
   });
 }
 
 function openRelatedPrototype(title){
-  alert(title + "\n\n" + t().labels.relatedOpenLater);
+  const category = mediaCategoryMap[title];
+
+  if(!category){
+    alert(t().labels.noCategoryFound);
+    return;
+  }
+
+  currentCategory = category;
+
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+
+  if(!exists){
+    demoData[currentCategory].unshift({
+      title: title,
+      status: "Planned"
+    });
+  }
+
+  openCard(title);
 }
 
 function openUniverse(){
@@ -1045,7 +1108,6 @@ async function loadCategoryFromSupabase(category){
 }
 
 applyTranslations();
-
   </script>
 
 </body>
