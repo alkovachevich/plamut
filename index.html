@@ -993,7 +993,7 @@ async function saveItemToSupabase(title, category, status){
         status: status
       }
     ]);
-  async function updateStatusInSupabase(title, category, status){
+ async function updateStatusInSupabase(title, category, status){
   const { error } = await supabaseClient
     .from("user_media")
     .update({ status: status })
