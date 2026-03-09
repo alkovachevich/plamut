@@ -926,22 +926,6 @@ async function renderSearchResults(){
     container.appendChild(row);
   });
 }
-
-  filtered.forEach(item => {
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const row = document.createElement("div");
-    row.className = "search-item";
-    row.innerHTML = `
-      <div>
-        <div class="search-item-title">${item.title}</div>
-        <div class="search-item-meta">${translateCategory(currentCategory)}</div>
-      </div>
-      <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-    `;
-    container.appendChild(row);
-  });
-}
-
 async function addSearchResult(title){
   const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
