@@ -903,86 +903,88 @@ function changeStatus(index){
     }, 200);
   }
 }
-    function closeStatusModal(){
-      document.getElementById("status-modal").classList.add("hidden");
-    }
 
-    function closeProgressModal(){
-      document.getElementById("progress-modal").classList.add("hidden");
-    }
+function closeStatusModal(){
+  document.getElementById("status-modal").classList.add("hidden");
+}
 
-    function openCard(title){
-      currentOpenTitle = title;
+function closeProgressModal(){
+  document.getElementById("progress-modal").classList.add("hidden");
+}
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      const details = detailsDatabase[title] || {
-        description: "No detailed description yet. This is a prototype card.",
-        related: []
-      };
+function openCard(title){
+  currentOpenTitle = title;
 
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
+  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+  const details = detailsDatabase[title] || {
+    description: "No detailed description yet. This is a prototype card.",
+    related: []
+  };
 
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-      document.getElementById("details-description").textContent = details.description;
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
 
-      const relatedList = document.getElementById("related-list");
-      relatedList.innerHTML = "";
+  document.getElementById("details-title").textContent = title;
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+  document.getElementById("details-description").textContent = details.description;
 
-      if(!details.related.length){
-        relatedList.innerHTML = `<div class="muted">${t().labels.noRelated}</div>`;
-        return;
-      }
+  const relatedList = document.getElementById("related-list");
+  relatedList.innerHTML = "";
 
-      details.related.forEach(name => {
-        const safeName = name.replace(/'/g, "\\'");
-        const row = document.createElement("div");
-        row.className = "related-item";
-        row.innerHTML = `
-          <div>${name}</div>
-          <button class="button" onclick="openRelatedPrototype('${safeName}')">${t().buttons.open}</button>
-        `;
-        relatedList.appendChild(row);
-      });
-    }
+  if(!details.related.length){
+    relatedList.innerHTML = <div class="muted">${t().labels.noRelated}</div>;
+    return;
+  }
 
-    function openRelatedPrototype(title){
-      alert(title + "\n\n" + t().labels.relatedOpenLater);
-    }
+  details.related.forEach(name => {
+    const safeName = name.replace(/'/g, "\\'");
+    const row = document.createElement("div");
+    row.className = "related-item";
+    row.innerHTML = 
+      <div>${name}</div>
+      <button class="button" onclick="openRelatedPrototype('${safeName}')">${t().buttons.open}</button>
+    ;
+    relatedList.appendChild(row);
+  });
+}
 
-    function openUniverse(){
-      alert(t().labels.universeLater);
-    }
+function openRelatedPrototype(title){
+  alert(title + "\n\n" + t().labels.relatedOpenLater);
+}
 
-    function openUniverseFromModal(){
-      closeProgressModal();
-      openUniverse();
-    }
+function openUniverse(){
+  alert(t().labels.universeLater);
+}
 
-    function openNextWork(){
-      closeProgressModal();
+function openUniverseFromModal(){
+  closeProgressModal();
+  openUniverse();
+}
 
-      const nextTitle = nextWorksMap[currentOpenTitle];
+function openNextWork(){
+  closeProgressModal();
 
-      if(!nextTitle){
-        alert("No next work mapped yet.");
-        return;
-      }
+  const nextTitle = nextWorksMap[currentOpenTitle];
 
-      const exists = (demoData[currentCategory] || []).some(item => item.title === nextTitle);
+  if(!nextTitle){
+    alert("No next work mapped yet.");
+    return;
+  }
 
-      if(!exists){
-        demoData[currentCategory].unshift({
-          title: nextTitle,
-          status: "Planned"
-        });
-        renderShelf();
-      }
+  const exists = (demoData[currentCategory] || []).some(item => item.title === nextTitle);
 
-      openCard(nextTitle);
-    }
+  if(!exists){
+    demoData[currentCategory].unshift({
+      title: nextTitle,
+      status: "Planned"
+    });
+    renderShelf();
+  }
+
+  openCard(nextTitle);
+}
+
 async function saveItemToSupabase(title, category, status){
   const { error } = await supabaseClient
     .from("user_media")
@@ -993,7 +995,17 @@ async function saveItemToSupabase(title, category, status){
         status: status
       }
     ]);
- async function updateStatusInSupabase(title, category, status){
+
+  if(error){
+    console.error("Supabase insert error:", error);
+    alert("Error saving item to database: " + error.message);
+    return false;
+  }
+
+  return true;
+}
+
+async function updateStatusInSupabase(title, category, status){
   const { error } = await supabaseClient
     .from("user_media")
     .update({ status: status })
@@ -1008,8 +1020,8 @@ async function saveItemToSupabase(title, category, status){
 
   return true;
 }
-    async function loadCategoryFromSupabase(category){
 
+async function loadCategoryFromSupabase(category){
   const { data, error } = await supabaseClient
     .from("user_media")
     .select("*")
@@ -1031,7 +1043,9 @@ async function saveItemToSupabase(title, category, status){
 
   renderShelf();
 }
-    applyTranslations();
+
+applyTranslations();
+
   </script>
 
 </body>
