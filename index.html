@@ -790,8 +790,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     function closeManualModal(){
       document.getElementById("manual-modal").classList.add("hidden");
     }
-
-    async function renderSearchResults() {
+     async function renderSearchResults() {
   const container = document.getElementById("search-results");
   const input = document.getElementById("search-input");
 
@@ -930,8 +929,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
   closeAddModal();
   renderShelf();
 }
-
-
     async function saveManualItem(){
       const title = document.getElementById("manual-name").value.trim();
       const creator = document.getElementById("manual-creator").value.trim();
