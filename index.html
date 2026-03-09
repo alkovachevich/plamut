@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Plamut</title>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
     body{
       font-family: Arial, sans-serif;
@@ -151,18 +153,21 @@
 
     .modal-box{
       width:100%;
-      max-width:420px;
+      max-width:560px;
       background:#1a1a1a;
       border:1px solid #333;
       border-radius:16px;
       padding:20px;
+      max-height:85vh;
+      overflow:auto;
     }
 
     .modal-box h3{
       margin-top:0;
     }
 
-    .input{
+    .input,
+    .textarea{
       width:100%;
       box-sizing:border-box;
       background:#111;
@@ -171,6 +176,12 @@
       border-radius:10px;
       padding:12px;
       margin-bottom:12px;
+      font:inherit;
+    }
+
+    .textarea{
+      min-height:100px;
+      resize:vertical;
     }
 
     .modal-actions{
@@ -178,6 +189,7 @@
       gap:10px;
       justify-content:flex-end;
       margin-top:8px;
+      flex-wrap:wrap;
     }
 
     .small{
@@ -198,14 +210,20 @@
       background:#141414;
     }
 
+    .search-item-left{
+      min-width:0;
+    }
+
     .search-item-title{
       font-size:14px;
+      word-break:break-word;
     }
 
     .search-item-meta{
       font-size:12px;
       color:#888;
       margin-top:4px;
+      word-break:break-word;
     }
 
     .details-layout{
@@ -229,6 +247,13 @@
       align-items:center;
       justify-content:center;
       color:#999;
+    }
+
+    .details-cover-box img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
     }
 
     .details-panel{
@@ -274,6 +299,12 @@
       color:#999;
     }
 
+    .loading{
+      color:#aaa;
+      font-size:14px;
+      padding:10px 0;
+    }
+
     @media (max-width: 800px){
       .details-layout{
         grid-template-columns:1fr;
@@ -284,7 +315,6 @@
       }
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -304,7 +334,6 @@
       <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
       <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
       <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
-      <div class="card" onclick="openCategory('Games')" id="cat-games"></div>
       <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
       <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
       <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
@@ -329,7 +358,7 @@
 
     <div class="details-layout">
       <div class="details-cover">
-        <div class="details-cover-box" id="cover-label"></div>
+        <div class="details-cover-box" id="cover-box"></div>
       </div>
 
       <div class="details-panel">
@@ -372,7 +401,25 @@
       <div id="search-results"></div>
 
       <div class="modal-actions">
+        <button class="button" onclick="openManualModal()" id="manual-add-btn"></button>
         <button class="button" onclick="closeAddModal()" id="close-search-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="manual-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="manual-title"></h3>
+      <div class="small" id="manual-subtitle"></div>
+
+      <input id="manual-name" class="input" type="text">
+      <input id="manual-creator" class="input" type="text">
+      <input id="manual-cover" class="input" type="text">
+      <textarea id="manual-description" class="textarea"></textarea>
+
+      <div class="modal-actions">
+        <button class="button" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+        <button class="button" onclick="saveManualItem()" id="manual-save-btn"></button>
       </div>
     </div>
   </div>
@@ -402,737 +449,692 @@
       </div>
     </div>
   </div>
-  
-   <script>
-const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+
+  <script>
+    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
-     
-const supabaseClient = supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY
-);
 
-const translations = {
-  en: {
-    subtitle: "Personal Library and Media Universe Tracker",
-    categories: {
-      Books: "📚 Books",
-      Movies: "🎬 Movies",
-      Series: "📺 Series",
-      Games: "🎮 Games",
-      Anime: "🍥 Anime",
-      Manga: "📖 Manga",
-      Blacklist: "🚫 Blacklist"
-    },
-    buttons: {
-      backHome: "← Back",
-      addNew: "+ Add new",
-      backShelf: "← Back to shelf",
-      exploreUniverse: "Explore universe",
-      close: "Close",
-      changeStatus: "Change status",
-      open: "Open",
-      add: "Add",
-      cancel: "Cancel",
-      nextWork: "Open next work in series",
-      closeSuggestion: "Close"
-    },
-    modals: {
-      searchTitle: "Search and add",
-      searchSubtitle: "Prototype mode: local search results",
-      searchPlaceholder: "Enter title",
-      statusTitle: "Select status"
-    },
-    labels: {
-      cover: "Cover",
-      description: "Description",
-      relatedWorks: "Related works",
-      noResults: "No results found",
-      alreadyExists: "This item is already on the shelf.",
-      itemNotFound: "Item not found on shelf.",
-      noRelated: "No related works yet.",
-      universeLater: "Universe view will be here later.",
-      relatedOpenLater: "Later this button can open a real related card.",
-      statusLabel: "Status",
-      progressTitle: "Finished this work",
-      noCategoryFound: "Category for this work is not mapped yet."
-    },
-    statuses: {
-      Planned: "Planned",
-      "In progress": "In progress",
-      Done: "Done",
-      Dropped: "Dropped",
-      Info: "Info"
-    },
-    categoryNames: {
-      Books: "Books",
-      Movies: "Movies",
-      Series: "Series",
-      Games: "Games",
-      Anime: "Anime",
-      Manga: "Manga",
-      Blacklist: "Blacklist"
+    const supabaseClient = supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
+
+    const translations = {
+      en: {
+        subtitle: "Personal Library and Media Universe Tracker",
+        categories: {
+          Books: "📚 Books",
+          Movies: "🎬 Movies",
+          Series: "📺 Series",
+          Anime: "🍥 Anime",
+          Manga: "📖 Manga",
+          Blacklist: "🚫 Blacklist"
+        },
+        buttons: {
+          backHome: "← Back",
+          addNew: "+ Add new",
+          backShelf: "← Back to shelf",
+          exploreUniverse: "Explore universe",
+          close: "Close",
+          changeStatus: "Change status",
+          open: "Open",
+          add: "Add",
+          cancel: "Cancel",
+          nextWork: "Open next work in series",
+          closeSuggestion: "Close",
+          manualAdd: "Add manually",
+          save: "Save"
+        },
+        modals: {
+          searchTitle: "Search and add",
+          searchSubtitle: "Books use Google Books API. Other categories can be added manually.",
+          searchPlaceholder: "Enter title",
+          statusTitle: "Select status",
+          manualTitle: "Add manually",
+          manualSubtitle: "Use this when search does not find what you need."
+        },
+        labels: {
+          cover: "Cover",
+          description: "Description",
+          relatedWorks: "Related works",
+          noResults: "No results found",
+          alreadyExists: "This item is already on the shelf.",
+          itemNotFound: "Item not found on shelf.",
+          noRelated: "No related works yet.",
+          universeLater: "Universe view will be here later.",
+          relatedOpenLater: "Later this button can open a real related card.",
+          statusLabel: "Status",
+          progressTitle: "Finished this work",
+          noCategoryFound: "Category for this work is not mapped yet.",
+          searching: "Searching...",
+          noBooksFound: "No books found",
+          apiError: "API error",
+          dbSaveError: "Error saving item to database",
+          dbUpdateError: "Supabase update error",
+          dbStatusNotSaved: "Status was not saved to database",
+          noNextWork: "No next work mapped yet.",
+          name: "Title",
+          creator: "Author / Director / Studio",
+          coverUrl: "Cover URL",
+          descriptionPlaceholder: "Description",
+          manualNameRequired: "Title is required"
+        },
+        statuses: {
+          Planned: "Planned",
+          "In progress": "In progress",
+          Done: "Done",
+          Dropped: "Dropped",
+          Info: "Info"
+        },
+        categoryNames: {
+          Books: "Books",
+          Movies: "Movies",
+          Series: "Series",
+          Anime: "Anime",
+          Manga: "Manga",
+          Blacklist: "Blacklist"
+        }
+      },
+      ru: {
+        subtitle: "Персональная библиотека и трекер медиа-вселенных",
+        categories: {
+          Books: "📚 Книги",
+          Movies: "🎬 Фильмы",
+          Series: "📺 Сериалы",
+          Anime: "🍥 Аниме",
+          Manga: "📖 Манга",
+          Blacklist: "🚫 Чёрный список"
+        },
+        buttons: {
+          backHome: "← Назад",
+          addNew: "+ Добавить",
+          backShelf: "← Назад к полке",
+          exploreUniverse: "Открыть вселенную",
+          close: "Закрыть",
+          changeStatus: "Изменить статус",
+          open: "Открыть",
+          add: "Добавить",
+          cancel: "Отмена",
+          nextWork: "Открыть следующее произведение",
+          closeSuggestion: "Закрыть",
+          manualAdd: "Добавить вручную",
+          save: "Сохранить"
+        },
+        modals: {
+          searchTitle: "Поиск и добавление",
+          searchSubtitle: "Для книг используется Google Books API. Остальные категории можно добавлять вручную.",
+          searchPlaceholder: "Введите название",
+          statusTitle: "Выберите статус",
+          manualTitle: "Добавить вручную",
+          manualSubtitle: "Используйте это, если поиск не нашёл нужное произведение."
+        },
+        labels: {
+          cover: "Обложка",
+          description: "Описание",
+          relatedWorks: "Связанные произведения",
+          noResults: "Ничего не найдено",
+          alreadyExists: "Это произведение уже есть на полке.",
+          itemNotFound: "Произведение не найдено на полке.",
+          noRelated: "Пока нет связанных произведений.",
+          universeLater: "Просмотр вселенной будет добавлен позже.",
+          relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку.",
+          statusLabel: "Статус",
+          progressTitle: "Вы завершили произведение",
+          noCategoryFound: "Для этого произведения пока не указана категория.",
+          searching: "Поиск...",
+          noBooksFound: "Книги не найдены",
+          apiError: "Ошибка API",
+          dbSaveError: "Ошибка сохранения в базу данных",
+          dbUpdateError: "Ошибка обновления Supabase",
+          dbStatusNotSaved: "Статус не был сохранён в базу",
+          noNextWork: "Для этого произведения пока не задана следующая часть.",
+          name: "Название",
+          creator: "Автор / Режиссёр / Студия",
+          coverUrl: "Ссылка на обложку",
+          descriptionPlaceholder: "Описание",
+          manualNameRequired: "Название обязательно"
+        },
+        statuses: {
+          Planned: "Запланировано",
+          "In progress": "В процессе",
+          Done: "Завершено",
+          Dropped: "Брошено",
+          Info: "Инфо"
+        },
+        categoryNames: {
+          Books: "Книги",
+          Movies: "Фильмы",
+          Series: "Сериалы",
+          Anime: "Аниме",
+          Manga: "Манга",
+          Blacklist: "Чёрный список"
+        }
+      }
+    };
+
+    let currentLanguage = "en";
+
+    const demoData = {
+      Books: [],
+      Movies: [],
+      Series: [],
+      Anime: [],
+      Manga: [],
+      Blacklist: []
+    };
+
+    const detailsDatabase = {};
+    const nextWorksMap = {};
+    const mediaCategoryMap = {};
+
+    let currentCategory = null;
+    let currentStatusIndex = null;
+    let currentOpenTitle = null;
+    let currentBookResults = [];
+
+    function t() {
+      return translations[currentLanguage];
     }
-  },
-  ru: {
-    subtitle: "Персональная библиотека и трекер медиа-вселенных",
-    categories: {
-      Books: "📚 Книги",
-      Movies: "🎬 Фильмы",
-      Series: "📺 Сериалы",
-      Games: "🎮 Игры",
-      Anime: "🍥 Аниме",
-      Manga: "📖 Манга",
-      Blacklist: "🚫 Чёрный список"
-    },
-    buttons: {
-      backHome: "← Назад",
-      addNew: "+ Добавить",
-      backShelf: "← Назад к полке",
-      exploreUniverse: "Открыть вселенную",
-      close: "Закрыть",
-      changeStatus: "Изменить статус",
-      open: "Открыть",
-      add: "Добавить",
-      cancel: "Отмена",
-      nextWork: "Открыть следующее произведение",
-      closeSuggestion: "Закрыть"
-    },
-    modals: {
-      searchTitle: "Поиск и добавление",
-      searchSubtitle: "Режим прототипа: локальные результаты поиска",
-      searchPlaceholder: "Введите название",
-      statusTitle: "Выберите статус"
-    },
-    labels: {
-      cover: "Обложка",
-      description: "Описание",
-      relatedWorks: "Связанные произведения",
-      noResults: "Ничего не найдено",
-      alreadyExists: "Это произведение уже есть на полке.",
-      itemNotFound: "Произведение не найдено на полке.",
-      noRelated: "Пока нет связанных произведений.",
-      universeLater: "Просмотр вселенной будет добавлен позже.",
-      relatedOpenLater: "Позже эта кнопка сможет открывать связанную карточку.",
-      statusLabel: "Статус",
-      progressTitle: "Вы завершили произведение",
-      noCategoryFound: "Для этого произведения пока не указана категория."
-    },
-    statuses: {
-      Planned: "Запланировано",
-      "In progress": "В процессе",
-      Done: "Завершено",
-      Dropped: "Брошено",
-      Info: "Инфо"
-    },
-    categoryNames: {
-      Books: "Книги",
-      Movies: "Фильмы",
-      Series: "Сериалы",
-      Games: "Игры",
-      Anime: "Аниме",
-      Manga: "Манга",
-      Blacklist: "Чёрный список"
+
+    function setLanguage(lang) {
+      currentLanguage = lang;
+      document.documentElement.lang = lang;
+      applyTranslations();
+      rerenderCurrentScreen();
     }
-  }
-};
 
-let currentLanguage = "en";
+    function applyTranslations() {
+      document.getElementById("home-subtitle").textContent = t().subtitle;
 
-const demoData = {
-  Books: [
-    { title: "Dune", status: "Planned" },
-    { title: "Foundation", status: "In progress" },
-    { title: "Neuromancer", status: "Done" }
-  ],
-  Movies: [
-    { title: "Dune (2021)", status: "Done" },
-    { title: "Blade Runner", status: "Planned" },
-    { title: "Arrival", status: "Done" }
-  ],
-  Series: [
-    { title: "Severance", status: "In progress" },
-    { title: "Dark", status: "Done" }
-  ],
-  Games: [
-    { title: "Cyberpunk 2077", status: "In progress" },
-    { title: "The Witcher 3", status: "Done" }
-  ],
-  Anime: [
-    { title: "Cowboy Bebop", status: "Done" },
-    { title: "Monster", status: "Planned" }
-  ],
-  Manga: [
-    { title: "Berserk", status: "In progress" },
-    { title: "20th Century Boys", status: "Planned" }
-  ],
-  Blacklist: [
-    { title: "Ignored creators will be here", status: "Info" }
-  ]
-};
+      document.getElementById("cat-books").textContent = t().categories.Books;
+      document.getElementById("cat-movies").textContent = t().categories.Movies;
+      document.getElementById("cat-series").textContent = t().categories.Series;
+      document.getElementById("cat-anime").textContent = t().categories.Anime;
+      document.getElementById("cat-manga").textContent = t().categories.Manga;
+      document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
 
-const searchDatabase = {
-  Books: [
-    { title: "Hyperion", status: "Planned" },
-    { title: "Snow Crash", status: "Planned" },
-    { title: "The Left Hand of Darkness", status: "Planned" },
-    { title: "A Fire Upon the Deep", status: "Planned" }
-  ],
-  Movies: [
-    { title: "Interstellar", status: "Planned" },
-    { title: "Solaris", status: "Planned" },
-    { title: "Gattaca", status: "Planned" }
-  ],
-  Series: [
-    { title: "The Expanse", status: "Planned" },
-    { title: "Silo", status: "Planned" },
-    { title: "Battlestar Galactica", status: "Planned" }
-  ],
-  Games: [
-    { title: "Mass Effect", status: "Planned" },
-    { title: "Deus Ex", status: "Planned" },
-    { title: "Disco Elysium", status: "Planned" }
-  ],
-  Anime: [
-    { title: "Steins;Gate", status: "Planned" },
-    { title: "Ghost in the Shell", status: "Planned" },
-    { title: "Ergo Proxy", status: "Planned" }
-  ],
-  Manga: [
-    { title: "Blame!", status: "Planned" },
-    { title: "Pluto", status: "Planned" },
-    { title: "Ajin", status: "Planned" }
-  ],
-  Blacklist: []
-};
+      document.getElementById("back-home-btn").textContent = t().buttons.backHome;
+      document.getElementById("add-new-btn").textContent = t().buttons.addNew;
+      document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
+      document.getElementById("explore-universe-btn").textContent = t().buttons.exploreUniverse;
+      document.getElementById("description-label").textContent = t().labels.description;
+      document.getElementById("related-label").textContent = t().labels.relatedWorks;
+      document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
 
-const detailsDatabase = {
-  "Dune": {
-    description: "Science fiction novel and the root of a large media universe.",
-    related: ["Dune Messiah", "Dune (2021)", "Dune: Spice Wars"]
-  },
-  "Foundation": {
-    description: "Classic science fiction series by Isaac Asimov.",
-    related: ["Foundation and Empire", "Second Foundation", "Foundation TV series"]
-  },
-  "Neuromancer": {
-    description: "Cyberpunk novel that shaped an entire genre.",
-    related: ["Count Zero", "Mona Lisa Overdrive", "Ghost in the Shell"]
-  },
-  "Dune (2021)": {
-    description: "Film adaptation of Frank Herbert's novel.",
-    related: ["Dune Part Two", "Dune (1984)", "Dune book"]
-  },
-  "Blade Runner": {
-    description: "Science fiction film based on Philip K. Dick's work.",
-    related: ["Blade Runner 2049", "Do Androids Dream of Electric Sheep?", "Cyberpunk 2077"]
-  },
-  "Arrival": {
-    description: "Science fiction film based on a short story.",
-    related: ["Story of Your Life", "Interstellar", "Contact"]
-  },
-  "Cyberpunk 2077": {
-    description: "Open world RPG set in the Cyberpunk universe.",
-    related: ["Cyberpunk Edgerunners", "Cyberpunk 2020", "Blade Runner"]
-  },
-  "The Witcher 3": {
-    description: "RPG based on The Witcher books.",
-    related: ["The Witcher books", "The Witcher Netflix", "The Witcher 2"]
-  },
-  "Cowboy Bebop": {
-    description: "Anime series blending noir, sci-fi and western themes.",
-    related: ["Cowboy Bebop movie", "Samurai Champloo", "Trigun"]
-  },
-  "Monster": {
-    description: "Psychological thriller anime adaptation of the manga.",
-    related: ["Monster manga", "Pluto", "20th Century Boys"]
-  },
-  "Berserk": {
-    description: "Dark fantasy manga with multiple adaptations.",
-    related: ["Berserk anime", "Berserk movies", "Claymore"]
-  },
-  "20th Century Boys": {
-    description: "Mystery manga by Naoki Urasawa.",
-    related: ["21st Century Boys", "Monster", "Pluto"]
-  }
-};
+      document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
+      document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
+      document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
+      document.getElementById("close-search-btn").textContent = t().buttons.close;
+      document.getElementById("manual-add-btn").textContent = t().buttons.manualAdd;
 
-const nextWorksMap = {
-  "Dune": "Dune Messiah",
-  "Foundation": "Foundation and Empire",
-  "Neuromancer": "Count Zero",
-  "Dune (2021)": "Dune Part Two",
-  "Blade Runner": "Blade Runner 2049",
-  "Cyberpunk 2077": "Cyberpunk Edgerunners",
-  "Berserk": "Berserk anime"
-};
+      document.getElementById("manual-title").textContent = t().modals.manualTitle;
+      document.getElementById("manual-subtitle").textContent = t().modals.manualSubtitle;
+      document.getElementById("manual-name").placeholder = t().labels.name;
+      document.getElementById("manual-creator").placeholder = t().labels.creator;
+      document.getElementById("manual-cover").placeholder = t().labels.coverUrl;
+      document.getElementById("manual-description").placeholder = t().labels.descriptionPlaceholder;
+      document.getElementById("manual-cancel-btn").textContent = t().buttons.cancel;
+      document.getElementById("manual-save-btn").textContent = t().buttons.save;
 
-const mediaCategoryMap = {
-  "Dune": "Books",
-  "Dune Messiah": "Books",
-  "Foundation": "Books",
-  "Foundation and Empire": "Books",
-  "Second Foundation": "Books",
-  "Neuromancer": "Books",
-  "Count Zero": "Books",
-  "Mona Lisa Overdrive": "Books",
-  "The Witcher books": "Books",
-  "Do Androids Dream of Electric Sheep?": "Books",
-  "Story of Your Life": "Books",
+      document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
+      document.getElementById("status-planned").textContent = t().statuses.Planned;
+      document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
+      document.getElementById("status-done").textContent = t().statuses.Done;
+      document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+      document.getElementById("status-cancel").textContent = t().buttons.cancel;
 
-  "Dune (2021)": "Movies",
-  "Dune Part Two": "Movies",
-  "Dune (1984)": "Movies",
-  "Blade Runner": "Movies",
-  "Blade Runner 2049": "Movies",
-  "Arrival": "Movies",
+      document.getElementById("progress-title").textContent = t().labels.progressTitle;
+      document.getElementById("progress-next").textContent = t().buttons.nextWork;
+      document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse;
+      document.getElementById("progress-close").textContent = t().buttons.closeSuggestion;
+    }
 
-  "Foundation TV series": "Series",
-  "Cyberpunk Edgerunners": "Anime",
+    function rerenderCurrentScreen() {
+      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
+        document.getElementById("category-title").textContent = translateCategory(currentCategory);
+        renderShelf();
+      }
 
-  "Dune: Spice Wars": "Games",
-  "Cyberpunk 2077": "Games",
-  "The Witcher 3": "Games",
-  "The Witcher 2": "Games",
+      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
+        openCard(currentOpenTitle);
+      }
+    }
 
-  "Ghost in the Shell": "Anime",
-  "Cowboy Bebop": "Anime",
-  "Cowboy Bebop movie": "Anime",
-  "Monster": "Anime",
-  "Samurai Champloo": "Anime",
-  "Trigun": "Anime",
-  "Berserk anime": "Anime",
+    function translateStatus(status) {
+      return t().statuses[status] || status;
+    }
 
-  "Monster manga": "Manga",
-  "Berserk": "Manga",
-  "Berserk movies": "Manga",
-  "20th Century Boys": "Manga",
-  "21st Century Boys": "Manga",
-  "Pluto": "Manga",
-  "Claymore": "Manga"
-};
+    function translateCategory(category) {
+      return t().categoryNames[category] || category;
+    }
 
-let currentCategory = null;
-let currentStatusIndex = null;
-let currentOpenTitle = null;
+    async function openCategory(name){
+      currentCategory = name;
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+      document.getElementById("category-title").textContent = translateCategory(name);
+      await loadCategoryFromSupabase(name);
+    }
 
-function t() {
-  return translations[currentLanguage];
-}
+    function renderShelf(){
+      const shelf = document.getElementById("shelf");
+      shelf.innerHTML = "";
 
-function setLanguage(lang) {
-  currentLanguage = lang;
-  document.documentElement.lang = lang;
-  applyTranslations();
-  rerenderCurrentScreen();
-}
+      const items = demoData[currentCategory] || [];
 
-function applyTranslations() {
-  document.getElementById("home-subtitle").textContent = t().subtitle;
+      items.forEach((item, index) => {
+        const safeTitle = item.title.replace(/'/g, "\\'");
+        const coverHtml = item.cover
+          ? `<img src="${item.cover}" alt="${item.title}" style="width:100%;height:100%;object-fit:cover;">`
+          : t().labels.cover;
 
-  document.getElementById("cat-books").textContent = t().categories.Books;
-  document.getElementById("cat-movies").textContent = t().categories.Movies;
-  document.getElementById("cat-series").textContent = t().categories.Series;
-  document.getElementById("cat-games").textContent = t().categories.Games;
-  document.getElementById("cat-anime").textContent = t().categories.Anime;
-  document.getElementById("cat-manga").textContent = t().categories.Manga;
-  document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${item.title}</h3>
+            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+            <div class="media-actions">
+              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+            </div>
+          </div>
+        `;
+        shelf.appendChild(card);
+      });
+    }
 
-  document.getElementById("back-home-btn").textContent = t().buttons.backHome;
-  document.getElementById("add-new-btn").textContent = t().buttons.addNew;
-  document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
-  document.getElementById("explore-universe-btn").textContent = t().buttons.exploreUniverse;
-  document.getElementById("cover-label").textContent = t().labels.cover;
-  document.getElementById("description-label").textContent = t().labels.description;
-  document.getElementById("related-label").textContent = t().labels.relatedWorks;
-  document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
+    function hideAllScreens(){
+      document.getElementById("home-screen").classList.add("hidden");
+      document.getElementById("category-screen").classList.add("hidden");
+      document.getElementById("details-screen").classList.add("hidden");
+    }
 
-  document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
-  document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
-  document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
-  document.getElementById("close-search-btn").textContent = t().buttons.close;
+    function goHome(){
+      hideAllScreens();
+      document.getElementById("home-screen").classList.remove("hidden");
+    }
 
-  document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
-  document.getElementById("status-planned").textContent = t().statuses.Planned;
-  document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
-  document.getElementById("status-done").textContent = t().statuses.Done;
-  document.getElementById("status-dropped").textContent = t().statuses.Dropped;
-  document.getElementById("status-cancel").textContent = t().buttons.cancel;
+    function backToCategory(){
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+    }
 
-  document.getElementById("progress-title").textContent = t().labels.progressTitle;
-  document.getElementById("progress-next").textContent = t().buttons.nextWork;
-  document.getElementById("progress-universe").textContent = t().buttons.exploreUniverse;
-  document.getElementById("progress-close").textContent = t().buttons.closeSuggestion;
-}
+    function addNew(){
+      document.getElementById("add-modal").classList.remove("hidden");
+      document.getElementById("search-input").value = "";
+      document.getElementById("search-results").innerHTML = "";
+      currentBookResults = [];
+      document.getElementById("search-input").focus();
+    }
 
-function rerenderCurrentScreen() {
-  if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
-    document.getElementById("category-title").textContent = translateCategory(currentCategory);
-    renderShelf();
-  }
+    function closeAddModal(){
+      document.getElementById("add-modal").classList.add("hidden");
+    }
 
-  if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
-    openCard(currentOpenTitle);
-  }
+    function openManualModal(){
+      document.getElementById("manual-modal").classList.remove("hidden");
+      document.getElementById("manual-name").value = document.getElementById("search-input").value.trim();
+      document.getElementById("manual-creator").value = "";
+      document.getElementById("manual-cover").value = "";
+      document.getElementById("manual-description").value = "";
+      document.getElementById("manual-name").focus();
+    }
 
-  if (!document.getElementById("add-modal").classList.contains("hidden")) {
-    renderSearchResults();
-  }
-}
+    function closeManualModal(){
+      document.getElementById("manual-modal").classList.add("hidden");
+    }
 
-function translateStatus(status) {
-  return t().statuses[status] || status;
-}
+    async function renderSearchResults() {
+      const container = document.getElementById("search-results");
+      const input = document.getElementById("search-input");
 
-function translateCategory(category) {
-  return t().categoryNames[category] || category;
-}
+      if (!container || !input) return;
 
-async function openCategory(name){
-  currentCategory = name;
-  hideAllScreens();
-  document.getElementById("category-screen").classList.remove("hidden");
-  document.getElementById("category-title").textContent = translateCategory(name);
-  await loadCategoryFromSupabase(name);
-}
+      const query = input.value.trim();
+      container.innerHTML = "";
 
-function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  shelf.innerHTML = "";
-
-  const items = demoData[currentCategory] || [];
-
-  items.forEach((item, index) => {
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = `
-      <div class="media-cover">${t().labels.cover}</div>
-      <div class="media-info">
-        <h3 class="media-title">${item.title}</h3>
-        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-        <div class="media-actions">
-          <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-          <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-        </div>
-      </div>
-    `;
-    shelf.appendChild(card);
-  });
-}
-
-function hideAllScreens(){
-  document.getElementById("home-screen").classList.add("hidden");
-  document.getElementById("category-screen").classList.add("hidden");
-  document.getElementById("details-screen").classList.add("hidden");
-}
-
-function goHome(){
-  hideAllScreens();
-  document.getElementById("home-screen").classList.remove("hidden");
-}
-
-function backToCategory(){
-  hideAllScreens();
-  document.getElementById("category-screen").classList.remove("hidden");
-}
-
-function addNew(){
-  document.getElementById("add-modal").classList.remove("hidden");
-  document.getElementById("search-input").value = "";
-  document.getElementById("search-results").innerHTML = "";
-  document.getElementById("search-input").focus();
-}
-
-function closeAddModal(){
-  document.getElementById("add-modal").classList.add("hidden");
-}
-
-async function renderSearchResults(){
-  const container = document.getElementById("search-results");
-  const query = document.getElementById("search-input").value.trim();
-
-  container.innerHTML = "";
-
-  if(!query){
-    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
-    return;
-  }
-
-  if(currentCategory === "Books"){
-    container.innerHTML = <div class="small">Searching...</div>;
-
-    try {
-      const url = "https://www.googleapis.com/books/v1/volumes?q=" + encodeURIComponent(query) + "&maxResults=10";
-      const response = await fetch(url);
-      const data = await response.json();
-      const items = data.items || [];
-
-      if(items.length === 0){
-        container.innerHTML = <div class="small">No books found</div>;
+      if (!query) {
+        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
         return;
       }
 
-      container.innerHTML = "";
+      if (currentCategory === "Books") {
+        container.innerHTML = `<div class="loading">${t().labels.searching}</div>`;
 
-      items.forEach(function(book){
-        const info = book.volumeInfo || {};
-        const title = info.title || "Untitled";
-        const authors = (info.authors || []).join(", ");
-        const safeTitle = title.replace(/'/g, "\\'");
+        try {
+          const url = "https://www.googleapis.com/books/v1/volumes?q=" + encodeURIComponent(query) + "&maxResults=10";
+          const response = await fetch(url);
+          const data = await response.json();
 
-        const row = document.createElement("div");
-        row.className = "search-item";
-        row.innerHTML = 
-          <div>
-            <div class="search-item-title">${title}</div>
-            <div class="search-item-meta">${authors || "Book"}</div>
-          </div>
-          <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-        ;
-        container.appendChild(row);
+          if (!data.items || data.items.length === 0) {
+            currentBookResults = [];
+            container.innerHTML = `
+              <div class="small">${t().labels.noBooksFound}</div>
+              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+              </div>
+            `;
+            return;
+          }
+
+          currentBookResults = data.items;
+          container.innerHTML = "";
+
+          data.items.forEach(function (book, index) {
+            const info = book.volumeInfo || {};
+            const title = info.title || "Untitled";
+            const authors = (info.authors || []).join(", ");
+
+            const row = document.createElement("div");
+            row.className = "search-item";
+            row.innerHTML = `
+              <div class="search-item-left">
+                <div class="search-item-title">${title}</div>
+                <div class="search-item-meta">${authors || "Book"}</div>
+              </div>
+              <button class="button" onclick="addGoogleBookResult(${index})">${t().buttons.add}</button>
+            `;
+            container.appendChild(row);
+          });
+
+          container.insertAdjacentHTML(
+            "beforeend",
+            `
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+            </div>
+            `
+          );
+
+          return;
+        } catch (error) {
+          console.error("Google Books API error:", error);
+          currentBookResults = [];
+          container.innerHTML = `
+            <div class="small">${t().labels.apiError}</div>
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+            </div>
+          `;
+          return;
+        }
+      }
+
+      container.innerHTML = `
+        <div class="small">${t().labels.noResults}</div>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+        </div>
+      `;
+    }
+
+    async function addGoogleBookResult(index){
+      const book = currentBookResults[index];
+      if(!book) return;
+
+      const info = book.volumeInfo || {};
+      const title = info.title || "Untitled";
+      const description = info.description || "";
+      const cover =
+        (info.imageLinks && (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail))
+          ? (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail)
+          : "";
+      const authors = (info.authors || []).join(", ");
+
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+
+      if(exists){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      detailsDatabase[title] = {
+        description: description || "No description available.",
+        related: []
+      };
+
+      const saved = await saveItemToSupabase(title, currentCategory, "Planned", cover, description, authors);
+
+      if(!saved) return;
+
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description
       });
 
-      return;
-    } catch (error) {
-      console.error("Google Books API error:", error);
-      container.innerHTML = <div class="small">API error: ${error.message}</div>;
-      return;
+      closeAddModal();
+      renderShelf();
     }
-  }
 
-  const items = searchDatabase[currentCategory] || [];
+    async function saveManualItem(){
+      const title = document.getElementById("manual-name").value.trim();
+      const creator = document.getElementById("manual-creator").value.trim();
+      const cover = document.getElementById("manual-cover").value.trim();
+      const description = document.getElementById("manual-description").value.trim();
 
-  const filtered = items.filter(function(item){
-    return item.title.toLowerCase().includes(query.toLowerCase());
-  });
-
-  if(filtered.length === 0){
-    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
-    return;
-  }
-
-  filtered.forEach(function(item){
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const row = document.createElement("div");
-    row.className = "search-item";
-    row.innerHTML = 
-      <div>
-        <div class="search-item-title">${item.title}</div>
-        <div class="search-item-meta">${translateCategory(currentCategory)}</div>
-      </div>
-      <button class="button" onclick="addSearchResult('${safeTitle}')">${t().buttons.add}</button>
-    ;
-    container.appendChild(row);
-  });
-}
-
-function changeStatus(index){
-  currentStatusIndex = index;
-  currentOpenTitle = demoData[currentCategory][index].title;
-  document.getElementById("status-modal").classList.remove("hidden");
-}
-
-function changeStatusFromDetails(){
-  const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
-
-  if(index === -1){
-    alert(t().labels.itemNotFound);
-    return;
-  }
-
-  currentStatusIndex = index;
-  document.getElementById("status-modal").classList.remove("hidden");
-}
-
-async function setStatus(status){
-  const item = demoData[currentCategory][currentStatusIndex];
-  const oldStatus = item.status;
-
-  item.status = status;
-  renderShelf();
-  closeStatusModal();
-
-  const updated = await updateStatusInSupabase(item.title, currentCategory, status);
-
-  if(!updated){
-    item.status = oldStatus;
-    renderShelf();
-    alert("Status was not saved to database");
-    return;
-  }
-
-  if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
-    openCard(currentOpenTitle);
-  }
-
-  if(status === "Done"){
-    setTimeout(() => {
-      document.getElementById("progress-modal").classList.remove("hidden");
-    }, 200);
-  }
-}
-
-function closeStatusModal(){
-  document.getElementById("status-modal").classList.add("hidden");
-}
-
-function closeProgressModal(){
-  document.getElementById("progress-modal").classList.add("hidden");
-}
-
-function openCard(title){
-  currentOpenTitle = title;
-
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
-  const details = detailsDatabase[title] || {
-    description: "No detailed description yet. This is a prototype card.",
-    related: []
-  };
-
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
-
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-  document.getElementById("details-description").textContent = details.description;
-
-  const relatedList = document.getElementById("related-list");
-  relatedList.innerHTML = "";
-
-  if(!details.related.length){
-    relatedList.innerHTML = `<div class="muted">${t().labels.noRelated}</div>`;
-    return;
-  }
-
-  details.related.forEach(name => {
-    const safeName = name.replace(/'/g, "\\'");
-    const row = document.createElement("div");
-    row.className = "related-item";
-    row.innerHTML = `
-      <div>${name}</div>
-      <button class="button" onclick="openRelatedPrototype('${safeName}')">${t().buttons.open}</button>
-    `;
-    relatedList.appendChild(row);
-  });
-}
-
-function openRelatedPrototype(title){
-  const category = mediaCategoryMap[title];
-
-  if(!category){
-    alert(t().labels.noCategoryFound);
-    return;
-  }
-
-  currentCategory = category;
-
-  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
-
-  if(!exists){
-    demoData[currentCategory].unshift({
-      title: title,
-      status: "Planned"
-    });
-  }
-
-  openCard(title);
-}
-
-function openUniverse(){
-  alert(t().labels.universeLater);
-}
-
-function openUniverseFromModal(){
-  closeProgressModal();
-  openUniverse();
-}
-
-function openNextWork(){
-  closeProgressModal();
-
-  const nextTitle = nextWorksMap[currentOpenTitle];
-
-  if(!nextTitle){
-    alert("No next work mapped yet.");
-    return;
-  }
-
-  const exists = (demoData[currentCategory] || []).some(item => item.title === nextTitle);
-
-  if(!exists){
-    demoData[currentCategory].unshift({
-      title: nextTitle,
-      status: "Planned"
-    });
-    renderShelf();
-  }
-
-  openCard(nextTitle);
-}
-
-async function saveItemToSupabase(title, category, status){
-  const { error } = await supabaseClient
-    .from("user_media")
-    .insert([
-      {
-        title: title,
-        category: category,
-        status: status
+      if(!title){
+        alert(t().labels.manualNameRequired);
+        return;
       }
-    ]);
 
-  if(error){
-    console.error("Supabase insert error:", error);
-    alert("Error saving item to database: " + error.message);
-    return false;
-  }
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-  return true;
-}
+      if(exists){
+        alert(t().labels.alreadyExists);
+        return;
+      }
 
-async function updateStatusInSupabase(title, category, status){
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update({ status: status })
-    .eq("title", title)
-    .eq("category", category);
+      detailsDatabase[title] = {
+        description: description || "No description available.",
+        related: []
+      };
 
-  if(error){
-    console.error("Supabase update error:", error);
-    alert("Supabase update error: " + error.message);
-    return false;
-  }
+      const saved = await saveItemToSupabase(title, currentCategory, "Planned", cover, description, creator);
 
-  return true;
-}
+      if(!saved) return;
 
-async function loadCategoryFromSupabase(category){
-  const { data, error } = await supabaseClient
-    .from("user_media")
-    .select("*")
-    .eq("category", category);
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description
+      });
 
-  if(error){
-    console.error("Supabase load error:", error);
-    return;
-  }
+      closeManualModal();
+      closeAddModal();
+      renderShelf();
+    }
 
-  demoData[category] = [];
+    function changeStatus(index){
+      currentStatusIndex = index;
+      currentOpenTitle = demoData[currentCategory][index].title;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
 
-  data.forEach(item => {
-    demoData[category].push({
-      title: item.title,
-      status: item.status
-    });
-  });
+    function changeStatusFromDetails(){
+      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
 
-  renderShelf();
-}
+      if(index === -1){
+        alert(t().labels.itemNotFound);
+        return;
+      }
 
-applyTranslations();
-</script>
+      currentStatusIndex = index;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    async function setStatus(status){
+      const item = demoData[currentCategory][currentStatusIndex];
+      const oldStatus = item.status;
+
+      item.status = status;
+      renderShelf();
+      closeStatusModal();
+
+      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+
+      if(!updated){
+        item.status = oldStatus;
+        renderShelf();
+        alert(t().labels.dbStatusNotSaved);
+        return;
+      }
+
+      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+        openCard(currentOpenTitle);
+      }
+
+      if(status === "Done"){
+        setTimeout(() => {
+          document.getElementById("progress-modal").classList.remove("hidden");
+        }, 200);
+      }
+    }
+
+    function closeStatusModal(){
+      document.getElementById("status-modal").classList.add("hidden");
+    }
+
+    function closeProgressModal(){
+      document.getElementById("progress-modal").classList.add("hidden");
+    }
+
+    function openCard(title){
+      currentOpenTitle = title;
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const details = detailsDatabase[title] || {
+        description: item?.description || "No detailed description yet.",
+        related: []
+      };
+
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
+
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-description").textContent = details.description || "No description available.";
+
+      const coverBox = document.getElementById("cover-box");
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
+      }
+
+      const relatedList = document.getElementById("related-list");
+      relatedList.innerHTML = `<div class="muted">${t().labels.noRelated}</div>`;
+    }
+
+    function openUniverse(){
+      alert(t().labels.universeLater);
+    }
+
+    function openUniverseFromModal(){
+      closeProgressModal();
+      openUniverse();
+    }
+
+    function openNextWork(){
+      closeProgressModal();
+
+      const nextTitle = nextWorksMap[currentOpenTitle];
+
+      if(!nextTitle){
+        alert(t().labels.noNextWork);
+        return;
+      }
+
+      const exists = (demoData[currentCategory] || []).some(item => item.title === nextTitle);
+
+      if(!exists){
+        demoData[currentCategory].unshift({
+          title: nextTitle,
+          status: "Planned"
+        });
+        renderShelf();
+      }
+
+      openCard(nextTitle);
+    }
+
+    async function saveItemToSupabase(title, category, status, cover = "", description = "", creator = ""){
+      const { error } = await supabaseClient
+        .from("user_media")
+        .insert([
+          {
+            title: title,
+            category: category,
+            status: status,
+            cover_url: cover,
+            description: description,
+            creator: creator
+          }
+        ]);
+
+      if(error){
+        console.error("Supabase insert error:", error);
+        alert(t().labels.dbSaveError + ": " + error.message);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function updateStatusInSupabase(title, category, status){
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({ status: status })
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase update error:", error);
+        alert(t().labels.dbUpdateError + ": " + error.message);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function loadCategoryFromSupabase(category){
+      const { data, error } = await supabaseClient
+        .from("user_media")
+        .select("*")
+        .eq("category", category)
+        .order("id", { ascending: false });
+
+      if(error){
+        console.error("Supabase load error:", error);
+        return;
+      }
+
+      demoData[category] = [];
+
+      data.forEach(item => {
+        demoData[category].push({
+          title: item.title,
+          status: item.status,
+          cover: item.cover_url || "",
+          description: item.description || ""
+        });
+
+        detailsDatabase[item.title] = {
+          description: item.description || "No description available.",
+          related: []
+        };
+      });
+
+      renderShelf();
+    }
+
+    applyTranslations();
+  </script>
 
 </body>
 </html>
