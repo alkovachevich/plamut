@@ -820,77 +820,112 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function addOpenLibraryBookResult(index){
-      const book = currentBookResults[index];
-      if(!book) return;
+  const book = currentBookResults[index];
+  if(!book) return;
 
-      const title = book.title || "Untitled";
-      const description = "";
-      const cover = getOpenLibraryCoverUrl(book.cover_i);
-      const authors = (book.author_name || []).join(", ");
+  const title = book.title || "Untitled";
+  const description = "";
+  const cover = getOpenLibraryCoverUrl(book.cover_i);
+  const authors = (book.author_name || []).join(", ");
 
-      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+  const workKey = book.key || "";
+  const editionKey = Array.isArray(book.edition_key) && book.edition_key.length > 0
+    ? book.edition_key[0]
+    : "";
 
-      if(exists){
-        alert(t().labels.alreadyExists);
-        return;
-      }
+  const exists = (demoData[currentCategory] || []).some(item =>
+    item.title === title
+  );
 
-      detailsDatabase[title] = {
-        description: description || "No description available."
-      };
+  if(exists){
+    alert(t().labels.alreadyExists);
+    return;
+  }
 
-      const saved = await saveItemToSupabase(title, currentCategory, "Planned", cover, description, authors);
+  detailsDatabase[title] = {
+    description: description || "No description available."
+  };
 
-      if(!saved) return;
+  const saved = await saveItemToSupabase(
+    title,
+    currentCategory,
+    "Planned",
+    cover,
+    description,
+    authors,
+    workKey,
+    editionKey,
+    "open_library"
+  );
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description
-      });
+  if(!saved) return;
 
-      closeAddModal();
-      renderShelf();
-    }
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned",
+    cover: cover,
+    description: description,
+    work_key: workKey,
+    edition_key: editionKey,
+    source: "open_library"
+  });
+
+  closeAddModal();
+  renderShelf();
+}
+
 
     async function saveManualItem(){
-      const title = document.getElementById("manual-name").value.trim();
-      const creator = document.getElementById("manual-creator").value.trim();
-      const cover = document.getElementById("manual-cover").value.trim();
-      const description = document.getElementById("manual-description").value.trim();
+  const title = document.getElementById("manual-name").value.trim();
+  const creator = document.getElementById("manual-creator").value.trim();
+  const cover = document.getElementById("manual-cover").value.trim();
+  const description = document.getElementById("manual-description").value.trim();
 
-      if(!title){
-        alert(t().labels.manualNameRequired);
-        return;
-      }
+  if(!title){
+    alert(t().labels.manualNameRequired);
+    return;
+  }
 
-      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-      if(exists){
-        alert(t().labels.alreadyExists);
-        return;
-      }
+  if(exists){
+    alert(t().labels.alreadyExists);
+    return;
+  }
 
-      detailsDatabase[title] = {
-        description: description || "No description available."
-      };
+  detailsDatabase[title] = {
+    description: description || "No description available."
+  };
 
-      const saved = await saveItemToSupabase(title, currentCategory, "Planned", cover, description, creator);
+  const saved = await saveItemToSupabase(
+    title,
+    currentCategory,
+    "Planned",
+    cover,
+    description,
+    creator,
+    "",
+    "",
+    "manual"
+  );
 
-      if(!saved) return;
+  if(!saved) return;
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description
-      });
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned",
+    cover: cover,
+    description: description,
+    work_key: "",
+    edition_key: "",
+    source: "manual"
+  });
 
-      closeManualModal();
-      closeAddModal();
-      renderShelf();
-    }
+  closeManualModal();
+  closeAddModal();
+  renderShelf();
+}
+
 
     function changeStatus(index){
       currentStatusIndex = index;
@@ -960,28 +995,42 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
       }
     }
 
-    async function saveItemToSupabase(title, category, status, cover = "", description = "", creator = ""){
-      const { error } = await supabaseClient
-        .from("user_media")
-        .insert([
-          {
-            title: title,
-            category: category,
-            status: status,
-            cover_url: cover,
-            description: description,
-            creator: creator
-          }
-        ]);
-
-      if(error){
-        console.error("Supabase insert error:", error);
-        alert(t().labels.dbSaveError + ": " + error.message);
-        return false;
+    async function saveItemToSupabase(
+  title,
+  category,
+  status,
+  cover = "",
+  description = "",
+  creator = "",
+  workKey = "",
+  editionKey = "",
+  source = "manual"
+){
+  const { error } = await supabaseClient
+    .from("user_media")
+    .insert([
+      {
+        title: title,
+        category: category,
+        status: status,
+        cover_url: cover,
+        description: description,
+        creator: creator,
+        work_key: workKey,
+        edition_key: editionKey,
+        source: source
       }
+    ]);
 
-      return true;
-    }
+  if(error){
+    console.error("Supabase insert error:", error);
+    alert(t().labels.dbSaveError + ": " + error.message);
+    return false;
+  }
+
+  return true;
+}
+
 
     async function updateStatusInSupabase(title, category, status){
       const { error } = await supabaseClient
@@ -1000,34 +1049,38 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function loadCategoryFromSupabase(category){
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("*")
-        .eq("category", category)
-        .order("id", { ascending: false });
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("category", category)
+    .order("id", { ascending: false });
 
-      if(error){
-        console.error("Supabase load error:", error);
-        return;
-      }
+  if(error){
+    console.error("Supabase load error:", error);
+    return;
+  }
 
-      demoData[category] = [];
+  demoData[category] = [];
 
-      data.forEach(item => {
-        demoData[category].push({
-          title: item.title,
-          status: item.status,
-          cover: item.cover_url || "",
-          description: item.description || ""
-        });
+  data.forEach(item => {
+    demoData[category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      work_key: item.work_key || "",
+      edition_key: item.edition_key || "",
+      source: item.source || "manual"
+    });
 
-        detailsDatabase[item.title] = {
-          description: item.description || "No description available."
-        };
-      });
+    detailsDatabase[item.title] = {
+      description: item.description || "No description available."
+    };
+  });
 
-      renderShelf();
-    }
+  renderShelf();
+}
+
 
     applyTranslations();
   </script>
