@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body{
+      font-family: Arial, sans-serif;
+      background:#111;
+      color:white;
+      margin:0;
+      padding:30px;
+    }
+
+    h1,h2,h3{
+      margin-top:0;
+    }
+
+    .subtitle{
+      color:#888;
+      margin-bottom:30px;
+    }
+
+    .hidden{
+      display:none !important;
+    }
+
+    .top-right{
+      display:flex;
+      justify-content:flex-end;
+      margin-bottom:20px;
+    }
+
+    .lang-switch{
+      display:flex;
+      gap:8px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:20px;
+      max-width:1000px;
+    }
+
+    .card{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:14px;
+      padding:20px;
+      text-align:center;
+      cursor:pointer;
+      transition:.2s;
+    }
+
+    .card:hover{
+      background:#222;
+    }
+
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-bottom:24px;
+      flex-wrap:wrap;
+    }
+
+    .button{
+      background:#2a2a2a;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:10px 14px;
+      cursor:pointer;
+    }
+
+    .button:hover{
+      background:#333;
+    }
+
+    .shelf{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:18px;
+      max-width:1100px;
+    }
+
+    .media-card{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:14px;
+      overflow:hidden;
+    }
+
+    .media-cover{
+      height:220px;
+      background:#2b2b2b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#999;
+      font-size:14px;
+    }
+
+    .media-cover img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+
+    .media-info{
+      padding:14px;
+    }
+
+    .media-title{
+      font-size:16px;
+      margin:0 0 8px 0;
+    }
+
+    .media-meta{
+      font-size:13px;
+      color:#aaa;
+      margin-bottom:8px;
+    }
+
+    .media-status{
+      font-size:13px;
+      color:#aaa;
+      margin-bottom:12px;
+    }
+
+    .media-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .add-btn{
+      background:#3a3a3a;
+      color:white;
+      border:none;
+      border-radius:8px;
+      padding:8px 10px;
+      cursor:pointer;
+    }
+
+    .add-btn:hover{
+      background:#4a4a4a;
+    }
+
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.7);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      z-index:1000;
+    }
+
+    .modal-box{
+      width:100%;
+      max-width:560px;
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      padding:20px;
+      max-height:85vh;
+      overflow:auto;
+    }
+
+    .input,
+    .textarea{
+      width:100%;
+      box-sizing:border-box;
+      background:#111;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:12px;
+      margin-bottom:12px;
+      font:inherit;
+    }
+
+    .textarea{
+      min-height:120px;
+      resize:vertical;
+    }
+
+    .modal-actions{
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      margin-top:8px;
+      flex-wrap:wrap;
+    }
+
+    .small{
+      color:#888;
+      font-size:13px;
+      margin-bottom:14px;
+    }
+
+    .search-item{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      border:1px solid #333;
+      border-radius:10px;
+      margin-bottom:10px;
+      background:#141414;
+    }
+
+    .search-item-left{
+      min-width:0;
+    }
+
+    .search-item-title{
+      font-size:14px;
+      word-break:break-word;
+    }
+
+    .search-item-meta{
+      font-size:12px;
+      color:#888;
+      margin-top:4px;
+      word-break:break-word;
+    }
+
+    .details-layout{
+      display:grid;
+      grid-template-columns:minmax(220px, 280px) 1fr;
+      gap:24px;
+      max-width:1100px;
+    }
+
+    .details-cover{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      overflow:hidden;
+    }
+
+    .details-cover-box{
+      height:380px;
+      background:#2b2b2b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#999;
+    }
+
+    .details-cover-box img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+
+    .details-panel{
+      background:#1a1a1a;
+      border:1px solid #333;
+      border-radius:16px;
+      padding:20px;
+    }
+
+    .badge{
+      display:inline-block;
+      padding:6px 10px;
+      border:1px solid #444;
+      border-radius:999px;
+      color:#bbb;
+      font-size:12px;
+      margin-right:8px;
+      margin-bottom:8px;
+    }
+
+    .section{
+      margin-top:24px;
+    }
+
+    .muted{
+      color:#999;
+    }
+
+    @media (max-width: 800px){
+      .details-layout{
+        grid-template-columns:1fr;
+      }
+
+      .details-cover-box{
+        height:260px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="top-right">
+    <div class="lang-switch">
+      <button class="button" onclick="setLanguage('en')">EN</button>
+      <button class="button" onclick="setLanguage('ru')">RU</button>
+    </div>
+  </div>
+
+  <div id="home-screen">
+    <h1>Plamut</h1>
+    <div class="subtitle" id="home-subtitle"></div>
+
+    <div class="grid">
+      <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
+      <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
+      <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
+      <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
+      <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
+      <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+    </div>
+  </div>
+
+  <div id="category-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="goHome()" id="back-home-btn"></button>
+      <h2 id="category-title" style="margin:0;"></h2>
+      <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
+    </div>
+
+    <div class="shelf" id="shelf"></div>
+  </div>
+
+  <div id="details-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="backToCategory()" id="back-shelf-btn"></button>
+    </div>
+
+    <div class="details-layout">
+      <div class="details-cover">
+        <div class="details-cover-box" id="details-cover-box"></div>
+      </div>
+
+      <div class="details-panel">
+        <h2 id="details-title"></h2>
+        <div class="muted" id="details-creator" style="margin-bottom:10px;"></div>
+
+        <div>
+          <span class="badge" id="details-category"></span>
+          <span class="badge" id="details-status"></span>
+        </div>
+
+        <div class="section">
+          <h3 id="description-label"></h3>
+          <div class="muted" id="details-description"></div>
+        </div>
+
+        <div class="section">
+          <button class="button" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="add-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="search-modal-title"></h3>
+      <div class="small" id="search-modal-subtitle"></div>
+
+      <input
+        id="search-input"
+        class="input"
+        type="text"
+        oninput="renderSearchResults()"
+      >
+
+      <div id="search-results"></div>
+
+      <div class="modal-actions">
+        <button class="button" onclick="openManualModal()" id="manual-add-btn"></button>
+        <button class="button" onclick="closeAddModal()" id="close-search-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="manual-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="manual-title"></h3>
+      <div class="small" id="manual-subtitle"></div>
+
+      <input id="manual-name" class="input" type="text">
+      <input id="manual-creator" class="input" type="text">
+      <input id="manual-cover" class="input" type="text">
+      <textarea id="manual-description" class="textarea"></textarea>
+
+      <div class="modal-actions">
+        <button class="button" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+        <button class="button" onclick="saveManualItem()" id="manual-save-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="status-modal-title"></h3>
+
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch">
+        <button class="button" onclick="setStatus('Planned')" id="status-planned"></button>
+        <button class="button" onclick="setStatus('In progress')" id="status-in-progress"></button>
+        <button class="button" onclick="setStatus('Done')" id="status-done"></button>
+        <button class="button" onclick="setStatus('Dropped')" id="status-dropped"></button>
+        <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
+
+    const supabaseClient = supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
+
+    const translations = {
+      en: {
+        subtitle: "Personal Library and Media Universe Tracker",
+        categories: {
+          Books: "📚 Books",
+          Movies: "🎬 Movies",
+          Series: "📺 Series",
+          Anime: "🍥 Anime",
+          Manga: "📖 Manga",
+          Blacklist: "🚫 Blacklist"
+        },
+        buttons: {
+          backHome: "← Back",
+          addNew: "+ Add new",
+          backShelf: "← Back to shelf",
+          close: "Close",
+          changeStatus: "Change status",
+          open: "Open",
+          add: "Add",
+          cancel: "Cancel",
+          manualAdd: "Add manually",
+          save: "Save"
+        },
+        modals: {
+          searchTitle: "Search and add",
+          searchSubtitle: "Books use Open Library API. Other categories can be added manually.",
+          searchPlaceholder: "Enter title",
+          statusTitle: "Select status",
+          manualTitle: "Add manually",
+          manualSubtitle: "Use this when search does not find what you need."
+        },
+        labels: {
+          cover: "Cover",
+          description: "Description",
+          noResults: "No results found",
+          alreadyExists: "This item is already on the shelf.",
+          itemNotFound: "Item not found on shelf.",
+          statusLabel: "Status",
+          searching: "Searching...",
+          noBooksFound: "No books found",
+          apiError: "API error",
+          dbSaveError: "Error saving item to database",
+          dbUpdateError: "Supabase update error",
+          dbStatusNotSaved: "Status was not saved to database",
+          name: "Title",
+          creator: "Author / Director / Studio",
+          coverUrl: "Cover URL",
+          descriptionPlaceholder: "Description",
+          manualNameRequired: "Title is required",
+          noDescription: "No description available."
+        },
+        statuses: {
+          Planned: "Planned",
+          "In progress": "In progress",
+          Done: "Done",
+          Dropped: "Dropped",
+          Info: "Info"
+        },
+        categoryNames: {
+          Books: "Books",
+          Movies: "Movies",
+          Series: "Series",
+          Anime: "Anime",
+          Manga: "Manga",
+          Blacklist: "Blacklist"
+        }
+      },
+      ru: {
+        subtitle: "Персональная библиотека и трекер медиа-вселенных",
+        categories: {
+          Books: "📚 Книги",
+          Movies: "🎬 Фильмы",
+          Series: "📺 Сериалы",
+          Anime: "🍥 Аниме",
+          Manga: "📖 Манга",
+          Blacklist: "🚫 Чёрный список"
+        },
+        buttons: {
+          backHome: "← Назад",
+          addNew: "+ Добавить",
+          backShelf: "← Назад к полке",
+          close: "Закрыть",
+          changeStatus: "Изменить статус",
+          open: "Открыть",
+          add: "Добавить",
+          cancel: "Отмена",
+          manualAdd: "Добавить вручную",
+          save: "Сохранить"
+        },
+        modals: {
+          searchTitle: "Поиск и добавление",
+          searchSubtitle: "Для книг используется Open Library API. Остальные категории можно добавлять вручную.",
+          searchPlaceholder: "Введите название",
+          statusTitle: "Выберите статус",
+          manualTitle: "Добавить вручную",
+          manualSubtitle: "Используйте это, если поиск не нашёл нужное произведение."
+        },
+        labels: {
+          cover: "Обложка",
+          description: "Описание",
+          noResults: "Ничего не найдено",
+          alreadyExists: "Это произведение уже есть на полке.",
+          itemNotFound: "Произведение не найдено на полке.",
+          statusLabel: "Статус",
+          searching: "Поиск...",
+          noBooksFound: "Книги не найдены",
+          apiError: "Ошибка API",
+          dbSaveError: "Ошибка сохранения в базу данных",
+          dbUpdateError: "Ошибка обновления Supabase",
+          dbStatusNotSaved: "Статус не был сохранён в базу",
+          name: "Название",
+          creator: "Автор / Режиссёр / Студия",
+          coverUrl: "Ссылка на обложку",
+          descriptionPlaceholder: "Описание",
+          manualNameRequired: "Название обязательно",
+          noDescription: "Описание отсутствует."
+        },
+        statuses: {
+          Planned: "Запланировано",
+          "In progress": "В процессе",
+          Done: "Завершено",
+          Dropped: "Брошено",
+          Info: "Инфо"
+        },
+        categoryNames: {
+          Books: "Книги",
+          Movies: "Фильмы",
+          Series: "Сериалы",
+          Anime: "Аниме",
+          Manga: "Манга",
+          Blacklist: "Чёрный список"
+        }
+      }
+    };
+
+    let currentLanguage = "en";
+    let currentCategory = null;
+    let currentStatusIndex = null;
+    let currentOpenTitle = null;
+    let currentBookResults = [];
+
+    const demoData = {
+      Books: [],
+      Movies: [],
+      Series: [],
+      Anime: [],
+      Manga: [],
+      Blacklist: []
+    };
+
+    const detailsDatabase = {};
+
+    function t() {
+      return translations[currentLanguage];
+    }
+
+    function setLanguage(lang) {
+      currentLanguage = lang;
+      document.documentElement.lang = lang;
+      applyTranslations();
+      rerenderCurrentScreen();
+    }
+
+    function applyTranslations() {
+      document.getElementById("home-subtitle").textContent = t().subtitle;
+
+      document.getElementById("cat-books").textContent = t().categories.Books;
+      document.getElementById("cat-movies").textContent = t().categories.Movies;
+      document.getElementById("cat-series").textContent = t().categories.Series;
+      document.getElementById("cat-anime").textContent = t().categories.Anime;
+      document.getElementById("cat-manga").textContent = t().categories.Manga;
+      document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+
+      document.getElementById("back-home-btn").textContent = t().buttons.backHome;
+      document.getElementById("add-new-btn").textContent = t().buttons.addNew;
+      document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
+      document.getElementById("description-label").textContent = t().labels.description;
+      document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
+
+      document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
+      document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
+      document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
+      document.getElementById("close-search-btn").textContent = t().buttons.close;
+      document.getElementById("manual-add-btn").textContent = t().buttons.manualAdd;
+
+      document.getElementById("manual-title").textContent = t().modals.manualTitle;
+      document.getElementById("manual-subtitle").textContent = t().modals.manualSubtitle;
+      document.getElementById("manual-name").placeholder = t().labels.name;
+      document.getElementById("manual-creator").placeholder = t().labels.creator;
+      document.getElementById("manual-cover").placeholder = t().labels.coverUrl;
+      document.getElementById("manual-description").placeholder = t().labels.descriptionPlaceholder;
+      document.getElementById("manual-cancel-btn").textContent = t().buttons.cancel;
+      document.getElementById("manual-save-btn").textContent = t().buttons.save;
+
+      document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
+      document.getElementById("status-planned").textContent = t().statuses.Planned;
+      document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
+      document.getElementById("status-done").textContent = t().statuses.Done;
+      document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+      document.getElementById("status-cancel").textContent = t().buttons.cancel;
+    }
+
+    function rerenderCurrentScreen() {
+      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
+        document.getElementById("category-title").textContent = translateCategory(currentCategory);
+        renderShelf();
+      }
+
+      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
+        openCard(currentOpenTitle);
+      }
+    }
+
+    function translateStatus(status) {
+      return t().statuses[status] || status;
+    }
+
+    function translateCategory(category) {
+      return t().categoryNames[category] || category;
+    }
+
+    function getOpenLibraryCoverUrl(coverId){
+      if(!coverId) return "";
+      return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
+    }
+
+    async function openCategory(name){
+      currentCategory = name;
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+      document.getElementById("category-title").textContent = translateCategory(name);
+      await loadCategoryFromSupabase(name);
+    }
+
+    function renderShelf(){
+      const shelf = document.getElementById("shelf");
+      shelf.innerHTML = "";
+
+      const items = demoData[currentCategory] || [];
+
+      items.forEach((item, index) => {
+        const safeTitle = item.title.replace(/'/g, "\\'");
+        const coverHtml = item.cover
+          ? `<img src="${item.cover}" alt="${item.title}">`
+          : t().labels.cover;
+
+        const creatorLine = item.creator
+          ? `<div class="media-meta">${item.creator}</div>`
+          : "";
+
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${item.title}</h3>
+            ${creatorLine}
+            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+            <div class="media-actions">
+              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+            </div>
+          </div>
+        `;
+        shelf.appendChild(card);
+      });
+    }
+
+    function hideAllScreens(){
+      document.getElementById("home-screen").classList.add("hidden");
+      document.getElementById("category-screen").classList.add("hidden");
+      document.getElementById("details-screen").classList.add("hidden");
+    }
+
+    function goHome(){
+      hideAllScreens();
+      document.getElementById("home-screen").classList.remove("hidden");
+    }
+
+    function backToCategory(){
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+    }
+
+    function openAddModal(){
+      document.getElementById("add-modal").classList.remove("hidden");
+      document.getElementById("search-input").value = "";
+      document.getElementById("search-results").innerHTML = "";
+      currentBookResults = [];
+      document.getElementById("search-input").focus();
+    }
+
+    function closeAddModal(){
+      document.getElementById("add-modal").classList.add("hidden");
+    }
+
+    function openManualModal(){
+      document.getElementById("manual-modal").classList.remove("hidden");
+      document.getElementById("manual-name").value = document.getElementById("search-input").value.trim();
+      document.getElementById("manual-creator").value = "";
+      document.getElementById("manual-cover").value = "";
+      document.getElementById("manual-description").value = "";
+      document.getElementById("manual-name").focus();
+    }
+
+    function closeManualModal(){
+      document.getElementById("manual-modal").classList.add("hidden");
+    }
+
+    async function renderSearchResults() {
+      const container = document.getElementById("search-results");
+      const input = document.getElementById("search-input");
+
+      if (!container || !input) return;
+
+      const query = input.value.trim();
+      container.innerHTML = "";
+
+      if (!query) {
+        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+        return;
+      }
+
+      if (currentCategory === "Books") {
+        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
+
+        try {
+          let items = [];
+
+          const url1 =
+            "https://openlibrary.org/search.json?title=" +
+            encodeURIComponent(query) +
+            "&lang=" + encodeURIComponent(currentLanguage) +
+            "&limit=10";
+
+          const response1 = await fetch(url1);
+          const data1 = await response1.json();
+          items = data1.docs || [];
+
+          if (items.length === 0) {
+            const url2 =
+              "https://openlibrary.org/search.json?q=" +
+              encodeURIComponent(query) +
+              "&lang=" + encodeURIComponent(currentLanguage) +
+              "&limit=10";
+
+            const response2 = await fetch(url2);
+            const data2 = await response2.json();
+            items = data2.docs || [];
+          }
+
+          if (items.length === 0) {
+            currentBookResults = [];
+            container.innerHTML = `
+              <div class="small">${t().labels.noBooksFound}</div>
+              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+              </div>
+            `;
+            return;
+          }
+
+          currentBookResults = items;
+          container.innerHTML = "";
+
+          items.forEach(function (book, index) {
+            const title = book.title || "Untitled";
+            const authors = (book.author_name || []).join(", ");
+            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+
+            const row = document.createElement("div");
+            row.className = "search-item";
+            row.innerHTML = `
+              <div class="search-item-left">
+                <div class="search-item-title">${title}</div>
+                <div class="search-item-meta">${authors || "Book"}${year}</div>
+              </div>
+              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+            `;
+            container.appendChild(row);
+          });
+
+          return;
+        } catch (error) {
+          console.error("Open Library API error:", error);
+          currentBookResults = [];
+          container.innerHTML = `
+            <div class="small">${t().labels.apiError}</div>
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+            </div>
+          `;
+          return;
+        }
+      }
+
+      container.innerHTML = `
+        <div class="small">${t().labels.noResults}</div>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+        </div>
+      `;
+    }
+    
+async function fetchOpenLibraryDescription(workKey){
+  if(!workKey) return "";
+
+  try {
+   const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
+    const url = "https://openlibrary.org" + cleanKey + ".json";
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if(typeof data.description === "string"){
+      return data.description;
+    }
+
+    if(data.description && typeof data.description.value === "string"){
+      return data.description.value;
+    }
+
+    return "";
+  } catch (error) {
+    console.error("Open Library description error:", error);
+    return "";
+  }
+}
+    
+    async function addOpenLibraryBookResult(index){
+  const book = currentBookResults[index];
+  if(!book) return;
+
+  const title = book.title || "Untitled";
+  const cover = getOpenLibraryCoverUrl(book.cover_i);
+  const authors = (book.author_name || []).join(", ");
+  const workKey = book.key || "";
+  const description = await fetchOpenLibraryDescription(workKey);
+
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+
+  if(exists){
+    alert(t().labels.alreadyExists);
+    return;
+  }
+
+  detailsDatabase[title] = {
+    description: description || t().labels.noDescription
+  };
+
+  const saved = await saveItemToSupabase(
+    title,
+    currentCategory,
+    "Planned",
+    cover,
+    description,
+    authors,
+    workKey
+  );
+
+  if(!saved) return;
+
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned",
+    cover: cover,
+    description: description,
+    creator: authors,
+    work_key: workKey
+  });
+
+  closeAddModal();
+  renderShelf();
+}
+
+    async function saveManualItem(){
+      const title = document.getElementById("manual-name").value.trim();
+      const creator = document.getElementById("manual-creator").value.trim();
+      const cover = document.getElementById("manual-cover").value.trim();
+      const description = document.getElementById("manual-description").value.trim();
+
+      if(!title){
+        alert(t().labels.manualNameRequired);
+        return;
+      }
+
+      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+
+      if(exists){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      detailsDatabase[title] = {
+        description: description || t().labels.noDescription
+      };
+
+      const saved = await saveItemToSupabase(
+        title,
+        currentCategory,
+        "Planned",
+        cover,
+        description,
+        creator
+      );
+
+      if(!saved) return;
+
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description,
+        creator: creator
+      });
+
+      closeManualModal();
+      closeAddModal();
+      renderShelf();
+    }
+
+    function changeStatus(index){
+      currentStatusIndex = index;
+      currentOpenTitle = demoData[currentCategory][index].title;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    function changeStatusFromDetails(){
+      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
+
+      if(index === -1){
+        alert(t().labels.itemNotFound);
+        return;
+      }
+
+      currentStatusIndex = index;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    async function setStatus(status){
+      const item = demoData[currentCategory][currentStatusIndex];
+      const oldStatus = item.status;
+
+      item.status = status;
+      renderShelf();
+      closeStatusModal();
+
+      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+
+      if(!updated){
+        item.status = oldStatus;
+        renderShelf();
+        alert(t().labels.dbStatusNotSaved);
+        return;
+      }
+
+      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+        openCard(currentOpenTitle);
+      }
+    }
+
+    function closeStatusModal(){
+      document.getElementById("status-modal").classList.add("hidden");
+    }
+
+    function openCard(title){
+      currentOpenTitle = title;
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const details = detailsDatabase[title] || {
+        description: item?.description || t().labels.noDescription
+      };
+
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
+
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-description").textContent = details.description || t().labels.noDescription;
+
+      const coverBox = document.getElementById("details-cover-box");
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
+      }
+    }
+
+    async function saveItemToSupabase(
+  title,
+  category,
+  status,
+  cover = "",
+  description = "",
+  creator = "",
+  workKey = ""
+){
+  const { error } = await supabaseClient
+    .from("user_media")
+    .insert([
+      {
+        title: title,
+        category: category,
+        status: status,
+        cover_url: cover,
+        description: description,
+        creator: creator,
+        work_key: workKey
+      }
+    ]);
+
+  if(error){
+    console.error("Supabase insert error:", error);
+    alert(t().labels.dbSaveError + ": " + error.message);
+    return false;
+  }
+
+  return true;
+}
+
+    async function updateStatusInSupabase(title, category, status){
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({ status: status })
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase update error:", error);
+        alert(t().labels.dbUpdateError + ": " + error.message);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function loadCategoryFromSupabase(category){
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("category", category)
+    .order("id", { ascending: false });
+
+  if(error){
+    console.error("Supabase load error:", error);
+    return;
+  }
+
+  demoData[category] = [];
+
+  data.forEach(item => {
+    demoData[category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      creator: item.creator || "",
+      work_key: item.work_key || ""
+    });
+
+    detailsDatabase[item.title] = {
+      description: item.description || t().labels.noDescription
+    };
+  });
+
+  renderShelf();
+}
+
+    applyTranslations();
+  </script>
+
+</body>
+</html>
