@@ -944,41 +944,6 @@ async function fetchOpenLibraryDescription(workKey){
   renderShelf();
 }
 
-    function isDuplicateItem(category, title, workKey = ""){
-  const items = demoData[category] || [];
-
-  return items.some(item => {
-    if(workKey && item.work_key && item.work_key === workKey){
-      return true;
-    }
-
-    return item.title.trim().toLowerCase() === title.trim().toLowerCase();
-  });
-}
-
-    async function existsInSupabase(category, title, workKey = ""){
-  let query = supabaseClient
-    .from("user_media")
-    .select("id, title, work_key")
-    .eq("category", category)
-    .limit(10);
-
-  if(workKey){
-    query = query.eq("work_key", workKey);
-  } else {
-    query = query.ilike("title", title);
-  }
-
-  const { data, error } = await query;
-
-  if(error){
-    console.error("Supabase duplicate check error:", error);
-    return false;
-  }
-
-  return Array.isArray(data) && data.length > 0;
-}
-    
    async function saveManualItem(){
   const title = document.getElementById("manual-name").value.trim();
   const creator = document.getElementById("manual-creator").value.trim();
