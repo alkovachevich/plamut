@@ -836,7 +836,7 @@ async function fetchOpenLibraryDescription(workKey){
   if(!workKey) return "";
 
   try {
-   const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
+   const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
     const url = "https://openlibrary.org" + cleanKey + ".json";
 
     const response = await fetch(url);
