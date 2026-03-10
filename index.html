@@ -831,7 +831,30 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
         </div>
       `;
     }
+async function fetchOpenLibraryDescription(workKey){
+  if(!workKey) return "";
 
+  try {
+    const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
+    const url = "https://openlibrary.org" + cleanKey + ".json";
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if(typeof data.description === "string"){
+      return data.description;
+    }
+
+    if(data.description && typeof data.description.value === "string"){
+      return data.description.value;
+    }
+
+    return "";
+  } catch (error) {
+    console.error("Open Library description error:", error);
+    return "";
+  }
+}
     async function addOpenLibraryBookResult(index){
   const book = currentBookResults[index];
   if(!book) return;
@@ -839,7 +862,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
   const title = book.title || "Untitled";
   const cover = getOpenLibraryCoverUrl(book.cover_i);
   const authors = (book.author_name || []).join(", ");
-
   const workKey = book.key || "";
   const description = await fetchOpenLibraryDescription(workKey);
 
@@ -860,7 +882,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     "Planned",
     cover,
     description,
-    authors
+    authors,
+    workKey
   );
 
   if(!saved) return;
@@ -877,7 +900,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
   closeAddModal();
   renderShelf();
 }
-
 
     async function saveManualItem(){
       const title = document.getElementById("manual-name").value.trim();
@@ -968,30 +990,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
     }
-async function fetchOpenLibraryDescription(workKey){
-  if(!workKey) return "";
 
-  try {
-    const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
-    const url = "https://openlibrary.org" + cleanKey + ".json";
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if(typeof data.description === "string"){
-      return data.description;
-    }
-
-    if(data.description && typeof data.description.value === "string"){
-      return data.description.value;
-    }
-
-    return "";
-  } catch (error) {
-    console.error("Open Library description error:", error);
-    return "";
-  }
-}
     function openCard(title){
       currentOpenTitle = title;
 
@@ -1017,28 +1016,37 @@ async function fetchOpenLibraryDescription(workKey){
       }
     }
 
-    async function saveItemToSupabase(title, category, status, cover = "", description = "", creator = ""){
-      const { error } = await supabaseClient
-        .from("user_media")
-        .insert([
-          {
-            title: title,
-            category: category,
-            status: status,
-            cover_url: cover,
-            description: description,
-            creator: creator
-          }
-        ]);
-
-      if(error){
-        console.error("Supabase insert error:", error);
-        alert(t().labels.dbSaveError + ": " + error.message);
-        return false;
+    async function saveItemToSupabase(
+  title,
+  category,
+  status,
+  cover = "",
+  description = "",
+  creator = "",
+  workKey = ""
+){
+  const { error } = await supabaseClient
+    .from("user_media")
+    .insert([
+      {
+        title: title,
+        category: category,
+        status: status,
+        cover_url: cover,
+        description: description,
+        creator: creator,
+        work_key: workKey
       }
+    ]);
 
-      return true;
-    }
+  if(error){
+    console.error("Supabase insert error:", error);
+    alert(t().labels.dbSaveError + ": " + error.message);
+    return false;
+  }
+
+  return true;
+}
 
     async function updateStatusInSupabase(title, category, status){
       const { error } = await supabaseClient
