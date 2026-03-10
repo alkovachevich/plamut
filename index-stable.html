@@ -992,8 +992,23 @@ async function fetchOpenLibraryDescription(workKey){
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
     }
+    
+async function updateDescriptionInSupabase(title, category, description){
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update({ description: description })
+    .eq("title", title)
+    .eq("category", category);
 
-    function openCard(title){
+  if(error){
+    console.error("Supabase description update error:", error);
+    return false;
+  }
+
+  return true;
+}
+    
+    async function openCard(title){
       currentOpenTitle = title;
 
       const item = (demoData[currentCategory] || []).find(x => x.title === title);
