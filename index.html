@@ -1144,8 +1144,8 @@ async function updateDescriptionInSupabase(title, category, description){
 
   data.forEach(item => {
     const dedupeKey = item.work_key
-      ? work:${item.work_key}
-      : title:${item.title.trim().toLowerCase()};
+      ? `work:${item.work_key}`
+      : `title:${item.title.trim().toLowerCase()}`;
 
     if(seen.has(dedupeKey)){
       return;
