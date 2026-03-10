@@ -833,47 +833,51 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function addOpenLibraryBookResult(index){
-      const book = currentBookResults[index];
-      if(!book) return;
+  const book = currentBookResults[index];
+  if(!book) return;
 
-      const title = book.title || "Untitled";
-      const description = "";
-      const cover = getOpenLibraryCoverUrl(book.cover_i);
-      const authors = (book.author_name || []).join(", ");
+  const title = book.title || "Untitled";
+  const cover = getOpenLibraryCoverUrl(book.cover_i);
+  const authors = (book.author_name || []).join(", ");
 
-      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
+  const workKey = book.key || "";
+  const description = await fetchOpenLibraryDescription(workKey);
 
-      if(exists){
-        alert(t().labels.alreadyExists);
-        return;
-      }
+  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
 
-      detailsDatabase[title] = {
-        description: description || t().labels.noDescription
-      };
+  if(exists){
+    alert(t().labels.alreadyExists);
+    return;
+  }
 
-      const saved = await saveItemToSupabase(
-        title,
-        currentCategory,
-        "Planned",
-        cover,
-        description,
-        authors
-      );
+  detailsDatabase[title] = {
+    description: description || t().labels.noDescription
+  };
 
-      if(!saved) return;
+  const saved = await saveItemToSupabase(
+    title,
+    currentCategory,
+    "Planned",
+    cover,
+    description,
+    authors
+  );
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        creator: authors
-      });
+  if(!saved) return;
 
-      closeAddModal();
-      renderShelf();
-    }
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned",
+    cover: cover,
+    description: description,
+    creator: authors,
+    work_key: workKey
+  });
+
+  closeAddModal();
+  renderShelf();
+}
+
 
     async function saveManualItem(){
       const title = document.getElementById("manual-name").value.trim();
@@ -964,7 +968,30 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     function closeStatusModal(){
       document.getElementById("status-modal").classList.add("hidden");
     }
+async function fetchOpenLibraryDescription(workKey){
+  if(!workKey) return "";
 
+  try {
+    const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
+    const url = "https://openlibrary.org" + cleanKey + ".json";
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if(typeof data.description === "string"){
+      return data.description;
+    }
+
+    if(data.description && typeof data.description.value === "string"){
+      return data.description.value;
+    }
+
+    return "";
+  } catch (error) {
+    console.error("Open Library description error:", error);
+    return "";
+  }
+}
     function openCard(title){
       currentOpenTitle = title;
 
@@ -1030,35 +1057,37 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function loadCategoryFromSupabase(category){
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("*")
-        .eq("category", category)
-        .order("id", { ascending: false });
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("category", category)
+    .order("id", { ascending: false });
 
-      if(error){
-        console.error("Supabase load error:", error);
-        return;
-      }
+  if(error){
+    console.error("Supabase load error:", error);
+    return;
+  }
 
-      demoData[category] = [];
+  demoData[category] = [];
 
-      data.forEach(item => {
-        demoData[category].push({
-          title: item.title,
-          status: item.status,
-          cover: item.cover_url || "",
-          description: item.description || "",
-          creator: item.creator || ""
-        });
+  data.forEach(item => {
+    demoData[category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      creator: item.creator || "",
+      work_key: item.work_key || ""
+    });
 
-        detailsDatabase[item.title] = {
-          description: item.description || t().labels.noDescription
-        };
-      });
+    detailsDatabase[item.title] = {
+      description: item.description || t().labels.noDescription
+    };
+  });
 
-      renderShelf();
-    }
+  renderShelf();
+}
+
 
     applyTranslations();
   </script>
