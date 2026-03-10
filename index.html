@@ -865,14 +865,20 @@ async function fetchOpenLibraryDescription(workKey){
   const cover = getOpenLibraryCoverUrl(book.cover_i);
   const authors = (book.author_name || []).join(", ");
   const workKey = book.key || "";
-  const description = await fetchOpenLibraryDescription(workKey);
 
-  const exists = (demoData[currentCategory] || []).some(item => item.title === title);
-
-  if(exists){
+  if(isDuplicateItem(currentCategory, title, workKey)){
     alert(t().labels.alreadyExists);
     return;
   }
+
+  const existsInDb = await existsInSupabase(currentCategory, title, workKey);
+  if(existsInDb){
+    alert(t().labels.alreadyExists);
+    await loadCategoryFromSupabase(currentCategory);
+    return;
+  }
+
+  const description = await fetchOpenLibraryDescription(workKey);
 
   detailsDatabase[title] = {
     description: description || t().labels.noDescription
@@ -903,51 +909,91 @@ async function fetchOpenLibraryDescription(workKey){
   renderShelf();
 }
 
-    async function saveManualItem(){
-      const title = document.getElementById("manual-name").value.trim();
-      const creator = document.getElementById("manual-creator").value.trim();
-      const cover = document.getElementById("manual-cover").value.trim();
-      const description = document.getElementById("manual-description").value.trim();
+    function isDuplicateItem(category, title, workKey = ""){
+  const items = demoData[category] || [];
 
-      if(!title){
-        alert(t().labels.manualNameRequired);
-        return;
-      }
-
-      const exists = (demoData[currentCategory] || []).some(item => item.title === title);
-
-      if(exists){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
-      detailsDatabase[title] = {
-        description: description || t().labels.noDescription
-      };
-
-      const saved = await saveItemToSupabase(
-        title,
-        currentCategory,
-        "Planned",
-        cover,
-        description,
-        creator
-      );
-
-      if(!saved) return;
-
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        creator: creator
-      });
-
-      closeManualModal();
-      closeAddModal();
-      renderShelf();
+  return items.some(item => {
+    if(workKey && item.work_key && item.work_key === workKey){
+      return true;
     }
+
+    return item.title.trim().toLowerCase() === title.trim().toLowerCase();
+  });
+}
+
+    async function existsInSupabase(category, title, workKey = ""){
+  let query = supabaseClient
+    .from("user_media")
+    .select("id, title, work_key")
+    .eq("category", category)
+    .limit(10);
+
+  if(workKey){
+    query = query.eq("work_key", workKey);
+  } else {
+    query = query.ilike("title", title);
+  }
+
+  const { data, error } = await query;
+
+  if(error){
+    console.error("Supabase duplicate check error:", error);
+    return false;
+  }
+
+  return Array.isArray(data) && data.length > 0;
+}
+    
+    async function saveManualItem(){
+  const title = document.getElementById("manual-name").value.trim();
+  const creator = document.getElementById("manual-creator").value.trim();
+  const cover = document.getElementById("manual-cover").value.trim();
+  const description = document.getElementById("manual-description").value.trim();
+
+  if(!title){
+    alert(t().labels.manualNameRequired);
+    return;
+  }
+
+  if(isDuplicateItem(currentCategory, title)){
+    alert(t().labels.alreadyExists);
+    return;
+  }
+
+  const existsInDb = await existsInSupabase(currentCategory, title);
+  if(existsInDb){
+    alert(t().labels.alreadyExists);
+    await loadCategoryFromSupabase(currentCategory);
+    return;
+  }
+
+  detailsDatabase[title] = {
+    description: description || t().labels.noDescription
+  };
+
+  const saved = await saveItemToSupabase(
+    title,
+    currentCategory,
+    "Planned",
+    cover,
+    description,
+    creator
+  );
+
+  if(!saved) return;
+
+  demoData[currentCategory].unshift({
+    title: title,
+    status: "Planned",
+    cover: cover,
+    description: description,
+    creator: creator
+  });
+
+  closeManualModal();
+  closeAddModal();
+  renderShelf();
+}
 
     function changeStatus(index){
       currentStatusIndex = index;
@@ -1094,8 +1140,19 @@ async function updateDescriptionInSupabase(title, category, description){
   }
 
   demoData[category] = [];
+  const seen = new Set();
 
   data.forEach(item => {
+    const dedupeKey = item.work_key
+      ? work:${item.work_key}
+      : title:${item.title.trim().toLowerCase()};
+
+    if(seen.has(dedupeKey)){
+      return;
+    }
+
+    seen.add(dedupeKey);
+
     demoData[category].push({
       title: item.title,
       status: item.status,
