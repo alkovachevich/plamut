@@ -1374,42 +1374,30 @@
       document.getElementById("status-modal").classList.add("hidden");
     }
 
-    async function updateDescriptionInSupabase(title, category, description){
-      const updateData = {};
+   async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
+  if(!description) return false;
 
-      if(!description) return false;
+  const updateData = {
+    description: description
+  };
 
-      if(currentLanguage === "ru"){
-        updateData.description_ru = description;
-      }
+  if(currentLanguage === "en" && looksLikeEnglish(description)){
+    updateData.description_en = description;
+  }
 
-      if(currentLanguage === "en"){
-        updateData.description_en = description;
-      }
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update(updateData)
+    .eq("title", title)
+    .eq("category", category);
 
-      if(Object.keys(updateData).length === 0){
-        updateData.description = description;
-      }
+  if(error){
+    console.error("Supabase description update error:", error);
+    return false;
+  }
 
-      const { data: authData } = await supabaseClient.auth.getUser();
-      if(!authData.user){
-        return false;
-      }
-
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update(updateData)
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
-
-      if(error){
-        console.error("Supabase description update error:", error);
-        return false;
-      }
-
-      return true;
-    }
+  return true;
+}
 
     async function saveCanonicalKey(){
       const keyInput = document.getElementById("canonical-key-input");
@@ -1564,7 +1552,7 @@ function looksLikeEnglish(text){
   }
 }
     
-    async function openCard(title){
+   async function openCard(title){
   currentOpenTitle = title;
 
   const item = (demoData[currentCategory] || []).find(x => x.title === title);
@@ -1605,17 +1593,13 @@ function looksLikeEnglish(text){
       if(openLibraryDescription){
         fetchedDescription = openLibraryDescription;
 
-        if(currentLanguage === "ru" && looksLikeRussian(openLibraryDescription)){
-          matchedLanguage = true;
-        }
-
         if(currentLanguage === "en" && looksLikeEnglish(openLibraryDescription)){
           matchedLanguage = true;
         }
       }
     }
 
-    if(!matchedLanguage){
+    if(!fetchedDescription){
       const googleResult = await fetchGoogleBooksDescription(
         item?.title || title,
         item?.creator || ""
@@ -1630,16 +1614,8 @@ function looksLikeEnglish(text){
     if(fetchedDescription){
       item.description = fetchedDescription;
 
-      if(currentLanguage === "ru"){
-        if(matchedLanguage && looksLikeRussian(fetchedDescription)){
-          item.description_ru = fetchedDescription;
-        }
-      }
-
-      if(currentLanguage === "en"){
-        if(matchedLanguage && looksLikeEnglish(fetchedDescription)){
-          item.description_en = fetchedDescription;
-        }
+      if(currentLanguage === "en" && looksLikeEnglish(fetchedDescription)){
+        item.description_en = fetchedDescription;
       }
 
       descriptionEl.textContent = getBestDescription(item)  item.description  t().labels.noDescription;
