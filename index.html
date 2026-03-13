@@ -1390,12 +1390,18 @@ async function loadProfile(){
     .from("profiles")
     .select("id")
     .eq("username", username)
-    .single();
+    .maybeSingle();
 
-  if(profileError || !profile){
-    alert("User not found");
-    return;
-  }
+  if(profileError){
+  console.error(profileError);
+  alert("Profile lookup error");
+  return;
+}
+
+if(!profile){
+  alert("User not found");
+  return;
+}
 
   const { data, error } = await supabaseClient
     .from("user_media")
