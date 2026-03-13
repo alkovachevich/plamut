@@ -330,48 +330,42 @@
     </div>
   </div>
 
-  <div id="home-screen" class="hidden">
-    <h1>Plamut</h1>
-    <div class="subtitle" id="home-subtitle"></div>
+  <div id="home-screen">
+  <h1>Plamut</h1>
+  <div class="subtitle" id="home-subtitle"></div>
 
-    <div class="grid">
-      <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
-      <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
-      <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
-      <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
-      <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
-      <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
-    </div>
-
-    <div style="margin-top:20px;">
-      <button onclick="logout()" class="button">Logout</button>
-    </div>
-
-  <div id="category-screen" class="hidden">
-    <div class="topbar">
-      <button class="button" onclick="goHome()" id="back-home-btn"></button>
-      <h2 id="category-title" style="margin:0;"></h2>
-      <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
-    </div>
-
-    <div id="public-category-tabs" class="hidden" style="gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-      <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
-      <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
-      <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
-      <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
-      <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
-      <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
-
-      </div>
-    
-      <button class="button" onclick="shareLibrary()" style="margin-top:16px;">
-Share Library
-</button>
-      
-    </div>
-
-    <div class="shelf" id="shelf"></div>
+  <div class="grid">
+    <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
+    <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
+    <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
+    <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
+    <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
+    <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
   </div>
+
+  <div style="margin-top:16px;">
+    <button class="button" onclick="shareLibrary()">Share Library</button>
+  </div>
+</div>
+
+ <div id="category-screen" class="hidden">
+  <div class="topbar">
+    <button class="button" onclick="goHome()" id="back-home-btn"></button>
+    <h2 id="category-title" style="margin:0;"></h2>
+    <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
+  </div>
+
+  <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
+    <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
+    <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
+    <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
+    <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
+    <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+  </div>
+
+  <div class="shelf" id="shelf"></div>
+</div>
 
   <div id="details-screen" class="hidden">
     <div class="topbar">
@@ -718,68 +712,70 @@ Share Library
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
-    async function openCategory(name){
-      isPublicView = false;
-      currentCategory = name;
+   async function openCategory(name){
+  isPublicView = false;
+  currentCategory = name;
 
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-      document.getElementById("category-title").textContent = translateCategory(name);
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+  document.getElementById("category-title").textContent = translateCategory(name);
 
-      const addBtn = document.getElementById("add-new-btn");
-      if(addBtn){
-        addBtn.classList.remove("hidden");
-        addBtn.style.display = "";
-      }
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.remove("hidden");
+    addBtn.style.display = "";
+  }
 
-      const tabs = document.getElementById("public-category-tabs");
-      if(tabs){
-        tabs.classList.add("hidden");
-        tabs.style.display = "none";
-      }
+  const tabs = document.getElementById("public-category-tabs");
+  if(tabs){
+    tabs.classList.add("hidden");
+    tabs.style.display = "none";
+  }
 
-      await loadCategoryFromSupabase(name);
-    }
+  await loadCategoryFromSupabase(name);
+}
 
-    function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      shelf.innerHTML = "";
+   function renderShelf(){
+  const shelf = document.getElementById("shelf");
+  if(!shelf) return;
 
-      const items = demoData[currentCategory] || [];
+  shelf.innerHTML = "";
 
-      items.forEach((item, index) => {
-        const safeTitle = item.title.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-        const coverHtml = item.cover
-          ? `<img src="${item.cover}" alt="${item.title}">`
-          : t().labels.cover;
+  const items = demoData[currentCategory] || [];
 
-        const creatorLine = item.creator
-          ? `<div class="media-meta">${item.creator}</div>`
-          : "";
+  items.forEach((item, index) => {
+    const safeTitle = item.title.replace(/'/g, "\\'");
+    const coverHtml = item.cover
+      ? <img src="${item.cover}" alt="${item.title}">
+      : t().labels.cover;
 
-        const actionsHtml = isPublicView
-          ? `<div class="media-actions">
-               <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-             </div>`
-          : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-               <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-             </div>`;
+    const creatorLine = item.creator
+      ? <div class="media-meta">${item.creator}</div>
+      : "";
 
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
-          <div class="media-info">
-            <h3 class="media-title">${item.title}</h3>
-            ${creatorLine}
-            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-            ${actionsHtml}
-          </div>
-        `;
-        shelf.appendChild(card);
-      });
-    }
+    const actionsHtml = isPublicView
+      ? <div class="media-actions">
+           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+         </div>
+      : <div class="media-actions">
+           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+         </div>;
+
+    const card = document.createElement("div");
+    card.className = "media-card";
+    card.innerHTML = 
+      <div class="media-cover">${coverHtml}</div>
+      <div class="media-info">
+        <h3 class="media-title">${item.title}</h3>
+        ${creatorLine}
+        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+        ${actionsHtml}
+      </div>
+    ;
+    shelf.appendChild(card);
+  });
+}
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
