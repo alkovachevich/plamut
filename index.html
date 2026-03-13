@@ -292,6 +292,8 @@
 
     .muted{
       color:#999;
+      white-space:pre-wrap;
+      word-break:break-word;
     }
 
     @media (max-width: 800px){
@@ -347,7 +349,7 @@
     </div>
 
     <div style="margin-top:16px;">
-      <button class="button" onclick="shareLibrary()">Share Library</button>
+      <button id="share-library-btn" class="button" onclick="shareLibrary()">Share Library</button>
     </div>
   </div>
 
@@ -359,12 +361,12 @@
     </div>
 
     <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-      <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
-      <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
-      <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
-      <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
-      <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
-      <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+      <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)" id="public-tab-books">Books</button>
+      <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)" id="public-tab-movies">Movies</button>
+      <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)" id="public-tab-series">Series</button>
+      <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)" id="public-tab-anime">Anime</button>
+      <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)" id="public-tab-manga">Manga</button>
+      <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
     </div>
 
     <div class="shelf" id="shelf"></div>
@@ -568,7 +570,8 @@
           userCreatedCheckEmail: "User created. Check your email.",
           profileLookupError: "Profile lookup error",
           userNotFound: "User not found",
-          libraryPrivate: "Library is private"
+          libraryPrivate: "Library is private",
+          unknownStatus: "Unknown"
         },
         statuses: {
           Planned: "Planned",
@@ -666,7 +669,8 @@
           userCreatedCheckEmail: "Пользователь создан. Проверьте почту.",
           profileLookupError: "Ошибка поиска профиля",
           userNotFound: "Пользователь не найден",
-          libraryPrivate: "Библиотека закрыта"
+          libraryPrivate: "Библиотека закрыта",
+          unknownStatus: "Неизвестно"
         },
         statuses: {
           Planned: "Запланировано",
@@ -718,6 +722,10 @@
         .replace(/'/g, "&#039;");
     }
 
+    function safeJsString(value) {
+      return JSON.stringify(String(value || ""));
+    }
+
     function setLanguage(lang) {
       currentLanguage = lang;
       localStorage.setItem("plamut_language", lang);
@@ -737,6 +745,13 @@
       document.getElementById("cat-anime").textContent = t().categories.Anime;
       document.getElementById("cat-manga").textContent = t().categories.Manga;
       document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+
+      document.getElementById("public-tab-books").textContent = t().categoryNames.Books;
+      document.getElementById("public-tab-movies").textContent = t().categoryNames.Movies;
+      document.getElementById("public-tab-series").textContent = t().categoryNames.Series;
+      document.getElementById("public-tab-anime").textContent = t().categoryNames.Anime;
+      document.getElementById("public-tab-manga").textContent = t().categoryNames.Manga;
+      document.getElementById("public-tab-blacklist").textContent = t().categoryNames.Blacklist;
 
       document.getElementById("back-home-btn").textContent = t().buttons.backHome;
       document.getElementById("add-new-btn").textContent = t().buttons.addNew;
@@ -779,7 +794,7 @@
       document.getElementById("login-top-btn").textContent = t().topbar.login;
       document.getElementById("logout-top-btn").textContent = t().topbar.logout;
       document.getElementById("profile-btn").textContent = t().topbar.profile;
-      document.querySelector('#home-screen button[onclick="shareLibrary()"]').textContent = t().topbar.shareLibrary;
+      document.getElementById("share-library-btn").textContent = t().topbar.shareLibrary;
 
       document.querySelector("#auth-screen h2").textContent = t().auth.loginTitle;
       document.getElementById("login-email").placeholder = t().auth.email;
@@ -841,49 +856,52 @@
     }
 
     function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  if(!shelf) return;
+      const shelf = document.getElementById("shelf");
+      if(!shelf) return;
 
-  shelf.innerHTML = "";
+      shelf.innerHTML = "";
 
-  const items = demoData[currentCategory] || [];
+      const items = demoData[currentCategory] || [];
 
-  items.forEach((item, index) => {
-    const safeTitleAttr = escapeHtml(item.title);
+      if (items.length === 0) {
+        shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+        return;
+      }
 
-    const coverHtml = item.cover
-      ? <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">
-      : t().labels.cover;
+      items.forEach((item, index) => {
+        const coverHtml = item.cover
+          ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
+          : escapeHtml(t().labels.cover);
 
-    const creatorLine = item.creator
-      ? <div class="media-meta">${escapeHtml(item.creator)}</div>
-      : "";
+        const creatorLine = item.creator
+          ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
+          : "";
 
-    const actionsHtml = isPublicView
-      ? <div class="media-actions">
-           <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
-         </div>
-      : <div class="media-actions">
-           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-           <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
-         </div>;
+        const actionsHtml = isPublicView
+          ? `<div class="media-actions">
+               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+             </div>`
+          : `<div class="media-actions">
+               <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
+               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+             </div>`;
 
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = 
-      <div class="media-cover">${coverHtml}</div>
-      <div class="media-info">
-        <h3 class="media-title">${safeTitleAttr}</h3>
-        ${creatorLine}
-        <div class="media-status">${t().labels.statusLabel}: ${escapeHtml(translateStatus(item.status))}</div>
-        ${actionsHtml}
-      </div>
-    ;
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${escapeHtml(item.title)}</h3>
+            ${creatorLine}
+            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status))}</div>
+            ${actionsHtml}
+          </div>
+        `;
 
-    shelf.appendChild(card);
-  });
-}
-    
+        shelf.appendChild(card);
+      });
+    }
+
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
@@ -937,12 +955,12 @@
       container.innerHTML = "";
 
       if (!query) {
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+        container.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
         return;
       }
 
       if (currentCategory === "Books") {
-        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
+        container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
 
         try {
           let items = [];
@@ -1020,9 +1038,9 @@
           if (items.length === 0) {
             currentBookResults = [];
             container.innerHTML = `
-              <div class="small">${t().labels.noBooksFound}</div>
+              <div class="small">${escapeHtml(t().labels.noBooksFound)}</div>
               <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+                <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
               </div>
             `;
             return;
@@ -1043,7 +1061,7 @@
                 <div class="search-item-title">${escapeHtml(title)}</div>
                 <div class="search-item-meta">${escapeHtml(authors || "Book")}${escapeHtml(year)}</div>
               </div>
-              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+              <button class="button" onclick="addOpenLibraryBookResult(${index})">${escapeHtml(t().buttons.add)}</button>
             `;
             container.appendChild(row);
           });
@@ -1053,9 +1071,9 @@
           console.error("Open Library API error:", error);
           currentBookResults = [];
           container.innerHTML = `
-            <div class="small">${t().labels.apiError}: ${escapeHtml(error.message)}</div>
+            <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
             <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+              <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
             </div>
           `;
           return;
@@ -1063,9 +1081,9 @@
       }
 
       container.innerHTML = `
-        <div class="small">${t().labels.noResults}</div>
+        <div class="small">${escapeHtml(t().labels.noResults)}</div>
         <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+          <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
         </div>
       `;
     }
@@ -1078,6 +1096,10 @@
         const url = "https://openlibrary.org" + cleanKey + ".json";
 
         const response = await fetch(url);
+        if (!response.ok) {
+          return "";
+        }
+
         const data = await response.json();
 
         if(typeof data.description === "string"){
@@ -1268,7 +1290,7 @@
     }
 
     async function setStatus(status){
-      const item = demoData[currentCategory][currentStatusIndex];
+      const item = demoData[currentCategory]?.[currentStatusIndex];
       if(!item) return;
 
       const oldStatus = item.status;
@@ -1296,6 +1318,9 @@
     }
 
     async function updateDescriptionInSupabase(title, category, description){
+      const { data: authData } = await supabaseClient.auth.getUser();
+      if(!authData.user) return false;
+
       const updateData = {
         description: description
       };
@@ -1311,6 +1336,7 @@
       const { error } = await supabaseClient
         .from("user_media")
         .update(updateData)
+        .eq("user_id", authData.user.id)
         .eq("title", title)
         .eq("category", category);
 
@@ -1348,106 +1374,109 @@
         return;
       }
 
+      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
+      if (item) item.canonical_key = key;
+
       await loadCategoryFromSupabase(currentCategory);
       alert(t().labels.canonicalSaved);
     }
 
     function getBestDescription(item){
-  if(!item){
-    return "";
-  }
+      if(!item){
+        return "";
+      }
 
-  if(currentLanguage === "ru" && item.description_ru){
-    return item.description_ru;
-  }
+      if(currentLanguage === "ru" && item.description_ru){
+        return item.description_ru;
+      }
 
-  if(currentLanguage === "en" && item.description_en){
-    return item.description_en;
-  }
+      if(currentLanguage === "en" && item.description_en){
+        return item.description_en;
+      }
 
-  return item.description || "";
-}
-    
+      return item.description || "";
+    }
+
     async function openCard(title){
-  currentOpenTitle = title;
+      currentOpenTitle = title;
 
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
-  let description = getBestDescription(item);
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      let description = getBestDescription(item);
 
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
 
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
 
-  const coverBox = document.getElementById("details-cover-box");
+      const coverBox = document.getElementById("details-cover-box");
 
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
-  }
-
-  const descriptionEl = document.getElementById("details-description");
-
-  if(description){
-    descriptionEl.textContent = description;
-  } else if(item && item.work_key){
-    descriptionEl.textContent = t().labels.searching;
-
-    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-
-    if(fetchedDescription){
-      descriptionEl.textContent = fetchedDescription;
-
-      item.description = fetchedDescription;
-
-      if(currentLanguage === "ru"){
-        item.description_ru = fetchedDescription;
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
       }
 
-      if(currentLanguage === "en"){
-        item.description_en = fetchedDescription;
+      const descriptionEl = document.getElementById("details-description");
+
+      if(description){
+        descriptionEl.textContent = description;
+      } else if(item && item.work_key){
+        descriptionEl.textContent = t().labels.searching;
+
+        const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+        if(fetchedDescription){
+          descriptionEl.textContent = fetchedDescription;
+
+          item.description = fetchedDescription;
+
+          if(currentLanguage === "ru"){
+            item.description_ru = fetchedDescription;
+          }
+
+          if(currentLanguage === "en"){
+            item.description_en = fetchedDescription;
+          }
+
+          detailsDatabase[title] = {
+            description: fetchedDescription
+          };
+
+          if(!isPublicView){
+            await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+          }
+        } else {
+          descriptionEl.textContent = t().labels.noDescription;
+        }
+      } else {
+        descriptionEl.textContent = t().labels.noDescription;
       }
 
-      detailsDatabase[title] = {
-        description: fetchedDescription
-      };
+      const canonicalSection = document.getElementById("canonical-key-section");
+      const canonicalInput = document.getElementById("canonical-key-input");
 
-      if(!isPublicView){
-        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+      if(canonicalInput && canonicalSection){
+        if(isPublicView){
+          canonicalSection.classList.add("hidden");
+        } else {
+          canonicalSection.classList.remove("hidden");
+          canonicalInput.value = item?.canonical_key || "";
+        }
       }
-    } else {
-      descriptionEl.textContent = t().labels.noDescription;
+
+      const statusBtn = document.getElementById("change-status-details-btn");
+
+      if(statusBtn){
+        if(isPublicView){
+          statusBtn.classList.add("hidden");
+        } else {
+          statusBtn.classList.remove("hidden");
+        }
+      }
     }
-  } else {
-    descriptionEl.textContent = t().labels.noDescription;
-  }
-
-  const canonicalSection = document.getElementById("canonical-key-section");
-  const canonicalInput = document.getElementById("canonical-key-input");
-
-  if(canonicalInput && canonicalSection){
-    if(isPublicView){
-      canonicalSection.classList.add("hidden");
-    } else {
-      canonicalSection.classList.remove("hidden");
-      canonicalInput.value = item?.canonical_key || "";
-    }
-  }
-
-  const statusBtn = document.getElementById("change-status-details-btn");
-
-  if(statusBtn){
-    if(isPublicView){
-      statusBtn.classList.add("hidden");
-    } else {
-      statusBtn.classList.remove("hidden");
-    }
-  }
-}
 
     async function saveItemToSupabase(
       title,
@@ -1529,6 +1558,8 @@
 
       if(authError || !authData.user){
         console.error("Auth load error:", authError);
+        demoData[category] = [];
+        renderShelf();
         return;
       }
 
@@ -1541,6 +1572,8 @@
 
       if(error){
         console.error("Supabase load error:", error);
+        demoData[category] = [];
+        renderShelf();
         return;
       }
 
