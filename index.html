@@ -1164,6 +1164,13 @@ if(canonicalInput){
   workKey = "",
   canonicalKey = ""
 ){
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+  if(authError || !authData.user){
+    alert("You must be logged in");
+    return false;
+  }
+
   const finalCanonicalKey =
     canonicalKey ||
     workKey ||
@@ -1173,6 +1180,7 @@ if(canonicalInput){
     .from("user_media")
     .insert([
       {
+        user_id: authData.user.id,
         title: title,
         category: category,
         status: status,
@@ -1192,7 +1200,7 @@ if(canonicalInput){
 
   return true;
 }
-
+    
     async function updateStatusInSupabase(title, category, status){
       const { error } = await supabaseClient
         .from("user_media")
@@ -1210,9 +1218,17 @@ if(canonicalInput){
     }
 
    async function loadCategoryFromSupabase(category){
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+  if(authError || !authData.user){
+    console.error("Auth load error:", authError);
+    return;
+  }
+
   const { data, error } = await supabaseClient
     .from("user_media")
     .select("*")
+    .eq("user_id", authData.user.id)
     .eq("category", category)
     .order("id", { ascending: false });
 
