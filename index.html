@@ -1295,7 +1295,6 @@ if(canonicalInput){
 }
 
     async function login(){
-
   const email = document.getElementById("login-email").value;
   const password = document.getElementById("login-password").value;
 
@@ -1308,38 +1307,33 @@ if(canonicalInput){
     alert(error.message);
     return;
   }
-  
-document.getElementById("auth-screen").classList.add("hidden");
-document.getElementById("home-screen").classList.remove("hidden");
-await loadProfile();
+
+  document.getElementById("auth-screen").classList.add("hidden");
+  document.getElementById("home-screen").classList.remove("hidden");
+  await loadProfile();
 }
 
 async function logout(){
-
-    async function logout(){
   await supabaseClient.auth.signOut();
   location.reload();
 }
 
-    async function checkAuth(){
-
+async function checkAuth(){
   const { data } = await supabaseClient.auth.getUser();
 
   if(!data.user){
     document.getElementById("auth-screen").classList.remove("hidden");
     document.getElementById("home-screen").classList.add("hidden");
+  } else {
+    document.getElementById("auth-screen").classList.add("hidden");
+    document.getElementById("home-screen").classList.remove("hidden");
+    await loadProfile();
   }
-    
-else {
-  document.getElementById("auth-screen").classList.add("hidden");
-  document.getElementById("home-screen").classList.remove("hidden");
-  await loadProfile();
-}    
 }
 
 checkAuth();
 
-    async function saveProfile(){
+async function saveProfile(){
   const username = document.getElementById("profile-username").value.trim();
   const displayName = document.getElementById("profile-display-name").value.trim();
 
@@ -1366,7 +1360,7 @@ checkAuth();
   alert("Profile saved");
 }
 
-    async function loadProfile(){
+async function loadProfile(){
   const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
   if(authError || !authData.user){
