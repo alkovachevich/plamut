@@ -312,6 +312,18 @@
     </div>
   </div>
 
+  <div id="auth-screen">
+
+<h2>Plamut Login</h2>
+
+<input id="login-email" placeholder="Email" class="input">
+<input id="login-password" placeholder="Password" type="password" class="input">
+
+<button onclick="login()">Login</button>
+<button onclick="register()">Register</button>
+
+</div>
+  
   <div id="home-screen">
     <h1>Plamut</h1>
     <div class="subtitle" id="home-subtitle"></div>
@@ -323,7 +335,13 @@
       <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
       <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
       <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+      
     </div>
+    
+    <div style="margin-top:20px;">
+  <button onclick="logout()" class="button">Logout</button>
+</div>
+    
   </div>
 
   <div id="category-screen" class="hidden">
