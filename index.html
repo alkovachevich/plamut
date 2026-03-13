@@ -68,7 +68,15 @@
       display:flex;
       gap:12px;
       align-items:center;
-      margin-bottom:24px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+
+    .toolbar-row{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-bottom:20px;
       flex-wrap:wrap;
     }
 
@@ -83,6 +91,16 @@
 
     .button:hover{
       background:#333;
+    }
+
+    .select{
+      background:#111;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:10px 12px;
+      font:inherit;
+      min-width:220px;
     }
 
     .shelf{
@@ -369,6 +387,17 @@
       <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
     </div>
 
+    <div class="toolbar-row" id="filter-toolbar">
+      <label for="status-filter" id="status-filter-label"></label>
+      <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+        <option value="All">All</option>
+        <option value="Planned">Planned</option>
+        <option value="In progress">In progress</option>
+        <option value="Done">Done</option>
+        <option value="Dropped">Dropped</option>
+      </select>
+    </div>
+
     <div class="shelf" id="shelf"></div>
   </div>
 
@@ -476,6 +505,7 @@
         <button class="button" onclick="setStatus('In progress')" id="status-in-progress"></button>
         <button class="button" onclick="setStatus('Done')" id="status-done"></button>
         <button class="button" onclick="setStatus('Dropped')" id="status-dropped"></button>
+        <button class="button" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
         <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
       </div>
     </div>
@@ -535,7 +565,8 @@
           cancel: "Cancel",
           manualAdd: "Add manually",
           save: "Save",
-          delete: "Delete"
+          delete: "Delete",
+          moveToBlacklist: "Move to blacklist"
         },
         modals: {
           searchTitle: "Search and add",
@@ -576,9 +607,14 @@
           libraryPrivate: "Library is private",
           unknownStatus: "Unknown",
           confirmDelete: "Delete this item?",
-          deleteError: "Could not delete item"
+          deleteError: "Could not delete item",
+          confirmMoveToBlacklist: "Move this item to blacklist?",
+          moveError: "Could not move item",
+          filterByStatus: "Filter by status",
+          allStatuses: "All statuses"
         },
         statuses: {
+          All: "All statuses",
           Planned: "Planned",
           "In progress": "In progress",
           Done: "Done",
@@ -637,7 +673,8 @@
           cancel: "Отмена",
           manualAdd: "Добавить вручную",
           save: "Сохранить",
-          delete: "Удалить"
+          delete: "Удалить",
+          moveToBlacklist: "Перенести в чёрный список"
         },
         modals: {
           searchTitle: "Поиск и добавление",
@@ -678,9 +715,14 @@
           libraryPrivate: "Библиотека закрыта",
           unknownStatus: "Неизвестно",
           confirmDelete: "Удалить это произведение?",
-          deleteError: "Не удалось удалить произведение"
+          deleteError: "Не удалось удалить произведение",
+          confirmMoveToBlacklist: "Перенести это произведение в чёрный список?",
+          moveError: "Не удалось перенести произведение",
+          filterByStatus: "Фильтр по статусу",
+          allStatuses: "Все статусы"
         },
         statuses: {
+          All: "Все статусы",
           Planned: "Запланировано",
           "In progress": "В процессе",
           Done: "Завершено",
@@ -700,12 +742,13 @@
 
     let currentLanguage = localStorage.getItem("plamut_language") || "ru";
     let currentCategory = null;
-    let currentStatusIndex = null;
+    let currentStatusTitle = null;
     let currentOpenTitle = null;
     let currentBookResults = [];
     let isPublicView = false;
     let currentPublicProfileName = "Library";
     let searchTimer = null;
+    let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
 
     const demoData = {
       Books: [],
@@ -735,12 +778,22 @@
       return JSON.stringify(String(value || ""));
     }
 
+    function normalizeSpaces(text){
+      return String(text || "").replace(/\s+/g, " ").trim();
+    }
+
     function setLanguage(lang) {
       currentLanguage = lang;
       localStorage.setItem("plamut_language", lang);
       document.documentElement.lang = lang;
       applyTranslations();
       rerenderCurrentScreen();
+    }
+
+    function setStatusFilter(value){
+      currentFilterStatus = value || "All";
+      localStorage.setItem("plamut_status_filter", currentFilterStatus);
+      renderShelf();
     }
 
     function applyTranslations() {
@@ -789,6 +842,7 @@
       document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
       document.getElementById("status-done").textContent = t().statuses.Done;
       document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+      document.getElementById("status-blacklist").textContent = t().buttons.moveToBlacklist;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
 
       document.getElementById("canonical-key-section").querySelector("h3").textContent = t().labels.canonicalKey;
@@ -811,6 +865,19 @@
       document.getElementById("login-password").placeholder = t().auth.password;
       document.querySelector('#auth-screen button[onclick="login()"]').textContent = t().auth.login;
       document.querySelector('#auth-screen button[onclick="register()"]').textContent = t().auth.register;
+
+      document.getElementById("status-filter-label").textContent = t().labels.filterByStatus;
+      const filterSelect = document.getElementById("status-filter");
+      if(filterSelect){
+        filterSelect.innerHTML = `
+          <option value="All">${escapeHtml(t().labels.allStatuses)}</option>
+          <option value="Planned">${escapeHtml(t().statuses.Planned)}</option>
+          <option value="In progress">${escapeHtml(t().statuses["In progress"])}</option>
+          <option value="Done">${escapeHtml(t().statuses.Done)}</option>
+          <option value="Dropped">${escapeHtml(t().statuses.Dropped)}</option>
+        `;
+        filterSelect.value = currentFilterStatus;
+      }
     }
 
     function rerenderCurrentScreen() {
@@ -840,6 +907,36 @@
     function getOpenLibraryCoverUrl(coverId){
       if(!coverId) return "";
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
+    }
+
+    function looksLikeRussian(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
+      return (cyrillic.length / letters.length) >= 0.6;
+    }
+
+    function looksLikeEnglish(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const latin = text.match(/[A-Za-z]/g) || [];
+      return (latin.length / letters.length) >= 0.6;
+    }
+
+    function splitDescriptionFields(description){
+      return {
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_en: looksLikeEnglish(description) ? description : ""
+      };
+    }
+
+    function pickBestDescription(item, lang){
+      if(!item) return "";
+      if(lang === "ru" && item.description_ru) return item.description_ru;
+      if(lang === "en" && item.description_en) return item.description_en;
+      return item.description || "";
     }
 
     function hideAllScreens(){
@@ -902,38 +999,15 @@
       document.getElementById("status-modal").classList.add("hidden");
     }
 
-    function normalizeSpaces(text){
-      return String(text || "").replace(/\s+/g, " ").trim();
+    function getFilteredItems(){
+      const items = demoData[currentCategory] || [];
+      if(currentCategory === "Blacklist") return items;
+      if(currentFilterStatus === "All") return items;
+      return items.filter(item => item.status === currentFilterStatus);
     }
 
-    function looksLikeRussian(text){
-      if(!text) return false;
-      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-      if(letters.length < 10) return false;
-      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
-      return (cyrillic.length / letters.length) >= 0.6;
-    }
-
-    function looksLikeEnglish(text){
-      if(!text) return false;
-      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-      if(letters.length < 10) return false;
-      const latin = text.match(/[A-Za-z]/g) || [];
-      return (latin.length / letters.length) >= 0.6;
-    }
-
-    function splitDescriptionFields(description){
-      return {
-        description_ru: looksLikeRussian(description) ? description : "",
-        description_en: looksLikeEnglish(description) ? description : ""
-      };
-    }
-
-    function pickBestDescription(item, lang){
-      if(!item) return "";
-      if(lang === "ru" && item.description_ru) return item.description_ru;
-      if(lang === "en" && item.description_en) return item.description_en;
-      return item.description || "";
+    function findItemIndexByTitle(title){
+      return (demoData[currentCategory] || []).findIndex(item => item.title === title);
     }
 
     async function getCurrentUser(){
@@ -1201,7 +1275,6 @@
         if(workKey && item.work_key && item.work_key === workKey){
           return true;
         }
-
         return (item.title || "").trim().toLowerCase() === title.trim().toLowerCase();
       });
     }
@@ -1263,7 +1336,7 @@
         user_id: user.id,
         title: title,
         category: category,
-        status: status,
+        status: status || "Planned",
         cover_url: cover,
         description: description || "",
         creator: creator || "",
@@ -1299,6 +1372,30 @@
 
       if(error){
         console.error("Supabase status update error:", error);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function updateCategoryInSupabase(title, oldCategory, newCategory, newStatus = null){
+      const user = await getCurrentUser();
+      if(!user) return false;
+
+      const updateData = { category: newCategory };
+      if(newStatus !== null){
+        updateData.status = newStatus;
+      }
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update(updateData)
+        .eq("user_id", user.id)
+        .eq("title", title)
+        .eq("category", oldCategory);
+
+      if(error){
+        console.error("Supabase category update error:", error);
         return false;
       }
 
@@ -1387,7 +1484,7 @@
 
         demoData[category].push({
           title: item.title,
-          status: item.status,
+          status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
@@ -1411,14 +1508,23 @@
 
       shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+      const filterToolbar = document.getElementById("filter-toolbar");
+      if(filterToolbar){
+        if(currentCategory === "Blacklist"){
+          filterToolbar.classList.add("hidden");
+        } else {
+          filterToolbar.classList.remove("hidden");
+        }
+      }
+
+      const items = getFilteredItems();
 
       if(items.length === 0){
         shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
         return;
       }
 
-      items.forEach((item, index) => {
+      items.forEach((item) => {
         const coverHtml = item.cover
           ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
           : escapeHtml(t().labels.cover);
@@ -1432,9 +1538,9 @@
                <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
              </div>`
           : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
+               <button class="add-btn" onclick='changeStatusByTitle(${safeJsString(item.title)})'>${escapeHtml(t().buttons.changeStatus)}</button>
                <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
-               <button class="add-btn" onclick="deleteItemByIndex(${index})">${escapeHtml(t().buttons.delete)}</button>
+               <button class="add-btn" onclick='deleteItemByTitle(${safeJsString(item.title)})'>${escapeHtml(t().buttons.delete)}</button>
              </div>`;
 
         const card = document.createElement("div");
@@ -1463,8 +1569,13 @@
 
       const addBtn = document.getElementById("add-new-btn");
       if(addBtn){
-        addBtn.classList.remove("hidden");
-        addBtn.style.display = "";
+        if(name === "Blacklist"){
+          addBtn.classList.add("hidden");
+          addBtn.style.display = "none";
+        } else {
+          addBtn.classList.remove("hidden");
+          addBtn.style.display = "";
+        }
       }
 
       const tabs = document.getElementById("public-category-tabs");
@@ -1736,27 +1847,27 @@
       renderShelf();
     }
 
-    function changeStatus(index){
-      if (!demoData[currentCategory] || !demoData[currentCategory][index]) return;
-      currentStatusIndex = index;
-      currentOpenTitle = demoData[currentCategory][index].title;
+    function changeStatusByTitle(title){
+      const index = findItemIndexByTitle(title);
+      if(index === -1) return;
+      currentStatusTitle = title;
+      currentOpenTitle = title;
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     function changeStatusFromDetails(){
-      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
-
+      const index = findItemIndexByTitle(currentOpenTitle);
       if(index === -1){
         alert(t().labels.itemNotFound);
         return;
       }
-
-      currentStatusIndex = index;
+      currentStatusTitle = currentOpenTitle;
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     async function setStatus(status){
-      const item = demoData[currentCategory]?.[currentStatusIndex];
+      const index = findItemIndexByTitle(currentStatusTitle);
+      const item = demoData[currentCategory]?.[index];
       if(!item) return;
 
       const oldStatus = item.status;
@@ -1773,8 +1884,51 @@
         return;
       }
 
-      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+      if(currentOpenTitle === item.title && !document.getElementById("details-screen").classList.contains("hidden")){
         openCard(currentOpenTitle);
+      }
+    }
+
+    async function moveCurrentItemToBlacklist(){
+      if(isPublicView) return;
+      if(currentCategory === "Blacklist"){
+        closeStatusModal();
+        return;
+      }
+
+      const index = findItemIndexByTitle(currentStatusTitle);
+      const item = demoData[currentCategory]?.[index];
+      if(!item) return;
+
+      const confirmed = confirm(t().labels.confirmMoveToBlacklist);
+      if(!confirmed) return;
+
+      const oldCategory = currentCategory;
+      const movedItem = { ...item, status: "Dropped" };
+
+      demoData[oldCategory].splice(index, 1);
+
+      const alreadyThere = demoData.Blacklist.some(x => (x.title || "").trim().toLowerCase() === item.title.trim().toLowerCase());
+      if(!alreadyThere){
+        demoData.Blacklist.unshift(movedItem);
+      }
+
+      closeStatusModal();
+      renderShelf();
+
+      const updated = await updateCategoryInSupabase(item.title, oldCategory, "Blacklist", "Dropped");
+
+      if(!updated){
+        demoData[oldCategory].splice(index, 0, item);
+        demoData.Blacklist = demoData.Blacklist.filter(x => x.title !== item.title);
+        renderShelf();
+        alert(t().labels.moveError);
+        return;
+      }
+
+      if(currentOpenTitle === item.title){
+        currentCategory = "Blacklist";
+        openCard(item.title);
       }
     }
 
@@ -1942,9 +2096,10 @@
       }
     }
 
-    async function deleteItemByIndex(index){
+    async function deleteItemByTitle(title){
       if(isPublicView) return;
 
+      const index = findItemIndexByTitle(title);
       const item = demoData[currentCategory]?.[index];
       if(!item) return;
 
@@ -1977,10 +2132,7 @@
       if(isPublicView) return;
       if(!currentOpenTitle) return;
 
-      const index = (demoData[currentCategory] || []).findIndex(
-        item => item.title === currentOpenTitle
-      );
-
+      const index = findItemIndexByTitle(currentOpenTitle);
       if(index === -1){
         alert(t().labels.itemNotFound);
         return;
@@ -2200,7 +2352,9 @@
       }
 
       isPublicView = true;
-      currentPublicProfileName = profile.display_name || profile.username || "Library";
+
+      currentPublicProfileName =
+        profile.display_name || profile.username || "Library";
 
       demoData.Books = [];
       demoData.Movies = [];
@@ -2231,7 +2385,7 @@
 
         demoData[item.category].push({
           title: item.title,
-          status: item.status,
+          status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
