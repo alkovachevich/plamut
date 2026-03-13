@@ -362,6 +362,13 @@
       <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
       <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
       <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+
+      </div>
+    
+      <button class="button" onclick="shareLibrary()" style="margin-top:16px;">
+Share Library
+</button>
+      
     </div>
 
     <div class="shelf" id="shelf"></div>
@@ -1607,7 +1614,34 @@
     }
   }
 }
-    
+
+    async function shareLibrary(){
+
+  const { data: authData } = await supabaseClient.auth.getUser();
+
+  if(!authData.user){
+    alert("You must be logged in");
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("username")
+    .eq("id", authData.user.id)
+    .single();
+
+  if(error || !data?.username){
+    alert("Set username first");
+    return;
+  }
+
+  const url = window.location.origin + "/u/" + data.username;
+
+  navigator.clipboard.writeText(url);
+
+  alert("Library link copied:\n" + url);
+}
+
     applyTranslations();
 checkPublicRoute();
     checkAuth();
