@@ -1284,23 +1284,31 @@ currentBookResults = [];
     }
 
     async function updateDescriptionInSupabase(title, category, description){
-      const { data: authData } = await supabaseClient.auth.getUser();
-      if(!authData.user) return false;
+  const updateData = {
+    description: description
+  };
 
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update({ description: description })
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
+  if(currentLanguage === "ru"){
+    updateData.description_ru = description;
+  }
 
-      if(error){
-        console.error("Supabase description update error:", error);
-        return false;
-      }
+  if(currentLanguage === "en"){
+    updateData.description_en = description;
+  }
 
-      return true;
-    }
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update(updateData)
+    .eq("title", title)
+    .eq("category", category);
+
+  if(error){
+    console.error("Supabase description update error:", error);
+    return false;
+  }
+
+  return true;
+}
 
     async function saveCanonicalKey(){
       const keyInput = document.getElementById("canonical-key-input");
@@ -1332,11 +1340,27 @@ currentBookResults = [];
       alert(t().labels.canonicalSaved);
     }
 
+    function getBestDescription(item){
+  if(!item){
+    return t().labels.noDescription;
+  }
+
+  if(currentLanguage === "ru" && item.description_ru){
+    return item.description_ru;
+  }
+
+  if(currentLanguage === "en" && item.description_en){
+    return item.description_en;
+  }
+
+  return item.description || t().labels.noDescription;
+}
+
     async function openCard(title){
       currentOpenTitle = title;
 
       const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      let description = item?.description || "";
+      let description = getBestDescription(item);
 
       hideAllScreens();
       document.getElementById("details-screen").classList.remove("hidden");
@@ -1469,57 +1493,59 @@ currentBookResults = [];
     }
 
     async function loadCategoryFromSupabase(category){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-      if(authError || !authData.user){
-        console.error("Auth load error:", authError);
-        return;
-      }
+  if(authError || !authData.user){
+    console.error("Auth load error:", authError);
+    return;
+  }
 
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("*")
-        .eq("user_id", authData.user.id)
-        .eq("category", category)
-        .order("id", { ascending: false });
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", authData.user.id)
+    .eq("category", category)
+    .order("id", { ascending: false });
 
-      if(error){
-        console.error("Supabase load error:", error);
-        return;
-      }
+  if(error){
+    console.error("Supabase load error:", error);
+    return;
+  }
 
-      demoData[category] = [];
-      const seen = new Set();
+  demoData[category] = [];
+  const seen = new Set();
 
-      data.forEach(item => {
-        const dedupeKey =
-          item.canonical_key ||
-          item.work_key ||
-          item.title.trim().toLowerCase();
+  data.forEach(item => {
+    const dedupeKey =
+      item.canonical_key ||
+      item.work_key ||
+      item.title.trim().toLowerCase();
 
-        if(seen.has(dedupeKey)){
-          return;
-        }
-
-        seen.add(dedupeKey);
-
-        demoData[category].push({
-          title: item.title,
-          status: item.status,
-          cover: item.cover_url || "",
-          description: item.description || "",
-          creator: item.creator || "",
-          work_key: item.work_key || "",
-          canonical_key: item.canonical_key || ""
-        });
-
-        detailsDatabase[item.title] = {
-          description: item.description || t().labels.noDescription
-        };
-      });
-
-      renderShelf();
+    if(seen.has(dedupeKey)){
+      return;
     }
+
+    seen.add(dedupeKey);
+
+    demoData[category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      description_ru: item.description_ru || "",
+      description_en: item.description_en || "",
+      creator: item.creator || "",
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || ""
+    });
+
+    detailsDatabase[item.title] = {
+      description: item.description || t().labels.noDescription
+    };
+  });
+
+  renderShelf();
+}
 
     async function register(){
       const email = document.getElementById("login-email").value;
