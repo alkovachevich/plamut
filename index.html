@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -447,14 +447,14 @@
 
   <div id="profile-modal" class="modal hidden">
     <div class="modal-box">
-      <h3>Profile</h3>
+      <h3 id="profile-title">Профиль</h3>
 
       <input id="profile-username" class="input" placeholder="Username">
       <input id="profile-display-name" class="input" placeholder="Display name">
 
       <div class="modal-actions">
-        <button class="button" onclick="closeProfileModal()">Close</button>
-        <button class="button" onclick="saveProfile()">Save Profile</button>
+        <button class="button" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
+        <button class="button" onclick="saveProfile()" id="profile-save-btn">Save Profile</button>
       </div>
     </div>
   </div>
@@ -485,6 +485,27 @@
     const translations = {
       en: {
         subtitle: "Personal Library and Media Universe Tracker",
+        auth: {
+          loginTitle: "Plamut Login",
+          email: "Email",
+          password: "Password",
+          login: "Login",
+          register: "Register"
+        },
+        topbar: {
+          profile: "Profile",
+          login: "Login",
+          logout: "Logout",
+          shareLibrary: "Share Library"
+        },
+        profile: {
+          title: "Profile",
+          username: "Username",
+          displayName: "Display name",
+          close: "Close",
+          save: "Save Profile",
+          saved: "Profile saved"
+        },
         categories: {
           Books: "📚 Books",
           Movies: "🎬 Movies",
@@ -531,7 +552,17 @@
           coverUrl: "Cover URL",
           descriptionPlaceholder: "Description",
           manualNameRequired: "Title is required",
-          noDescription: "No description available."
+          noDescription: "No description available.",
+          canonicalKey: "Canonical Key",
+          canonicalSaved: "Canonical key saved",
+          canonicalSaveError: "Error saving canonical key",
+          mustBeLoggedIn: "You must be logged in",
+          setUsernameFirst: "Set username first",
+          libraryLinkCopied: "Library link copied:",
+          userCreatedCheckEmail: "User created. Check your email.",
+          profileLookupError: "Profile lookup error",
+          userNotFound: "User not found",
+          libraryPrivate: "Library is private"
         },
         statuses: {
           Planned: "Planned",
@@ -551,6 +582,27 @@
       },
       ru: {
         subtitle: "Персональная библиотека и трекер медиа-вселенных",
+        auth: {
+          loginTitle: "Вход в Plamut",
+          email: "Почта",
+          password: "Пароль",
+          login: "Войти",
+          register: "Регистрация"
+        },
+        topbar: {
+          profile: "Профиль",
+          login: "Войти",
+          logout: "Выйти",
+          shareLibrary: "Поделиться библиотекой"
+        },
+        profile: {
+          title: "Профиль",
+          username: "Username",
+          displayName: "Отображаемое имя",
+          close: "Закрыть",
+          save: "Сохранить профиль",
+          saved: "Профиль сохранён"
+        },
         categories: {
           Books: "📚 Книги",
           Movies: "🎬 Фильмы",
@@ -597,7 +649,17 @@
           coverUrl: "Ссылка на обложку",
           descriptionPlaceholder: "Описание",
           manualNameRequired: "Название обязательно",
-          noDescription: "Описание отсутствует."
+          noDescription: "Описание отсутствует.",
+          canonicalKey: "Canonical Key",
+          canonicalSaved: "Canonical key saved",
+          canonicalSaveError: "Ошибка сохранения canonical key",
+          mustBeLoggedIn: "Нужно войти в аккаунт",
+          setUsernameFirst: "Сначала задайте username",
+          libraryLinkCopied: "Ссылка на библиотеку скопирована:",
+          userCreatedCheckEmail: "Пользователь создан. Проверьте почту.",
+          profileLookupError: "Ошибка поиска профиля",
+          userNotFound: "Пользователь не найден",
+          libraryPrivate: "Библиотека закрыта"
         },
         statuses: {
           Planned: "Запланировано",
@@ -617,7 +679,7 @@
       }
     };
 
-    let currentLanguage = "en";
+    let currentLanguage = localStorage.getItem("plamut_language") || "ru";
     let currentCategory = null;
     let currentStatusIndex = null;
     let currentOpenTitle = null;
@@ -642,12 +704,15 @@
 
     function setLanguage(lang) {
       currentLanguage = lang;
+      localStorage.setItem("plamut_language", lang);
       document.documentElement.lang = lang;
       applyTranslations();
       rerenderCurrentScreen();
     }
 
     function applyTranslations() {
+      document.documentElement.lang = currentLanguage;
+
       document.getElementById("home-subtitle").textContent = t().subtitle;
 
       document.getElementById("cat-books").textContent = t().categories.Books;
@@ -684,6 +749,26 @@
       document.getElementById("status-done").textContent = t().statuses.Done;
       document.getElementById("status-dropped").textContent = t().statuses.Dropped;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
+
+      document.getElementById("canonical-key-section").querySelector("h3").textContent = t().labels.canonicalKey;
+      document.querySelector("#canonical-key-section .button").textContent = t().buttons.save;
+
+      document.getElementById("profile-title").textContent = t().profile.title;
+      document.getElementById("profile-username").placeholder = t().profile.username;
+      document.getElementById("profile-display-name").placeholder = t().profile.displayName;
+      document.getElementById("profile-close-btn").textContent = t().profile.close;
+      document.getElementById("profile-save-btn").textContent = t().profile.save;
+
+      document.getElementById("login-top-btn").textContent = t().topbar.login;
+      document.getElementById("logout-top-btn").textContent = t().topbar.logout;
+      document.getElementById("profile-btn").textContent = t().topbar.profile;
+      document.querySelector('#home-screen button[onclick="shareLibrary()"]').textContent = t().topbar.shareLibrary;
+
+      document.querySelector("#auth-screen h2").textContent = t().auth.loginTitle;
+      document.getElementById("login-email").placeholder = t().auth.email;
+      document.getElementById("login-password").placeholder = t().auth.password;
+      document.querySelector('#auth-screen button[onclick="login()"]').textContent = t().auth.login;
+      document.querySelector('#auth-screen button[onclick="register()"]').textContent = t().auth.register;
     }
 
     function rerenderCurrentScreen() {
@@ -1173,7 +1258,7 @@
 
       const { data: authData } = await supabaseClient.auth.getUser();
       if(!authData.user){
-        alert("You must be logged in");
+        alert(t().labels.mustBeLoggedIn);
         return;
       }
 
@@ -1186,12 +1271,12 @@
 
       if(error){
         console.error("Canonical key update error:", error);
-        alert("Error saving canonical key");
+        alert(t().labels.canonicalSaveError);
         return;
       }
 
       await loadCategoryFromSupabase(currentCategory);
-      alert("Canonical key saved");
+      alert(t().labels.canonicalSaved);
     }
 
     async function openCard(title){
@@ -1276,7 +1361,7 @@
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
       if(authError || !authData.user){
-        alert("You must be logged in");
+        alert(t().labels.mustBeLoggedIn);
         return false;
       }
 
@@ -1397,7 +1482,7 @@
         return;
       }
 
-      alert("User created. Check your email.");
+      alert(t().labels.userCreatedCheckEmail);
     }
 
     async function login(){
@@ -1479,7 +1564,7 @@
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
       if(authError || !authData.user){
-        alert("You must be logged in");
+        alert(t().labels.mustBeLoggedIn);
         return;
       }
 
@@ -1497,7 +1582,7 @@
       }
 
       closeProfileModal();
-      alert("Profile saved");
+      alert(t().profile.saved);
     }
 
     async function loadProfile(){
@@ -1561,17 +1646,17 @@
 
       if(profileError){
         console.error(profileError);
-        alert("Profile lookup error");
+        alert(t().labels.profileLookupError);
         return;
       }
 
       if(!profile){
-        alert("User not found");
+        alert(t().labels.userNotFound);
         return;
       }
 
       if(profile.is_public === false){
-        alert("Library is private");
+        alert(t().labels.libraryPrivate);
         return;
       }
 
@@ -1672,7 +1757,7 @@
       const { data: authData } = await supabaseClient.auth.getUser();
 
       if(!authData.user){
-        alert("You must be logged in");
+        alert(t().labels.mustBeLoggedIn);
         return;
       }
 
@@ -1683,14 +1768,14 @@
         .single();
 
       if(error || !data?.username){
-        alert("Set username first");
+        alert(t().labels.setUsernameFirst);
         return;
       }
 
       const url = window.location.origin + "/u/" + data.username;
 
       await navigator.clipboard.writeText(url);
-      alert("Library link copied:\n" + url);
+      alert(t().labels.libraryLinkCopied + "\n" + url);
     }
 
     applyTranslations();
