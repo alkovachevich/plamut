@@ -841,49 +841,49 @@
     }
 
     function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      if(!shelf) return;
+  const shelf = document.getElementById("shelf");
+  if(!shelf) return;
 
-      shelf.innerHTML = "";
+  shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+  const items = demoData[currentCategory] || [];
 
-      items.forEach((item, index) => {
-        const safeTitleAttr = escapeHtml(item.title);
+  items.forEach((item, index) => {
+    const safeTitleAttr = escapeHtml(item.title);
 
-        const coverHtml = item.cover
-          ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
-          : t().labels.cover;
+    const coverHtml = item.cover
+      ? <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">
+      : t().labels.cover;
 
-        const creatorLine = item.creator
-          ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
-          : "";
+    const creatorLine = item.creator
+      ? <div class="media-meta">${escapeHtml(item.creator)}</div>
+      : "";
 
-        const actionsHtml = isPublicView
-          ? `<div class="media-actions">
-               <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
-             </div>`
-          : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-               <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
-             </div>`;
+    const actionsHtml = isPublicView
+      ? <div class="media-actions">
+           <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
+         </div>
+      : <div class="media-actions">
+           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+           <button class="add-btn" onclick="openCard(${JSON.stringify(item.title)})">${t().buttons.open}</button>
+         </div>;
 
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
-          <div class="media-info">
-            <h3 class="media-title">${safeTitleAttr}</h3>
-            ${creatorLine}
-            <div class="media-status">${t().labels.statusLabel}: ${escapeHtml(translateStatus(item.status))}</div>
-            ${actionsHtml}
-          </div>
-        `;
+    const card = document.createElement("div");
+    card.className = "media-card";
+    card.innerHTML = 
+      <div class="media-cover">${coverHtml}</div>
+      <div class="media-info">
+        <h3 class="media-title">${safeTitleAttr}</h3>
+        ${creatorLine}
+        <div class="media-status">${t().labels.statusLabel}: ${escapeHtml(translateStatus(item.status))}</div>
+        ${actionsHtml}
+      </div>
+    ;
 
-        shelf.appendChild(card);
-      });
-    }
-
+    shelf.appendChild(card);
+  });
+}
+    
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
@@ -1353,101 +1353,101 @@
     }
 
     function getBestDescription(item){
-      if(!item){
-        return t().labels.noDescription;
-      }
+  if(!item){
+    return "";
+  }
 
-      if(currentLanguage === "ru" && item.description_ru){
-        return item.description_ru;
-      }
+  if(currentLanguage === "ru" && item.description_ru){
+    return item.description_ru;
+  }
 
-      if(currentLanguage === "en" && item.description_en){
-        return item.description_en;
-      }
+  if(currentLanguage === "en" && item.description_en){
+    return item.description_en;
+  }
 
-      return item.description || t().labels.noDescription;
-    }
-
+  return item.description || "";
+}
+    
     async function openCard(title){
-      currentOpenTitle = title;
+  currentOpenTitle = title;
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      let description = getBestDescription(item);
+  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+  let description = getBestDescription(item);
 
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
 
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+  document.getElementById("details-title").textContent = title;
+  document.getElementById("details-creator").textContent = item?.creator || "";
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
 
-      const coverBox = document.getElementById("details-cover-box");
+  const coverBox = document.getElementById("details-cover-box");
 
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
+  if(item && item.cover){
+    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
+  } else {
+    coverBox.textContent = t().labels.cover;
+  }
+
+  const descriptionEl = document.getElementById("details-description");
+
+  if(description){
+    descriptionEl.textContent = description;
+  } else if(item && item.work_key){
+    descriptionEl.textContent = t().labels.searching;
+
+    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+    if(fetchedDescription){
+      descriptionEl.textContent = fetchedDescription;
+
+      item.description = fetchedDescription;
+
+      if(currentLanguage === "ru"){
+        item.description_ru = fetchedDescription;
       }
 
-      const descriptionEl = document.getElementById("details-description");
-
-      if(description){
-        descriptionEl.textContent = description;
-      } else if(item && item.work_key){
-        descriptionEl.textContent = t().labels.searching;
-
-        const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-
-        if(fetchedDescription){
-          descriptionEl.textContent = fetchedDescription;
-
-          item.description = fetchedDescription;
-
-          if(currentLanguage === "ru"){
-            item.description_ru = fetchedDescription;
-          }
-
-          if(currentLanguage === "en"){
-            item.description_en = fetchedDescription;
-          }
-
-          detailsDatabase[title] = {
-            description: fetchedDescription
-          };
-
-          if(!isPublicView){
-            await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
-          }
-        } else {
-          descriptionEl.textContent = t().labels.noDescription;
-        }
-      } else {
-        descriptionEl.textContent = t().labels.noDescription;
+      if(currentLanguage === "en"){
+        item.description_en = fetchedDescription;
       }
 
-      const canonicalSection = document.getElementById("canonical-key-section");
-      const canonicalInput = document.getElementById("canonical-key-input");
+      detailsDatabase[title] = {
+        description: fetchedDescription
+      };
 
-      if(canonicalInput && canonicalSection){
-        if(isPublicView){
-          canonicalSection.classList.add("hidden");
-        } else {
-          canonicalSection.classList.remove("hidden");
-          canonicalInput.value = item?.canonical_key || "";
-        }
+      if(!isPublicView){
+        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
       }
-
-      const statusBtn = document.getElementById("change-status-details-btn");
-
-      if(statusBtn){
-        if(isPublicView){
-          statusBtn.classList.add("hidden");
-        } else {
-          statusBtn.classList.remove("hidden");
-        }
-      }
+    } else {
+      descriptionEl.textContent = t().labels.noDescription;
     }
+  } else {
+    descriptionEl.textContent = t().labels.noDescription;
+  }
+
+  const canonicalSection = document.getElementById("canonical-key-section");
+  const canonicalInput = document.getElementById("canonical-key-input");
+
+  if(canonicalInput && canonicalSection){
+    if(isPublicView){
+      canonicalSection.classList.add("hidden");
+    } else {
+      canonicalSection.classList.remove("hidden");
+      canonicalInput.value = item?.canonical_key || "";
+    }
+  }
+
+  const statusBtn = document.getElementById("change-status-details-btn");
+
+  if(statusBtn){
+    if(isPublicView){
+      statusBtn.classList.add("hidden");
+    } else {
+      statusBtn.classList.remove("hidden");
+    }
+  }
+}
 
     async function saveItemToSupabase(
       title,
