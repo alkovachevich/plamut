@@ -361,6 +361,12 @@
         </div>
 
         <div class="section">
+  <h3>Canonical Key</h3>
+  <input id="canonical-key-input" class="input" type="text">
+  <button class="button" onclick="saveCanonicalKey()">Save</button>
+</div>
+        
+        <div class="section">
           <button class="button" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
         </div>
       </div>
@@ -1062,7 +1068,30 @@ async function updateDescriptionInSupabase(title, category, description){
 
   return true;
 }
-    
+
+    async function saveCanonicalKey(){
+  const keyInput = document.getElementById("canonical-key-input");
+  if(!keyInput) return;
+
+  const key = keyInput.value.trim();
+  if(!key) return;
+
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update({ canonical_key: key })
+    .eq("title", currentOpenTitle)
+    .eq("category", currentCategory);
+
+  if(error){
+    console.error("Canonical key update error:", error);
+    alert("Error saving canonical key");
+    return;
+  }
+
+  await loadCategoryFromSupabase(currentCategory);
+  alert("Canonical key saved");
+}
+
     async function openCard(title){
       currentOpenTitle = title;
 
@@ -1080,6 +1109,11 @@ async function updateDescriptionInSupabase(title, category, description){
       document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
       document.getElementById("details-description").textContent = details.description || t().labels.noDescription;
 
+      const canonicalInput = document.getElementById("canonical-key-input");
+if(canonicalInput){
+  canonicalInput.value = item?.canonical_key || "";
+}
+      
       const coverBox = document.getElementById("details-cover-box");
       if(item && item.cover){
         coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
