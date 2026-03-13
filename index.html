@@ -1308,11 +1308,13 @@ if(canonicalInput){
     alert(error.message);
     return;
   }
-
-  document.getElementById("auth-screen").classList.add("hidden");
-  document.getElementById("home-screen").classList.remove("hidden");
+  
+document.getElementById("auth-screen").classList.add("hidden");
+document.getElementById("home-screen").classList.remove("hidden");
+await loadProfile();
 }
-    await loadProfile();
+
+async function logout(){
 
     async function logout(){
   await supabaseClient.auth.signOut();
