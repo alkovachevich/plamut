@@ -612,7 +612,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     let currentStatusIndex = null;
     let currentOpenTitle = null;
     let currentBookResults = [];
-
+    let isPublicView = false;
+    
     const demoData = {
       Books: [],
       Movies: [],
@@ -699,46 +700,59 @@ const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     }
 
     async function openCategory(name){
-      currentCategory = name;
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-      document.getElementById("category-title").textContent = translateCategory(name);
-      await loadCategoryFromSupabase(name);
-    }
+  isPublicView = false;
+  currentCategory = name;
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+  document.getElementById("category-title").textContent = translateCategory(name);
+
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.remove("hidden");
+  }
+
+  await loadCategoryFromSupabase(name);
+}
 
     function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      shelf.innerHTML = "";
+  const shelf = document.getElementById("shelf");
+  shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+  const items = demoData[currentCategory] || [];
 
-      items.forEach((item, index) => {
-        const safeTitle = item.title.replace(/'/g, "\\'");
-        const coverHtml = item.cover
-          ? `<img src="${item.cover}" alt="${item.title}">`
-          : t().labels.cover;
+  items.forEach((item, index) => {
+    const safeTitle = item.title.replace(/'/g, "\\'");
+    const coverHtml = item.cover
+      ? <img src="${item.cover}" alt="${item.title}">
+      : t().labels.cover;
 
-        const creatorLine = item.creator
-          ? `<div class="media-meta">${item.creator}</div>`
-          : "";
+    const creatorLine = item.creator
+      ? <div class="media-meta">${item.creator}</div>
+      : "";
 
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
-          <div class="media-info">
-            <h3 class="media-title">${item.title}</h3>
-            ${creatorLine}
-            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-            <div class="media-actions">
-              <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-              <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-            </div>
-          </div>
-        `;
-        shelf.appendChild(card);
-      });
-    }
+    const actionsHtml = isPublicView
+      ? <div class="media-actions">
+           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+         </div>
+      : <div class="media-actions">
+           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+         </div>;
+
+    const card = document.createElement("div");
+    card.className = "media-card";
+    card.innerHTML = 
+      <div class="media-cover">${coverHtml}</div>
+      <div class="media-info">
+        <h3 class="media-title">${item.title}</h3>
+        ${creatorLine}
+        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+        ${actionsHtml}
+      </div>
+    ;
+    shelf.appendChild(card);
+  });
+}
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
@@ -1131,34 +1145,71 @@ async function updateDescriptionInSupabase(title, category, description){
 }
 
     async function openCard(title){
-      currentOpenTitle = title;
+  currentOpenTitle = title;
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      const details = detailsDatabase[title] || {
-        description: item?.description || t().labels.noDescription
+  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+  let description = item?.description || "";
+
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
+
+  document.getElementById("details-title").textContent = title;
+  document.getElementById("details-creator").textContent = item?.creator || "";
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+
+  const coverBox = document.getElementById("details-cover-box");
+  if(item && item.cover){
+    coverBox.innerHTML = <img src="${item.cover}" alt="${title}">;
+  } else {
+    coverBox.textContent = t().labels.cover;
+  }
+
+  const descriptionEl = document.getElementById("details-description");
+
+  if(description){
+    descriptionEl.textContent = description;
+  } else if(item && item.work_key){
+    descriptionEl.textContent = t().labels.searching;
+
+    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+    if(fetchedDescription){
+      descriptionEl.textContent = fetchedDescription;
+      item.description = fetchedDescription;
+      detailsDatabase[title] = {
+        description: fetchedDescription
       };
 
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
-
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-      document.getElementById("details-description").textContent = details.description || t().labels.noDescription;
-
-      const canonicalInput = document.getElementById("canonical-key-input");
-if(canonicalInput){
-  canonicalInput.value = item?.canonical_key || "";
-}
-      
-      const coverBox = document.getElementById("details-cover-box");
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
+      if(!isPublicView){
+        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
       }
+    } else {
+      descriptionEl.textContent = t().labels.noDescription;
     }
+  } else {
+    descriptionEl.textContent = t().labels.noDescription;
+  }
+
+  const canonicalInput = document.getElementById("canonical-key-input");
+  if(canonicalInput){
+    if(isPublicView){
+      canonicalInput.parentElement.classList.add("hidden");
+    } else {
+      canonicalInput.parentElement.classList.remove("hidden");
+      canonicalInput.value = item?.canonical_key || "";
+    }
+  }
+
+  const statusBtn = document.getElementById("change-status-details-btn");
+  if(statusBtn){
+    if(isPublicView){
+      statusBtn.classList.add("hidden");
+    } else {
+      statusBtn.classList.remove("hidden");
+    }
+  }
+}
 
     async function saveItemToSupabase(
   title,
@@ -1384,24 +1435,28 @@ async function loadProfile(){
   if(displayNameInput) displayNameInput.value = data.display_name || "";
 }
 
-    async function loadPublicLibrary(username){
-
+   async function loadPublicLibrary(username){
   const { data: profile, error: profileError } = await supabaseClient
     .from("profiles")
-    .select("id")
+    .select("id, username, display_name, is_public")
     .eq("username", username)
     .maybeSingle();
 
   if(profileError){
-  console.error(profileError);
-  alert("Profile lookup error");
-  return;
-}
+    console.error(profileError);
+    alert("Profile lookup error");
+    return;
+  }
 
-if(!profile){
-  alert("User not found");
-  return;
-}
+  if(!profile){
+    alert("User not found");
+    return;
+  }
+
+  if(profile.is_public === false){
+    alert("Library is private");
+    return;
+  }
 
   const { data, error } = await supabaseClient
     .from("user_media")
@@ -1414,9 +1469,30 @@ if(!profile){
     return;
   }
 
+  isPublicView = true;
+
   demoData.Books = [];
+  demoData.Movies = [];
+  demoData.Series = [];
+  demoData.Anime = [];
+  demoData.Manga = [];
+  demoData.Blacklist = [];
+
+  const seen = new Set();
 
   data.forEach(item => {
+    const dedupeKey =
+      item.canonical_key ||
+      item.work_key ||
+      item.title.trim().toLowerCase();
+
+    const fullKey = ${item.category}:${dedupeKey};
+
+    if(seen.has(fullKey)){
+      return;
+    }
+
+    seen.add(fullKey);
 
     demoData[item.category].push({
       title: item.title,
@@ -1428,12 +1504,22 @@ if(!profile){
       canonical_key: item.canonical_key || ""
     });
 
+    detailsDatabase[item.title] = {
+      description: item.description || t().labels.noDescription
+    };
   });
-
-  currentCategory = "Books";
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
+
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.add("hidden");
+  }
+
+  currentCategory = "Books";
+  document.getElementById("category-title").textContent =
+    (profile.display_name  profile.username  "Library") + " — " + translateCategory("Books");
 
   renderShelf();
 }
