@@ -402,8 +402,9 @@
           <button class="button" onclick="saveCanonicalKey()">Save</button>
         </div>
 
-        <div class="section">
+        <div class="section" style="display:flex;gap:10px;flex-wrap:wrap;">
           <button class="button" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+          <button class="button" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
         </div>
       </div>
     </div>
@@ -533,7 +534,8 @@
           add: "Add",
           cancel: "Cancel",
           manualAdd: "Add manually",
-          save: "Save"
+          save: "Save",
+          delete: "Delete"
         },
         modals: {
           searchTitle: "Search and add",
@@ -572,7 +574,9 @@
           profileLookupError: "Profile lookup error",
           userNotFound: "User not found",
           libraryPrivate: "Library is private",
-          unknownStatus: "Unknown"
+          unknownStatus: "Unknown",
+          confirmDelete: "Delete this item?",
+          deleteError: "Could not delete item"
         },
         statuses: {
           Planned: "Planned",
@@ -632,7 +636,8 @@
           add: "Добавить",
           cancel: "Отмена",
           manualAdd: "Добавить вручную",
-          save: "Сохранить"
+          save: "Сохранить",
+          delete: "Удалить"
         },
         modals: {
           searchTitle: "Поиск и добавление",
@@ -671,7 +676,9 @@
           profileLookupError: "Ошибка поиска профиля",
           userNotFound: "Пользователь не найден",
           libraryPrivate: "Библиотека закрыта",
-          unknownStatus: "Неизвестно"
+          unknownStatus: "Неизвестно",
+          confirmDelete: "Удалить это произведение?",
+          deleteError: "Не удалось удалить произведение"
         },
         statuses: {
           Planned: "Запланировано",
@@ -760,6 +767,7 @@
       document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
       document.getElementById("description-label").textContent = t().labels.description;
       document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
+      document.getElementById("delete-details-btn").textContent = t().buttons.delete;
 
       document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
       document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
@@ -1320,6 +1328,25 @@
       return true;
     }
 
+    async function deleteItemFromSupabase(title, category){
+      const user = await getCurrentUser();
+      if(!user) return false;
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase delete error:", error);
+        return false;
+      }
+
+      return true;
+    }
+
     async function loadCategoryFromSupabase(category){
       const user = await getCurrentUser();
 
@@ -1407,6 +1434,7 @@
           : `<div class="media-actions">
                <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
                <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+               <button class="add-btn" onclick="deleteItemByIndex(${index})">${escapeHtml(t().buttons.delete)}</button>
              </div>`;
 
         const card = document.createElement("div");
@@ -1895,6 +1923,8 @@
       }
 
       const statusBtn = document.getElementById("change-status-details-btn");
+      const deleteBtn = document.getElementById("delete-details-btn");
+
       if(statusBtn){
         if(isPublicView){
           statusBtn.classList.add("hidden");
@@ -1902,6 +1932,81 @@
           statusBtn.classList.remove("hidden");
         }
       }
+
+      if(deleteBtn){
+        if(isPublicView){
+          deleteBtn.classList.add("hidden");
+        } else {
+          deleteBtn.classList.remove("hidden");
+        }
+      }
+    }
+
+    async function deleteItemByIndex(index){
+      if(isPublicView) return;
+
+      const item = demoData[currentCategory]?.[index];
+      if(!item) return;
+
+      const confirmed = confirm(t().labels.confirmDelete);
+      if(!confirmed) return;
+
+      const removedItem = item;
+      demoData[currentCategory].splice(index, 1);
+      renderShelf();
+
+      const deleted = await deleteItemFromSupabase(removedItem.title, currentCategory);
+
+      if(!deleted){
+        demoData[currentCategory].splice(index, 0, removedItem);
+        renderShelf();
+        alert(t().labels.deleteError);
+        return;
+      }
+
+      if(detailsDatabase[removedItem.title]){
+        delete detailsDatabase[removedItem.title];
+      }
+
+      if(currentOpenTitle === removedItem.title){
+        currentOpenTitle = null;
+      }
+    }
+
+    async function deleteCurrentItem(){
+      if(isPublicView) return;
+      if(!currentOpenTitle) return;
+
+      const index = (demoData[currentCategory] || []).findIndex(
+        item => item.title === currentOpenTitle
+      );
+
+      if(index === -1){
+        alert(t().labels.itemNotFound);
+        return;
+      }
+
+      const item = demoData[currentCategory][index];
+      const confirmed = confirm(t().labels.confirmDelete);
+      if(!confirmed) return;
+
+      demoData[currentCategory].splice(index, 1);
+
+      const deleted = await deleteItemFromSupabase(item.title, currentCategory);
+
+      if(!deleted){
+        demoData[currentCategory].splice(index, 0, item);
+        alert(t().labels.deleteError);
+        return;
+      }
+
+      if(detailsDatabase[item.title]){
+        delete detailsDatabase[item.title];
+      }
+
+      currentOpenTitle = null;
+      backToCategory();
+      renderShelf();
     }
 
     async function register(){
