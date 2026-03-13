@@ -892,7 +892,7 @@ async function fetchOpenLibraryDescription(workKey){
   return Array.isArray(data) && data.length > 0;
 }
     
-    async function addOpenLibraryBookResult(index){
+   async function addOpenLibraryBookResult(index){
   const book = currentBookResults[index];
   if(!book) return;
 
@@ -900,6 +900,9 @@ async function fetchOpenLibraryDescription(workKey){
   const cover = getOpenLibraryCoverUrl(book.cover_i);
   const authors = (book.author_name || []).join(", ");
   const workKey = book.key || "";
+  const description = await fetchOpenLibraryDescription(workKey);
+
+  const canonicalKey = workKey || title.trim().toLowerCase();
 
   if(isDuplicateItem(currentCategory, title, workKey)){
     alert(t().labels.alreadyExists);
@@ -913,8 +916,6 @@ async function fetchOpenLibraryDescription(workKey){
     return;
   }
 
-  const description = await fetchOpenLibraryDescription(workKey);
-
   detailsDatabase[title] = {
     description: description || t().labels.noDescription
   };
@@ -926,7 +927,8 @@ async function fetchOpenLibraryDescription(workKey){
     cover,
     description,
     authors,
-    workKey
+    workKey,
+    canonicalKey
   );
 
   if(!saved) return;
@@ -937,7 +939,8 @@ async function fetchOpenLibraryDescription(workKey){
     cover: cover,
     description: description,
     creator: authors,
-    work_key: workKey
+    work_key: workKey,
+    canonical_key: canonicalKey
   });
 
   closeAddModal();
@@ -954,6 +957,8 @@ async function fetchOpenLibraryDescription(workKey){
     alert(t().labels.manualNameRequired);
     return;
   }
+
+  const canonicalKey = title.trim().toLowerCase();
 
   if(isDuplicateItem(currentCategory, title)){
     alert(t().labels.alreadyExists);
@@ -977,7 +982,9 @@ async function fetchOpenLibraryDescription(workKey){
     "Planned",
     cover,
     description,
-    creator
+    creator,
+    "",
+    canonicalKey
   );
 
   if(!saved) return;
@@ -987,7 +994,9 @@ async function fetchOpenLibraryDescription(workKey){
     status: "Planned",
     cover: cover,
     description: description,
-    creator: creator
+    creator: creator,
+    work_key: "",
+    canonical_key: canonicalKey
   });
 
   closeManualModal();
@@ -1086,8 +1095,14 @@ async function updateDescriptionInSupabase(title, category, description){
   cover = "",
   description = "",
   creator = "",
-  workKey = ""
+  workKey = "",
+  canonicalKey = ""
 ){
+  const finalCanonicalKey =
+    canonicalKey ||
+    workKey ||
+    title.trim().toLowerCase();
+
   const { error } = await supabaseClient
     .from("user_media")
     .insert([
@@ -1098,7 +1113,8 @@ async function updateDescriptionInSupabase(title, category, description){
         cover_url: cover,
         description: description,
         creator: creator,
-        work_key: workKey
+        work_key: workKey,
+        canonical_key: finalCanonicalKey
       }
     ]);
 
@@ -1127,7 +1143,7 @@ async function updateDescriptionInSupabase(title, category, description){
       return true;
     }
 
-    async function loadCategoryFromSupabase(category){
+   async function loadCategoryFromSupabase(category){
   const { data, error } = await supabaseClient
     .from("user_media")
     .select("*")
@@ -1143,9 +1159,10 @@ async function updateDescriptionInSupabase(title, category, description){
   const seen = new Set();
 
   data.forEach(item => {
-    const dedupeKey = item.work_key
-      ? `work:${item.work_key}`
-      : `title:${item.title.trim().toLowerCase()}`;
+    const dedupeKey =
+      item.canonical_key ||
+      item.work_key ||
+      item.title.trim().toLowerCase();
 
     if(seen.has(dedupeKey)){
       return;
@@ -1159,7 +1176,8 @@ async function updateDescriptionInSupabase(title, category, description){
       cover: item.cover_url || "",
       description: item.description || "",
       creator: item.creator || "",
-      work_key: item.work_key || ""
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || ""
     });
 
     detailsDatabase[item.title] = {
