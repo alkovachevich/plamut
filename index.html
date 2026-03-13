@@ -452,6 +452,11 @@
       <input id="profile-username" class="input" placeholder="Username">
       <input id="profile-display-name" class="input" placeholder="Display name">
 
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+  <input type="checkbox" id="profile-public">
+  Public library
+</label>
+      
       <div class="modal-actions">
         <button class="button" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
         <button class="button" onclick="saveProfile()" id="profile-save-btn">Save Profile</button>
@@ -1558,56 +1563,60 @@
     }
 
     async function saveProfile(){
-      const username = document.getElementById("profile-username").value.trim();
-      const displayName = document.getElementById("profile-display-name").value.trim();
+  const username = document.getElementById("profile-username").value.trim();
+  const displayName = document.getElementById("profile-display-name").value.trim();
+  const isPublic = document.getElementById("profile-public").checked;
 
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-      if(authError || !authData.user){
-        alert(t().labels.mustBeLoggedIn);
-        return;
-      }
+  if(authError || !authData.user){
+    alert("You must be logged in");
+    return;
+  }
 
-      const { error } = await supabaseClient
-        .from("profiles")
-        .upsert({
-          id: authData.user.id,
-          username: username || null,
-          display_name: displayName || null
-        });
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: authData.user.id,
+      username: username || null,
+      display_name: displayName || null,
+      is_public: isPublic
+    });
 
-      if(error){
-        alert(error.message);
-        return;
-      }
+  if(error){
+    alert(error.message);
+    return;
+  }
 
-      closeProfileModal();
-      alert(t().profile.saved);
-    }
+  closeProfileModal();
+  alert("Profile saved");
+}
 
     async function loadProfile(){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-      if(authError || !authData.user){
-        return;
-      }
+  if(authError || !authData.user){
+    return;
+  }
 
-      const { data, error } = await supabaseClient
-        .from("profiles")
-        .select("*")
-        .eq("id", authData.user.id)
-        .maybeSingle();
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", authData.user.id)
+    .single();
 
-      if(error || !data){
-        return;
-      }
+  if(error || !data){
+    return;
+  }
 
-      const usernameInput = document.getElementById("profile-username");
-      const displayNameInput = document.getElementById("profile-display-name");
+  const usernameInput = document.getElementById("profile-username");
+  const displayNameInput = document.getElementById("profile-display-name");
+  const publicInput = document.getElementById("profile-public");
 
-      if(usernameInput) usernameInput.value = data.username || "";
-      if(displayNameInput) displayNameInput.value = data.display_name || "";
-    }
+  if(usernameInput) usernameInput.value = data.username || "";
+  if(displayNameInput) displayNameInput.value = data.display_name || "";
+  if(publicInput) publicInput.checked = data.is_public !== false;
+}
 
     function openPublicCategory(name, profileName = "Library"){
       if(!isPublicView){
