@@ -698,6 +698,7 @@
     let currentBookResults = [];
     let isPublicView = false;
     let currentPublicProfileName = "Library";
+    let searchTimer = null;
 
     const demoData = {
       Books: [],
@@ -833,92 +834,6 @@
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
-    function looksLikeRussian(text){
-      if(!text) return false;
-      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-      if(letters.length < 20) return false;
-      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
-      return (cyrillic.length / letters.length) >= 0.6;
-    }
-
-    function looksLikeEnglish(text){
-      if(!text) return false;
-      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-      if(letters.length < 20) return false;
-      const latin = text.match(/[A-Za-z]/g) || [];
-      return (latin.length / letters.length) >= 0.6;
-    }
-
-    async function openCategory(name){
-      isPublicView = false;
-      currentCategory = name;
-
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-      document.getElementById("category-title").textContent = translateCategory(name);
-
-      const addBtn = document.getElementById("add-new-btn");
-      if(addBtn){
-        addBtn.classList.remove("hidden");
-        addBtn.style.display = "";
-      }
-
-      const tabs = document.getElementById("public-category-tabs");
-      if(tabs){
-        tabs.classList.add("hidden");
-        tabs.style.display = "none";
-      }
-
-      await loadCategoryFromSupabase(name);
-    }
-
-    function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      if(!shelf) return;
-
-      shelf.innerHTML = "";
-
-      const items = demoData[currentCategory] || [];
-
-      if (items.length === 0) {
-        shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-        return;
-      }
-
-      items.forEach((item, index) => {
-        const coverHtml = item.cover
-          ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
-          : escapeHtml(t().labels.cover);
-
-        const creatorLine = item.creator
-          ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
-          : "";
-
-        const actionsHtml = isPublicView
-          ? `<div class="media-actions">
-               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
-             </div>`
-          : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
-               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
-             </div>`;
-
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
-          <div class="media-info">
-            <h3 class="media-title">${escapeHtml(item.title)}</h3>
-            ${creatorLine}
-            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
-            ${actionsHtml}
-          </div>
-        `;
-
-        shelf.appendChild(card);
-      });
-    }
-
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
@@ -962,162 +877,105 @@
       document.getElementById("manual-modal").classList.add("hidden");
     }
 
-    async function renderSearchResults() {
-      const container = document.getElementById("search-results");
-      const input = document.getElementById("search-input");
-
-      if (!container || !input) return;
-
-      const query = input.value.trim();
-      container.innerHTML = "";
-
-      if (!query) {
-        container.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-        return;
-      }
-
-      if (currentCategory === "Books") {
-        container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
-
-        try {
-          let items = [];
-          const tried = new Set();
-
-          async function fetchBooks(url) {
-            if (tried.has(url)) return [];
-            tried.add(url);
-
-            const response = await fetch(url);
-            if (!response.ok) {
-              throw new Error("HTTP " + response.status);
-            }
-
-            const data = await response.json();
-            return data.docs || [];
-          }
-
-          const normalizedQuery = query.replace(/\s+/g, " ").trim();
-
-          const generalUrl =
-            "https://openlibrary.org/search.json?q=" +
-            encodeURIComponent(normalizedQuery) +
-            "&limit=10";
-
-          items = await fetchBooks(generalUrl);
-
-          if (items.length === 0) {
-            const titleUrl =
-              "https://openlibrary.org/search.json?title=" +
-              encodeURIComponent(normalizedQuery) +
-              "&limit=10";
-
-            items = await fetchBooks(titleUrl);
-          }
-
-          if (items.length === 0) {
-            const authorUrl =
-              "https://openlibrary.org/search.json?author=" +
-              encodeURIComponent(normalizedQuery) +
-              "&limit=10";
-
-            items = await fetchBooks(authorUrl);
-          }
-
-          if (items.length === 0) {
-            const words = normalizedQuery.split(" ").filter(Boolean);
-
-            if (words.length >= 2) {
-              const firstHalf = words.slice(0, Math.ceil(words.length / 2)).join(" ");
-              const secondHalf = words.slice(Math.ceil(words.length / 2)).join(" ");
-
-              const comboUrl1 =
-                "https://openlibrary.org/search.json?title=" +
-                encodeURIComponent(firstHalf) +
-                "&author=" +
-                encodeURIComponent(secondHalf) +
-                "&limit=10";
-
-              items = await fetchBooks(comboUrl1);
-
-              if (items.length === 0) {
-                const comboUrl2 =
-                  "https://openlibrary.org/search.json?title=" +
-                  encodeURIComponent(secondHalf) +
-                  "&author=" +
-                  encodeURIComponent(firstHalf) +
-                  "&limit=10";
-
-                items = await fetchBooks(comboUrl2);
-              }
-            }
-          }
-
-          if (items.length === 0) {
-            currentBookResults = [];
-            container.innerHTML = `
-              <div class="small">${escapeHtml(t().labels.noBooksFound)}</div>
-              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
-              </div>
-            `;
-            return;
-          }
-
-          currentBookResults = items;
-          container.innerHTML = "";
-
-          items.forEach(function (book, index) {
-            const title = book.title || "Untitled";
-            const authors = (book.author_name || []).join(", ");
-            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
-
-            const row = document.createElement("div");
-            row.className = "search-item";
-            row.innerHTML = `
-              <div class="search-item-left">
-                <div class="search-item-title">${escapeHtml(title)}</div>
-                <div class="search-item-meta">${escapeHtml(authors || "Book")}${escapeHtml(year)}</div>
-              </div>
-              <button class="button" onclick="addOpenLibraryBookResult(${index})">${escapeHtml(t().buttons.add)}</button>
-            `;
-            container.appendChild(row);
-          });
-
-          return;
-        } catch (error) {
-          console.error("Open Library API error:", error);
-          currentBookResults = [];
-          container.innerHTML = `
-            <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
-            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-              <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
-            </div>
-          `;
-          return;
-        }
-      }
-
-      container.innerHTML = `
-        <div class="small">${escapeHtml(t().labels.noResults)}</div>
-        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-          <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
-        </div>
-      `;
+    function openProfileModal(){
+      document.getElementById("profile-modal").classList.remove("hidden");
     }
 
-    async function fetchOpenLibraryDescription(workKey){
-      if(!workKey) return "";
+    function closeProfileModal(){
+      document.getElementById("profile-modal").classList.add("hidden");
+    }
+
+    function showAuthScreen(){
+      hideAllScreens();
+      document.getElementById("auth-screen").classList.remove("hidden");
+    }
+
+    function closeStatusModal(){
+      document.getElementById("status-modal").classList.add("hidden");
+    }
+
+    function normalizeSpaces(text){
+      return String(text || "").replace(/\s+/g, " ").trim();
+    }
+
+    function looksLikeRussian(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
+      return (cyrillic.length / letters.length) >= 0.6;
+    }
+
+    function looksLikeEnglish(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const latin = text.match(/[A-Za-z]/g) || [];
+      return (latin.length / letters.length) >= 0.6;
+    }
+
+    function splitDescriptionFields(description){
+      return {
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_en: looksLikeEnglish(description) ? description : ""
+      };
+    }
+
+    function pickBestDescription(item, lang){
+      if(!item) return "";
+      if(lang === "ru" && item.description_ru) return item.description_ru;
+      if(lang === "en" && item.description_en) return item.description_en;
+      return item.description || "";
+    }
+
+    async function getCurrentUser(){
+      const { data, error } = await supabaseClient.auth.getUser();
+      if(error || !data.user) return null;
+      return data.user;
+    }
+
+    async function fetchJson(url){
+      const response = await fetch(url);
+      if(!response.ok){
+        throw new Error("HTTP " + response.status);
+      }
+      return await response.json();
+    }
+
+    async function translateText(text, fromLang, toLang){
+      if(!text) return "";
+      try {
+        const url =
+          "https://api.mymemory.translated.net/get?q=" +
+          encodeURIComponent(text) +
+          "&langpair=" +
+          encodeURIComponent(fromLang + "|" + toLang);
+
+        const data = await fetchJson(url);
+        return data?.responseData?.translatedText || "";
+      } catch (error) {
+        console.error("Translation error:", error);
+        return "";
+      }
+    }
+
+    async function translateTextToRussian(text){
+      if(looksLikeRussian(text)) return text;
+      return await translateText(text, "en", "ru");
+    }
+
+    async function translateTextToEnglish(text){
+      if(looksLikeEnglish(text)) return text;
+      return await translateText(text, "ru", "en");
+    }
+
+    async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
+      if(!workKey) return { text: "", language: "" };
 
       try {
         const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
         const workUrl = "https://openlibrary.org" + cleanKey + ".json";
-
-        const workResponse = await fetch(workUrl);
-        if(!workResponse.ok){
-          throw new Error("HTTP " + workResponse.status);
-        }
-
-        const workData = await workResponse.json();
+        const workData = await fetchJson(workUrl);
 
         function extractDescription(obj){
           if(!obj) return "";
@@ -1126,62 +984,206 @@
           return "";
         }
 
-        const targetLangKey =
-          currentLanguage === "ru"
-            ? "/languages/rus"
-            : currentLanguage === "en"
-              ? "/languages/eng"
-              : "";
-
-        if(targetLangKey){
-          const editionsUrl = "https://openlibrary.org" + cleanKey + "/editions.json?limit=20";
-          const editionsResponse = await fetch(editionsUrl);
-
-          if(editionsResponse.ok){
-            const editionsData = await editionsResponse.json();
-            const entries = Array.isArray(editionsData.entries)
-              ? editionsData.entries
-              : Array.isArray(editionsData.docs)
-                ? editionsData.docs
-                : [];
-
-            for(const edition of entries){
-              const languages = Array.isArray(edition.languages) ? edition.languages : [];
-              const hasTargetLanguage = languages.some(lang => {
-                if (!lang) return false;
-                if (typeof lang === "string") return lang === targetLangKey;
-                return lang.key === targetLangKey;
-              });
-
-              if(!hasTargetLanguage) continue;
-
-              const editionDescription = extractDescription(edition);
-              if(editionDescription){
-                return editionDescription;
-              }
-
-              const editionKey = edition.key || "";
-              if(!editionKey) continue;
-
-              const editionUrl = "https://openlibrary.org" + editionKey + ".json";
-              const editionResponse = await fetch(editionUrl);
-              if(!editionResponse.ok) continue;
-
-              const editionData = await editionResponse.json();
-              const fullEditionDescription = extractDescription(editionData);
-
-              if(fullEditionDescription){
-                return fullEditionDescription;
-              }
-            }
-          }
+        function detectLang(text){
+          if(looksLikeRussian(text)) return "ru";
+          if(looksLikeEnglish(text)) return "en";
+          return "";
         }
 
-        return extractDescription(workData);
+        const workDescription = extractDescription(workData);
+        const workLang = detectLang(workDescription);
+
+        const targetLangKey = preferredLang === "ru" ? "/languages/rus" : "/languages/eng";
+        const editionsUrl = "https://openlibrary.org" + cleanKey + "/editions.json?limit=30";
+
+        try {
+          const editionsData = await fetchJson(editionsUrl);
+          const entries = Array.isArray(editionsData.entries)
+            ? editionsData.entries
+            : Array.isArray(editionsData.docs)
+              ? editionsData.docs
+              : [];
+
+          for(const edition of entries){
+            const languages = Array.isArray(edition.languages) ? edition.languages : [];
+            const hasTargetLanguage = languages.some(lang => {
+              if(!lang) return false;
+              if(typeof lang === "string") return lang === targetLangKey;
+              return lang.key === targetLangKey;
+            });
+
+            if(!hasTargetLanguage) continue;
+
+            const editionDescription = extractDescription(edition);
+            if(editionDescription){
+              const lang = detectLang(editionDescription);
+              return { text: editionDescription, language: lang };
+            }
+
+            const editionKey = edition.key || "";
+            if(!editionKey) continue;
+
+            try {
+              const editionData = await fetchJson("https://openlibrary.org" + editionKey + ".json");
+              const fullEditionDescription = extractDescription(editionData);
+              if(fullEditionDescription){
+                const lang = detectLang(fullEditionDescription);
+                return { text: fullEditionDescription, language: lang };
+              }
+            } catch (e) {
+              console.error("Edition description error:", e);
+            }
+          }
+        } catch (e) {
+          console.error("Open Library editions error:", e);
+        }
+
+        return { text: workDescription, language: workLang };
       } catch (error) {
         console.error("Open Library description error:", error);
-        return "";
+        return { text: "", language: "" };
       }
+    }
+
+    async function fetchGoogleBooksDescription(title, author = "", preferredLang = currentLanguage){
+      try {
+        const targetLang = preferredLang === "ru" ? "ru" : "en";
+
+        let query = "";
+        if(title && author){
+          query = `intitle:${title} inauthor:${author}`;
+        } else if(title){
+          query = `intitle:${title}`;
+        } else if(author){
+          query = `inauthor:${author}`;
+        } else {
+          return { text: "", language: "", matchedLanguage: false };
+        }
+
+        function detectLang(text){
+          if(looksLikeRussian(text)) return "ru";
+          if(looksLikeEnglish(text)) return "en";
+          return "";
+        }
+
+        async function tryRequest(url){
+          const data = await fetchJson(url);
+          const items = data.items || [];
+
+          for(const book of items){
+            const info = book.volumeInfo || {};
+            const description = info.description || "";
+            if(!description) continue;
+
+            const lang = detectLang(description);
+            if(lang === targetLang){
+              return { text: description, language: lang, matchedLanguage: true };
+            }
+          }
+
+          for(const book of items){
+            const info = book.volumeInfo || {};
+            const description = info.description || "";
+            if(description){
+              const lang = detectLang(description);
+              return { text: description, language: lang, matchedLanguage: false };
+            }
+          }
+
+          return { text: "", language: "", matchedLanguage: false };
+        }
+
+        const strictUrl =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&langRestrict=" + encodeURIComponent(targetLang) +
+          "&maxResults=10" +
+          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
+
+        let result = await tryRequest(strictUrl);
+        if(result.text) return result;
+
+        const fallbackUrl =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&maxResults=10" +
+          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
+
+        result = await tryRequest(fallbackUrl);
+        return result;
+      } catch (error) {
+        console.error("Google Books description error:", error);
+        return { text: "", language: "", matchedLanguage: false };
+      }
+    }
+
+    async function buildBookDescriptions(title, author, workKey){
+      let description = "";
+      let description_ru = "";
+      let description_en = "";
+
+      const olCurrent = await fetchOpenLibraryDescription(workKey, currentLanguage);
+      if(olCurrent.text){
+        description = olCurrent.text;
+        if(olCurrent.language === "ru") description_ru = olCurrent.text;
+        if(olCurrent.language === "en") description_en = olCurrent.text;
+      }
+
+      if(!description_ru){
+        const olRu = await fetchOpenLibraryDescription(workKey, "ru");
+        if(olRu.text && looksLikeRussian(olRu.text)){
+          description_ru = olRu.text;
+          if(!description) description = olRu.text;
+        }
+      }
+
+      if(!description_en){
+        const olEn = await fetchOpenLibraryDescription(workKey, "en");
+        if(olEn.text && looksLikeEnglish(olEn.text)){
+          description_en = olEn.text;
+          if(!description) description = olEn.text;
+        }
+      }
+
+      if(!description_ru){
+        const googleRu = await fetchGoogleBooksDescription(title, author, "ru");
+        if(googleRu.text && looksLikeRussian(googleRu.text)){
+          description_ru = googleRu.text;
+          if(!description) description = googleRu.text;
+        }
+      }
+
+      if(!description_en){
+        const googleEn = await fetchGoogleBooksDescription(title, author, "en");
+        if(googleEn.text && looksLikeEnglish(googleEn.text)){
+          description_en = googleEn.text;
+          if(!description) description = googleEn.text;
+        }
+      }
+
+      if(!description_ru && description_en){
+        const translatedRu = await translateTextToRussian(description_en);
+        if(translatedRu && looksLikeRussian(translatedRu)){
+          description_ru = translatedRu;
+        }
+      }
+
+      if(!description_en && description_ru){
+        const translatedEn = await translateTextToEnglish(description_ru);
+        if(translatedEn && looksLikeEnglish(translatedEn)){
+          description_en = translatedEn;
+        }
+      }
+
+      if(!description){
+        description = description_ru || description_en || "";
+      }
+
+      return {
+        description: description || "",
+        description_ru: description_ru || "",
+        description_en: description_en || ""
+      };
     }
 
     function isDuplicateItem(category, title, workKey = ""){
@@ -1197,16 +1199,13 @@
     }
 
     async function existsInSupabase(category, title, workKey = ""){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-      if(authError || !authData.user){
-        return false;
-      }
+      const user = await getCurrentUser();
+      if(!user) return false;
 
       let query = supabaseClient
         .from("user_media")
         .select("id, title, work_key")
-        .eq("user_id", authData.user.id)
+        .eq("user_id", user.id)
         .eq("category", category)
         .limit(10);
 
@@ -1226,521 +1225,6 @@
       return Array.isArray(data) && data.length > 0;
     }
 
-    async function addOpenLibraryBookResult(index){
-      const book = currentBookResults[index];
-      if(!book) return;
-
-      const title = book.title || "Untitled";
-      const cover = getOpenLibraryCoverUrl(book.cover_i);
-      const authors = (book.author_name || []).join(", ");
-      const workKey = book.key || "";
-      const description = await fetchOpenLibraryDescription(workKey);
-
-      const canonicalKey = workKey || title.trim().toLowerCase();
-
-      if(isDuplicateItem(currentCategory, title, workKey)){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
-      const existsInDb = await existsInSupabase(currentCategory, title, workKey);
-      if(existsInDb){
-        alert(t().labels.alreadyExists);
-        await loadCategoryFromSupabase(currentCategory);
-        return;
-      }
-
-      detailsDatabase[title] = {
-        description: description || t().labels.noDescription
-      };
-
-      const saved = await saveItemToSupabase(
-        title,
-        currentCategory,
-        "Planned",
-        cover,
-        description,
-        authors,
-        workKey,
-        canonicalKey
-      );
-
-      if(!saved) return;
-
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        creator: authors,
-        work_key: workKey,
-        canonical_key: canonicalKey,
-        description_ru: looksLikeRussian(description) ? description : "",
-        description_en: looksLikeEnglish(description) ? description : ""
-      });
-
-      closeAddModal();
-      renderShelf();
-    }
-
-    async function saveManualItem(){
-      const title = document.getElementById("manual-name").value.trim();
-      const creator = document.getElementById("manual-creator").value.trim();
-      const cover = document.getElementById("manual-cover").value.trim();
-      const description = document.getElementById("manual-description").value.trim();
-
-      if(!title){
-        alert(t().labels.manualNameRequired);
-        return;
-      }
-
-      const canonicalKey = title.trim().toLowerCase();
-
-      if(isDuplicateItem(currentCategory, title)){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
-      const existsInDb = await existsInSupabase(currentCategory, title);
-      if(existsInDb){
-        alert(t().labels.alreadyExists);
-        await loadCategoryFromSupabase(currentCategory);
-        return;
-      }
-
-      detailsDatabase[title] = {
-        description: description || t().labels.noDescription
-      };
-
-      const saved = await saveItemToSupabase(
-        title,
-        currentCategory,
-        "Planned",
-        cover,
-        description,
-        creator,
-        "",
-        canonicalKey
-      );
-
-      if(!saved) return;
-
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        creator: creator,
-        work_key: "",
-        canonical_key: canonicalKey,
-        description_ru: looksLikeRussian(description) ? description : "",
-        description_en: looksLikeEnglish(description) ? description : ""
-      });
-
-      closeManualModal();
-      closeAddModal();
-      renderShelf();
-    }
-
-    function changeStatus(index){
-      if (!demoData[currentCategory] || !demoData[currentCategory][index]) return;
-      currentStatusIndex = index;
-      currentOpenTitle = demoData[currentCategory][index].title;
-      document.getElementById("status-modal").classList.remove("hidden");
-    }
-
-    function changeStatusFromDetails(){
-      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
-
-      if(index === -1){
-        alert(t().labels.itemNotFound);
-        return;
-      }
-
-      currentStatusIndex = index;
-      document.getElementById("status-modal").classList.remove("hidden");
-    }
-
-    async function setStatus(status){
-      const item = demoData[currentCategory]?.[currentStatusIndex];
-      if(!item) return;
-
-      const oldStatus = item.status;
-
-      item.status = status;
-      renderShelf();
-      closeStatusModal();
-
-      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
-
-      if(!updated){
-        item.status = oldStatus;
-        renderShelf();
-        alert(t().labels.dbStatusNotSaved);
-        return;
-      }
-
-      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
-        openCard(currentOpenTitle);
-      }
-    }
-
-    function closeStatusModal(){
-      document.getElementById("status-modal").classList.add("hidden");
-    }
-
-    async function updateStatusInSupabase(title, category, status){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-      if(authError || !authData.user){
-        console.error("Auth error while updating status:", authError);
-        return false;
-      }
-
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update({ status: status })
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
-
-      if(error){
-        console.error("Supabase status update error:", error);
-        return false;
-      }
-
-      return true;
-    }
-
-    async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
-      if(!description) return false;
-
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-      if(authError || !authData.user){
-        console.error("Auth error while updating description:", authError);
-        return false;
-      }
-
-      const updateData = {
-        description: description
-      };
-
-      if(matchedLanguage){
-        if(looksLikeRussian(description)){
-          updateData.description_ru = description;
-        }
-
-        if(looksLikeEnglish(description)){
-          updateData.description_en = description;
-        }
-      }
-
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update(updateData)
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
-
-      if(error){
-        console.error("Supabase description update error:", error);
-        return false;
-      }
-
-      return true;
-    }
-
-    async function saveCanonicalKey(){
-      const keyInput = document.getElementById("canonical-key-input");
-      if(!keyInput) return;
-
-      const key = keyInput.value.trim();
-      if(!key) return;
-
-      const { data: authData } = await supabaseClient.auth.getUser();
-      if(!authData.user){
-        alert(t().labels.mustBeLoggedIn);
-        return;
-      }
-
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update({ canonical_key: key })
-        .eq("user_id", authData.user.id)
-        .eq("title", currentOpenTitle)
-        .eq("category", currentCategory);
-
-      if(error){
-        console.error("Canonical key update error:", error);
-        alert(t().labels.canonicalSaveError);
-        return;
-      }
-
-      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
-      if (item) item.canonical_key = key;
-
-      await loadCategoryFromSupabase(currentCategory);
-      alert(t().labels.canonicalSaved);
-    }
-
-    async function fetchGoogleBooksDescription(title, author = ""){
-      try {
-        const targetLang = currentLanguage === "ru" ? "ru" : "en";
-
-        let query = "";
-        if(title && author){
-          query = `intitle:${title} inauthor:${author}`;
-        } else if(title){
-          query = `intitle:${title}`;
-        } else if(author){
-          query = `inauthor:${author}`;
-        } else {
-          return { text: "", matchedLanguage: false };
-        }
-
-        async function tryRequest(url){
-          const response = await fetch(url);
-
-          if(!response.ok){
-            throw new Error("HTTP " + response.status);
-          }
-
-          const data = await response.json();
-          const items = data.items || [];
-
-          for(const book of items){
-            const info = book.volumeInfo || {};
-            const description = info.description || "";
-
-            if(!description){
-              continue;
-            }
-
-            if(targetLang === "ru" && looksLikeRussian(description)){
-              return { text: description, matchedLanguage: true };
-            }
-
-            if(targetLang === "en" && looksLikeEnglish(description)){
-              return { text: description, matchedLanguage: true };
-            }
-          }
-
-          for(const book of items){
-            const info = book.volumeInfo || {};
-            const description = info.description || "";
-
-            if(description){
-              return { text: description, matchedLanguage: false };
-            }
-          }
-
-          return { text: "", matchedLanguage: false };
-        }
-
-        const strictUrl =
-          "https://www.googleapis.com/books/v1/volumes?q=" +
-          encodeURIComponent(query) +
-          "&langRestrict=" + encodeURIComponent(targetLang) +
-          "&maxResults=5" +
-          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
-
-        let result = await tryRequest(strictUrl);
-
-        if(result.text){
-          return result;
-        }
-
-        const fallbackUrl =
-          "https://www.googleapis.com/books/v1/volumes?q=" +
-          encodeURIComponent(query) +
-          "&maxResults=5" +
-          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
-
-        result = await tryRequest(fallbackUrl);
-
-        return result;
-      } catch (error) {
-        console.error("Google Books description error:", error);
-        return { text: "", matchedLanguage: false };
-      }
-    }
-
-    async function translateTextToRussian(text){
-      if(!text) return "";
-
-      try {
-        const url =
-          "https://api.mymemory.translated.net/get?q=" +
-          encodeURIComponent(text) +
-          "&langpair=" +
-          encodeURIComponent("en|ru");
-
-        const response = await fetch(url);
-
-        if(!response.ok){
-          throw new Error("HTTP " + response.status);
-        }
-
-        const data = await response.json();
-        return data?.responseData?.translatedText || "";
-      } catch (error) {
-        console.error("Translation error:", error);
-        return "";
-      }
-    }
-
-    async function openCard(title){
-      currentOpenTitle = title;
-
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
-
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
-
-      const coverBox = document.getElementById("details-cover-box");
-
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
-      }
-
-      const descriptionEl = document.getElementById("details-description");
-
-      if(currentLanguage === "ru" && item?.description_ru){
-        descriptionEl.textContent = item.description_ru;
-      } else if(currentLanguage === "en" && item?.description_en){
-        descriptionEl.textContent = item.description_en;
-      } else if(currentLanguage === "ru" && item?.description){
-        descriptionEl.textContent = t().labels.searching;
-
-        if(looksLikeRussian(item.description)){
-          item.description_ru = item.description;
-          descriptionEl.textContent = item.description;
-          if(!isPublicView){
-            await updateDescriptionInSupabase(title, currentCategory, item.description, true);
-          }
-        } else {
-          const translated = await translateTextToRussian(item.description);
-
-          if(translated){
-            item.description_ru = translated;
-            descriptionEl.textContent = translated;
-
-            if(!isPublicView){
-              await supabaseClient
-                .from("user_media")
-                .update({ description_ru: translated })
-                .eq("title", title)
-                .eq("category", currentCategory);
-            }
-          } else {
-            descriptionEl.textContent = item.description;
-          }
-        }
-      } else if(item?.description){
-        descriptionEl.textContent = item.description;
-      } else if(item && item.work_key){
-        descriptionEl.textContent = t().labels.searching;
-
-        let fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-        let matchedLanguage = false;
-
-        if(fetchedDescription){
-          if(looksLikeRussian(fetchedDescription) || looksLikeEnglish(fetchedDescription)){
-            matchedLanguage = true;
-          }
-        }
-
-        if(!fetchedDescription){
-          const googleResult = await fetchGoogleBooksDescription(
-            item?.title || title,
-            item?.creator || ""
-          );
-          fetchedDescription = googleResult.text || "";
-          matchedLanguage = googleResult.matchedLanguage;
-        }
-
-        if(fetchedDescription){
-          item.description = fetchedDescription;
-
-          if(looksLikeEnglish(fetchedDescription)){
-            item.description_en = fetchedDescription;
-          }
-
-          if(looksLikeRussian(fetchedDescription)){
-            item.description_ru = fetchedDescription;
-          }
-
-          if(currentLanguage === "ru" && !item.description_ru && looksLikeEnglish(fetchedDescription)){
-            const translated = await translateTextToRussian(fetchedDescription);
-            if(translated){
-              item.description_ru = translated;
-            }
-          }
-
-          const bestDescription =
-            currentLanguage === "ru"
-              ? (item.description_ru || item.description)
-              : (item.description_en || item.description);
-
-          descriptionEl.textContent = bestDescription || t().labels.noDescription;
-
-          if(!isPublicView){
-            const updateData = {
-              description: item.description || fetchedDescription
-            };
-
-            if(item.description_en){
-              updateData.description_en = item.description_en;
-            }
-
-            if(item.description_ru){
-              updateData.description_ru = item.description_ru;
-            }
-
-            await supabaseClient
-              .from("user_media")
-              .update(updateData)
-              .eq("title", title)
-              .eq("category", currentCategory);
-          }
-        } else {
-          descriptionEl.textContent = t().labels.noDescription;
-        }
-      } else {
-        descriptionEl.textContent = t().labels.noDescription;
-      }
-
-      const canonicalSection = document.getElementById("canonical-key-section");
-      const canonicalInput = document.getElementById("canonical-key-input");
-
-      if(canonicalInput && canonicalSection){
-        if(isPublicView){
-          canonicalSection.classList.add("hidden");
-        } else {
-          canonicalSection.classList.remove("hidden");
-          canonicalInput.value = item?.canonical_key || "";
-        }
-      }
-
-      const statusBtn = document.getElementById("change-status-details-btn");
-
-      if(statusBtn){
-        if(isPublicView){
-          statusBtn.classList.add("hidden");
-        } else {
-          statusBtn.classList.remove("hidden");
-        }
-      }
-    }
-
     async function saveItemToSupabase(
       title,
       category,
@@ -1749,11 +1233,13 @@
       description = "",
       creator = "",
       workKey = "",
-      canonicalKey = ""
+      canonicalKey = "",
+      description_ru = "",
+      description_en = ""
     ){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+      const user = await getCurrentUser();
 
-      if(authError || !authData.user){
+      if(!user){
         alert(t().labels.mustBeLoggedIn);
         return false;
       }
@@ -1763,25 +1249,21 @@
         workKey ||
         title.trim().toLowerCase();
 
+      const autoLang = splitDescriptionFields(description);
+
       const insertData = {
-        user_id: authData.user.id,
+        user_id: user.id,
         title: title,
         category: category,
         status: status,
         cover_url: cover,
-        description: description,
-        creator: creator,
-        work_key: workKey,
-        canonical_key: finalCanonicalKey
+        description: description || "",
+        creator: creator || "",
+        work_key: workKey || "",
+        canonical_key: finalCanonicalKey,
+        description_ru: description_ru || autoLang.description_ru || "",
+        description_en: description_en || autoLang.description_en || ""
       };
-
-      if(description && looksLikeRussian(description)){
-        insertData.description_ru = description;
-      }
-
-      if(description && looksLikeEnglish(description)){
-        insertData.description_en = description;
-      }
 
       const { error } = await supabaseClient
         .from("user_media")
@@ -1796,11 +1278,52 @@
       return true;
     }
 
-    async function loadCategoryFromSupabase(category){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+    async function updateStatusInSupabase(title, category, status){
+      const user = await getCurrentUser();
+      if(!user) return false;
 
-      if(authError || !authData.user){
-        console.error("Auth load error:", authError);
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({ status: status })
+        .eq("user_id", user.id)
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase status update error:", error);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function updateBookDescriptionsInSupabase(title, category, description, description_ru, description_en){
+      const user = await getCurrentUser();
+      if(!user) return false;
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({
+          description: description || "",
+          description_ru: description_ru || "",
+          description_en: description_en || ""
+        })
+        .eq("user_id", user.id)
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase description update error:", error);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function loadCategoryFromSupabase(category){
+      const user = await getCurrentUser();
+
+      if(!user){
         demoData[category] = [];
         renderShelf();
         return;
@@ -1809,7 +1332,7 @@
       const { data, error } = await supabaseClient
         .from("user_media")
         .select("*")
-        .eq("user_id", authData.user.id)
+        .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false });
 
@@ -1853,6 +1376,532 @@
       });
 
       renderShelf();
+    }
+
+    function renderShelf(){
+      const shelf = document.getElementById("shelf");
+      if(!shelf) return;
+
+      shelf.innerHTML = "";
+
+      const items = demoData[currentCategory] || [];
+
+      if(items.length === 0){
+        shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+        return;
+      }
+
+      items.forEach((item, index) => {
+        const coverHtml = item.cover
+          ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
+          : escapeHtml(t().labels.cover);
+
+        const creatorLine = item.creator
+          ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
+          : "";
+
+        const actionsHtml = isPublicView
+          ? `<div class="media-actions">
+               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+             </div>`
+          : `<div class="media-actions">
+               <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
+               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+             </div>`;
+
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${escapeHtml(item.title)}</h3>
+            ${creatorLine}
+            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
+            ${actionsHtml}
+          </div>
+        `;
+
+        shelf.appendChild(card);
+      });
+    }
+
+    async function openCategory(name){
+      isPublicView = false;
+      currentCategory = name;
+
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+      document.getElementById("category-title").textContent = translateCategory(name);
+
+      const addBtn = document.getElementById("add-new-btn");
+      if(addBtn){
+        addBtn.classList.remove("hidden");
+        addBtn.style.display = "";
+      }
+
+      const tabs = document.getElementById("public-category-tabs");
+      if(tabs){
+        tabs.classList.add("hidden");
+        tabs.style.display = "none";
+      }
+
+      await loadCategoryFromSupabase(name);
+    }
+
+    async function renderSearchResults() {
+      clearTimeout(searchTimer);
+
+      searchTimer = setTimeout(async () => {
+        const container = document.getElementById("search-results");
+        const input = document.getElementById("search-input");
+
+        if (!container || !input) return;
+
+        const query = normalizeSpaces(input.value);
+        container.innerHTML = "";
+
+        if (!query) {
+          container.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+          return;
+        }
+
+        if (currentCategory === "Books") {
+          container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
+
+          try {
+            let items = [];
+            const tried = new Set();
+
+            async function fetchBooks(url) {
+              if (tried.has(url)) return [];
+              tried.add(url);
+
+              const data = await fetchJson(url);
+              return data.docs || [];
+            }
+
+            const generalUrl =
+              "https://openlibrary.org/search.json?q=" +
+              encodeURIComponent(query) +
+              "&limit=10";
+
+            items = await fetchBooks(generalUrl);
+
+            if (items.length === 0) {
+              const titleUrl =
+                "https://openlibrary.org/search.json?title=" +
+                encodeURIComponent(query) +
+                "&limit=10";
+              items = await fetchBooks(titleUrl);
+            }
+
+            if (items.length === 0) {
+              const authorUrl =
+                "https://openlibrary.org/search.json?author=" +
+                encodeURIComponent(query) +
+                "&limit=10";
+              items = await fetchBooks(authorUrl);
+            }
+
+            if (items.length === 0) {
+              const words = query.split(" ").filter(Boolean);
+
+              if (words.length >= 2) {
+                const firstHalf = words.slice(0, Math.ceil(words.length / 2)).join(" ");
+                const secondHalf = words.slice(Math.ceil(words.length / 2)).join(" ");
+
+                const comboUrl1 =
+                  "https://openlibrary.org/search.json?title=" +
+                  encodeURIComponent(firstHalf) +
+                  "&author=" +
+                  encodeURIComponent(secondHalf) +
+                  "&limit=10";
+
+                items = await fetchBooks(comboUrl1);
+
+                if (items.length === 0) {
+                  const comboUrl2 =
+                    "https://openlibrary.org/search.json?title=" +
+                    encodeURIComponent(secondHalf) +
+                    "&author=" +
+                    encodeURIComponent(firstHalf) +
+                    "&limit=10";
+
+                  items = await fetchBooks(comboUrl2);
+                }
+              }
+            }
+
+            if (items.length === 0) {
+              currentBookResults = [];
+              container.innerHTML = `
+                <div class="small">${escapeHtml(t().labels.noBooksFound)}</div>
+                <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                  <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
+                </div>
+              `;
+              return;
+            }
+
+            currentBookResults = items;
+            container.innerHTML = "";
+
+            items.forEach((book, index) => {
+              const title = book.title || "Untitled";
+              const authors = (book.author_name || []).join(", ");
+              const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+
+              const row = document.createElement("div");
+              row.className = "search-item";
+              row.innerHTML = `
+                <div class="search-item-left">
+                  <div class="search-item-title">${escapeHtml(title)}</div>
+                  <div class="search-item-meta">${escapeHtml(authors || "Book")}${escapeHtml(year)}</div>
+                </div>
+                <button class="button" onclick="addOpenLibraryBookResult(${index})">${escapeHtml(t().buttons.add)}</button>
+              `;
+              container.appendChild(row);
+            });
+
+            return;
+          } catch (error) {
+            console.error("Open Library API error:", error);
+            currentBookResults = [];
+            container.innerHTML = `
+              <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
+              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
+              </div>
+            `;
+            return;
+          }
+        }
+
+        container.innerHTML = `
+          <div class="small">${escapeHtml(t().labels.noResults)}</div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+            <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
+          </div>
+        `;
+      }, 300);
+    }
+
+    async function addOpenLibraryBookResult(index){
+      const book = currentBookResults[index];
+      if(!book) return;
+
+      const title = book.title || "Untitled";
+      const cover = getOpenLibraryCoverUrl(book.cover_i);
+      const authors = (book.author_name || []).join(", ");
+      const workKey = book.key || "";
+      const canonicalKey = workKey || title.trim().toLowerCase();
+
+      if(isDuplicateItem(currentCategory, title, workKey)){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      const existsInDb = await existsInSupabase(currentCategory, title, workKey);
+      if(existsInDb){
+        alert(t().labels.alreadyExists);
+        await loadCategoryFromSupabase(currentCategory);
+        return;
+      }
+
+      const descriptions = await buildBookDescriptions(title, authors, workKey);
+
+      detailsDatabase[title] = {
+        description: descriptions.description || t().labels.noDescription
+      };
+
+      const saved = await saveItemToSupabase(
+        title,
+        currentCategory,
+        "Planned",
+        cover,
+        descriptions.description,
+        authors,
+        workKey,
+        canonicalKey,
+        descriptions.description_ru,
+        descriptions.description_en
+      );
+
+      if(!saved) return;
+
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: descriptions.description || "",
+        description_ru: descriptions.description_ru || "",
+        description_en: descriptions.description_en || "",
+        creator: authors,
+        work_key: workKey,
+        canonical_key: canonicalKey
+      });
+
+      closeAddModal();
+      renderShelf();
+    }
+
+    async function saveManualItem(){
+      const title = document.getElementById("manual-name").value.trim();
+      const creator = document.getElementById("manual-creator").value.trim();
+      const cover = document.getElementById("manual-cover").value.trim();
+      const description = document.getElementById("manual-description").value.trim();
+
+      if(!title){
+        alert(t().labels.manualNameRequired);
+        return;
+      }
+
+      const canonicalKey = title.trim().toLowerCase();
+
+      if(isDuplicateItem(currentCategory, title)){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      const existsInDb = await existsInSupabase(currentCategory, title);
+      if(existsInDb){
+        alert(t().labels.alreadyExists);
+        await loadCategoryFromSupabase(currentCategory);
+        return;
+      }
+
+      const langParts = splitDescriptionFields(description);
+
+      detailsDatabase[title] = {
+        description: description || t().labels.noDescription
+      };
+
+      const saved = await saveItemToSupabase(
+        title,
+        currentCategory,
+        "Planned",
+        cover,
+        description,
+        creator,
+        "",
+        canonicalKey,
+        langParts.description_ru,
+        langParts.description_en
+      );
+
+      if(!saved) return;
+
+      demoData[currentCategory].unshift({
+        title: title,
+        status: "Planned",
+        cover: cover,
+        description: description,
+        description_ru: langParts.description_ru,
+        description_en: langParts.description_en,
+        creator: creator,
+        work_key: "",
+        canonical_key: canonicalKey
+      });
+
+      closeManualModal();
+      closeAddModal();
+      renderShelf();
+    }
+
+    function changeStatus(index){
+      if (!demoData[currentCategory] || !demoData[currentCategory][index]) return;
+      currentStatusIndex = index;
+      currentOpenTitle = demoData[currentCategory][index].title;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    function changeStatusFromDetails(){
+      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
+
+      if(index === -1){
+        alert(t().labels.itemNotFound);
+        return;
+      }
+
+      currentStatusIndex = index;
+      document.getElementById("status-modal").classList.remove("hidden");
+    }
+
+    async function setStatus(status){
+      const item = demoData[currentCategory]?.[currentStatusIndex];
+      if(!item) return;
+
+      const oldStatus = item.status;
+      item.status = status;
+      renderShelf();
+      closeStatusModal();
+
+      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+
+      if(!updated){
+        item.status = oldStatus;
+        renderShelf();
+        alert(t().labels.dbStatusNotSaved);
+        return;
+      }
+
+      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+        openCard(currentOpenTitle);
+      }
+    }
+
+    async function saveCanonicalKey(){
+      const keyInput = document.getElementById("canonical-key-input");
+      if(!keyInput) return;
+
+      const key = keyInput.value.trim();
+      if(!key) return;
+
+      const user = await getCurrentUser();
+
+      if(!user){
+        alert(t().labels.mustBeLoggedIn);
+        return;
+      }
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({ canonical_key: key })
+        .eq("user_id", user.id)
+        .eq("title", currentOpenTitle)
+        .eq("category", currentCategory);
+
+      if(error){
+        console.error("Canonical key update error:", error);
+        alert(t().labels.canonicalSaveError);
+        return;
+      }
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
+      if (item) item.canonical_key = key;
+
+      await loadCategoryFromSupabase(currentCategory);
+      alert(t().labels.canonicalSaved);
+    }
+
+    async function ensureItemDescriptions(item){
+      if(!item) return item;
+
+      let changed = false;
+
+      if(currentCategory === "Books"){
+        if(!item.description_ru || !item.description_en || !item.description){
+          const descriptions = await buildBookDescriptions(
+            item.title || "",
+            item.creator || "",
+            item.work_key || ""
+          );
+
+          if(descriptions.description && descriptions.description !== item.description){
+            item.description = descriptions.description;
+            changed = true;
+          }
+          if(descriptions.description_ru && descriptions.description_ru !== item.description_ru){
+            item.description_ru = descriptions.description_ru;
+            changed = true;
+          }
+          if(descriptions.description_en && descriptions.description_en !== item.description_en){
+            item.description_en = descriptions.description_en;
+            changed = true;
+          }
+        }
+      } else {
+        if(currentLanguage === "ru" && !item.description_ru && item.description){
+          if(looksLikeRussian(item.description)){
+            item.description_ru = item.description;
+            changed = true;
+          } else if(looksLikeEnglish(item.description)){
+            const translated = await translateTextToRussian(item.description);
+            if(translated){
+              item.description_ru = translated;
+              changed = true;
+            }
+          }
+        }
+
+        if(currentLanguage === "en" && !item.description_en && item.description){
+          if(looksLikeEnglish(item.description)){
+            item.description_en = item.description;
+            changed = true;
+          } else if(looksLikeRussian(item.description)){
+            const translated = await translateTextToEnglish(item.description);
+            if(translated){
+              item.description_en = translated;
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if(changed && !isPublicView){
+        await updateBookDescriptionsInSupabase(
+          item.title,
+          currentCategory,
+          item.description || "",
+          item.description_ru || "",
+          item.description_en || ""
+        );
+      }
+
+      return item;
+    }
+
+    async function openCard(title){
+      currentOpenTitle = title;
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
+
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
+
+      const coverBox = document.getElementById("details-cover-box");
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
+      }
+
+      const descriptionEl = document.getElementById("details-description");
+
+      if(!item){
+        descriptionEl.textContent = t().labels.noDescription;
+      } else {
+        descriptionEl.textContent = t().labels.searching;
+        await ensureItemDescriptions(item);
+        const bestDescription = pickBestDescription(item, currentLanguage);
+        descriptionEl.textContent = bestDescription || t().labels.noDescription;
+      }
+
+      const canonicalSection = document.getElementById("canonical-key-section");
+      const canonicalInput = document.getElementById("canonical-key-input");
+
+      if(canonicalInput && canonicalSection){
+        if(isPublicView){
+          canonicalSection.classList.add("hidden");
+        } else {
+          canonicalSection.classList.remove("hidden");
+          canonicalInput.value = item?.canonical_key || "";
+        }
+      }
+
+      const statusBtn = document.getElementById("change-status-details-btn");
+      if(statusBtn){
+        if(isPublicView){
+          statusBtn.classList.add("hidden");
+        } else {
+          statusBtn.classList.remove("hidden");
+        }
+      }
     }
 
     async function register(){
@@ -1906,13 +1955,13 @@
     }
 
     async function checkAuth(){
-      const { data } = await supabaseClient.auth.getUser();
+      const user = await getCurrentUser();
 
       const loginBtn = document.getElementById("login-top-btn");
       const logoutBtn = document.getElementById("logout-top-btn");
       const profileBtn = document.getElementById("profile-btn");
 
-      if(!data.user){
+      if(!user){
         document.getElementById("auth-screen").classList.remove("hidden");
         document.getElementById("home-screen").classList.add("hidden");
 
@@ -1931,27 +1980,13 @@
       }
     }
 
-    function openProfileModal(){
-      document.getElementById("profile-modal").classList.remove("hidden");
-    }
-
-    function closeProfileModal(){
-      document.getElementById("profile-modal").classList.add("hidden");
-    }
-
-    function showAuthScreen(){
-      hideAllScreens();
-      document.getElementById("auth-screen").classList.remove("hidden");
-    }
-
     async function saveProfile(){
       const username = document.getElementById("profile-username").value.trim();
       const displayName = document.getElementById("profile-display-name").value.trim();
       const isPublic = document.getElementById("profile-public").checked;
 
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-      if(authError || !authData.user){
+      const user = await getCurrentUser();
+      if(!user){
         alert(t().labels.mustBeLoggedIn);
         return;
       }
@@ -1959,7 +1994,7 @@
       const { error } = await supabaseClient
         .from("profiles")
         .upsert({
-          id: authData.user.id,
+          id: user.id,
           username: username || null,
           display_name: displayName || null,
           is_public: isPublic
@@ -1975,16 +2010,13 @@
     }
 
     async function loadProfile(){
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-      if(authError || !authData.user){
-        return;
-      }
+      const user = await getCurrentUser();
+      if(!user) return;
 
       const { data, error } = await supabaseClient
         .from("profiles")
         .select("*")
-        .eq("id", authData.user.id)
+        .eq("id", user.id)
         .maybeSingle();
 
       if(error || !data){
@@ -2063,9 +2095,7 @@
       }
 
       isPublicView = true;
-
-      currentPublicProfileName =
-        profile.display_name || profile.username || "Library";
+      currentPublicProfileName = profile.display_name || profile.username || "Library";
 
       demoData.Books = [];
       demoData.Movies = [];
@@ -2150,9 +2180,9 @@
     }
 
     async function shareLibrary(){
-      const { data: authData } = await supabaseClient.auth.getUser();
+      const user = await getCurrentUser();
 
-      if(!authData.user){
+      if(!user){
         alert(t().labels.mustBeLoggedIn);
         return;
       }
@@ -2160,8 +2190,8 @@
       const { data, error } = await supabaseClient
         .from("profiles")
         .select("username")
-        .eq("id", authData.user.id)
-        .single();
+        .eq("id", user.id)
+        .maybeSingle();
 
       if(error || !data?.username){
         alert(t().labels.setUsernameFirst);
