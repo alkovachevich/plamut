@@ -1461,162 +1461,162 @@
     }
 
     function looksLikeRussian(text){
-  if(!text) return false;
-  return /[А-Яа-яЁё]/.test(text);
-}
-
-function looksLikeEnglish(text){
-  if(!text) return false;
-  return /[A-Za-z]/.test(text);
-}
-
-   async function fetchGoogleBooksDescription(title, author = ""){
-  try {
-    const targetLang = currentLanguage === "ru" ? "ru" : "en";
-
-    let query = "";
-    if(title && author){
-      query = intitle:${title} inauthor:${author};
-    } else if(title){
-      query = intitle:${title};
-    } else if(author){
-      query = inauthor:${author};
-    } else {
-      return "";
+      if(!text) return false;
+      return /[А-Яа-яЁё]/.test(text);
     }
 
-    const url =
-      "https://www.googleapis.com/books/v1/volumes?q=" +
-      encodeURIComponent(query) +
-      "&langRestrict=" + encodeURIComponent(targetLang) +
-      "&maxResults=5" +
-      "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
-
-    const response = await fetch(url);
-
-    if(!response.ok){
-      throw new Error("HTTP " + response.status);
+    function looksLikeEnglish(text){
+      if(!text) return false;
+      return /[A-Za-z]/.test(text);
     }
 
-    const data = await response.json();
-    const items = data.items || [];
+    async function fetchGoogleBooksDescription(title, author = ""){
+      try {
+        const targetLang = currentLanguage === "ru" ? "ru" : "en";
 
-    for(const book of items){
-      const info = book.volumeInfo || {};
-      const description = info.description || "";
+        let query = "";
+        if(title && author){
+          query = `intitle:${title} inauthor:${author}`;
+        } else if(title){
+          query = `intitle:${title}`;
+        } else if(author){
+          query = `inauthor:${author}`;
+        } else {
+          return "";
+        }
 
-      if(!description){
-        continue;
-      }
+        const url =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&langRestrict=" + encodeURIComponent(targetLang) +
+          "&maxResults=5" +
+          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
 
-      if(targetLang === "ru" && looksLikeRussian(description)){
-        return description;
-      }
+        const response = await fetch(url);
 
-      if(targetLang === "en" && looksLikeEnglish(description)){
-        return description;
+        if(!response.ok){
+          throw new Error("HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        const items = data.items || [];
+
+        for(const book of items){
+          const info = book.volumeInfo || {};
+          const description = info.description || "";
+
+          if(!description){
+            continue;
+          }
+
+          if(targetLang === "ru" && looksLikeRussian(description)){
+            return description;
+          }
+
+          if(targetLang === "en" && looksLikeEnglish(description)){
+            return description;
+          }
+        }
+
+        return "";
+      } catch (error) {
+        console.error("Google Books description error:", error);
+        return "";
       }
     }
-
-    return "";
-  } catch (error) {
-    console.error("Google Books description error:", error);
-    return "";
-  }
-}
     
-   async function openCard(title){
-  currentOpenTitle = title;
+    async function openCard(title){
+      currentOpenTitle = title;
 
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
 
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
 
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
 
-  const coverBox = document.getElementById("details-cover-box");
+      const coverBox = document.getElementById("details-cover-box");
 
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
-  }
-
-  const descriptionEl = document.getElementById("details-description");
-
-  const hasCurrentLanguageDescription =
-    (currentLanguage === "ru" && item?.description_ru) ||
-    (currentLanguage === "en" && item?.description_en);
-
-  if(hasCurrentLanguageDescription){
-    descriptionEl.textContent = getBestDescription(item);
-  } else {
-    descriptionEl.textContent = t().labels.searching;
-
-    let fetchedDescription = "";
-
-    if(item && item.work_key){
-      fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-    }
-
-    if(!fetchedDescription){
-      fetchedDescription = await fetchGoogleBooksDescription(
-        item?.title || title,
-        item?.creator || ""
-      );
-    }
-
-    if(fetchedDescription){
-      item.description = item.description || fetchedDescription;
-
-      if(currentLanguage === "ru"){
-        item.description_ru = fetchedDescription;
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
       }
 
-      if(currentLanguage === "en"){
-        item.description_en = fetchedDescription;
+      const descriptionEl = document.getElementById("details-description");
+
+      const hasCurrentLanguageDescription =
+        (currentLanguage === "ru" && item?.description_ru) ||
+        (currentLanguage === "en" && item?.description_en);
+
+      if(hasCurrentLanguageDescription){
+        descriptionEl.textContent = getBestDescription(item);
+      } else {
+        descriptionEl.textContent = t().labels.searching;
+
+        let fetchedDescription = "";
+
+        if(item && item.work_key){
+          fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+        }
+
+        if(!fetchedDescription){
+          fetchedDescription = await fetchGoogleBooksDescription(
+            item?.title || title,
+            item?.creator || ""
+          );
+        }
+
+        if(fetchedDescription){
+          item.description = item.description || fetchedDescription;
+
+          if(currentLanguage === "ru"){
+            item.description_ru = fetchedDescription;
+          }
+
+          if(currentLanguage === "en"){
+            item.description_en = fetchedDescription;
+          }
+
+          descriptionEl.textContent = getBestDescription(item);
+
+          detailsDatabase[title] = {
+            description: item.description || fetchedDescription
+          };
+
+          if(!isPublicView){
+            await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+          }
+        } else {
+          descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+        }
       }
 
-      descriptionEl.textContent = getBestDescription(item);
+      const canonicalSection = document.getElementById("canonical-key-section");
+      const canonicalInput = document.getElementById("canonical-key-input");
 
-      detailsDatabase[title] = {
-        description: item.description || fetchedDescription
-      };
-
-      if(!isPublicView){
-        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+      if(canonicalInput && canonicalSection){
+        if(isPublicView){
+          canonicalSection.classList.add("hidden");
+        } else {
+          canonicalSection.classList.remove("hidden");
+          canonicalInput.value = item?.canonical_key || "";
+        }
       }
-    } else {
-      descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+
+      const statusBtn = document.getElementById("change-status-details-btn");
+
+      if(statusBtn){
+        if(isPublicView){
+          statusBtn.classList.add("hidden");
+        } else {
+          statusBtn.classList.remove("hidden");
+        }
+      }
     }
-  }
-
-  const canonicalSection = document.getElementById("canonical-key-section");
-  const canonicalInput = document.getElementById("canonical-key-input");
-
-  if(canonicalInput && canonicalSection){
-    if(isPublicView){
-      canonicalSection.classList.add("hidden");
-    } else {
-      canonicalSection.classList.remove("hidden");
-      canonicalInput.value = item?.canonical_key || "";
-    }
-  }
-
-  const statusBtn = document.getElementById("change-status-details-btn");
-
-  if(statusBtn){
-    if(isPublicView){
-      statusBtn.classList.add("hidden");
-    } else {
-      statusBtn.classList.remove("hidden");
-    }
-  }
-}
 
     async function saveItemToSupabase(
       title,
