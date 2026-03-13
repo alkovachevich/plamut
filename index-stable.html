@@ -1460,6 +1460,28 @@
       return item.description || "";
     }
 
+    function looksLikeRussian(text){
+  if(!text) return false;
+
+  const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+  if(letters.length < 20) return false;
+
+  const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
+
+  return (cyrillic.length / letters.length) >= 0.6;
+}
+
+function looksLikeEnglish(text){
+  if(!text) return false;
+
+  const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+  if(letters.length < 20) return false;
+
+  const latin = text.match(/[A-Za-z]/g) || [];
+
+  return (latin.length / letters.length) >= 0.6;
+}
+
     async function fetchGoogleBooksDescription(title, author = ""){
   try {
     const targetLang = currentLanguage === "ru" ? "ru" : "en";
@@ -1472,41 +1494,77 @@
     } else if(author){
       query = inauthor:${author};
     } else {
-      return "";
+      return { text: "", matchedLanguage: false };
     }
 
-    const url =
+    async function tryRequest(url){
+      const response = await fetch(url);
+
+      if(!response.ok){
+        throw new Error("HTTP " + response.status);
+      }
+
+      const data = await response.json();
+      const items = data.items || [];
+
+      for(const book of items){
+        const info = book.volumeInfo || {};
+        const description = info.description || "";
+
+        if(!description){
+          continue;
+        }
+
+        if(targetLang === "ru" && looksLikeRussian(description)){
+          return { text: description, matchedLanguage: true };
+        }
+
+        if(targetLang === "en" && looksLikeEnglish(description)){
+          return { text: description, matchedLanguage: true };
+        }
+      }
+
+      for(const book of items){
+        const info = book.volumeInfo || {};
+        const description = info.description || "";
+
+        if(description){
+          return { text: description, matchedLanguage: false };
+        }
+      }
+
+      return { text: "", matchedLanguage: false };
+    }
+
+    const strictUrl =
       "https://www.googleapis.com/books/v1/volumes?q=" +
       encodeURIComponent(query) +
       "&langRestrict=" + encodeURIComponent(targetLang) +
       "&maxResults=5" +
       "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
 
-    const response = await fetch(url);
+    let result = await tryRequest(strictUrl);
 
-    if(!response.ok){
-      throw new Error("HTTP " + response.status);
+    if(result.text){
+      return result;
     }
 
-    const data = await response.json();
-    const items = data.items || [];
+    const fallbackUrl =
+      "https://www.googleapis.com/books/v1/volumes?q=" +
+      encodeURIComponent(query) +
+      "&maxResults=5" +
+      "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
 
-    for(const book of items){
-      const info = book.volumeInfo || {};
-      const description = info.description || "";
-      if(description){
-        return description;
-      }
-    }
+    result = await tryRequest(fallbackUrl);
 
-    return "";
+    return result;
   } catch (error) {
     console.error("Google Books description error:", error);
-    return "";
+    return { text: "", matchedLanguage: false };
   }
 }
     
-   async function openCard(title){
+    async function openCard(title){
   currentOpenTitle = title;
 
   const item = (demoData[currentCategory] || []).find(x => x.title === title);
@@ -1539,37 +1597,58 @@
     descriptionEl.textContent = t().labels.searching;
 
     let fetchedDescription = "";
+    let matchedLanguage = false;
 
     if(item && item.work_key){
       fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+      if(fetchedDescription){
+        if(currentLanguage === "ru" && looksLikeRussian(fetchedDescription)){
+          matchedLanguage = true;
+        }
+
+        if(currentLanguage === "en" && looksLikeEnglish(fetchedDescription)){
+          matchedLanguage = true;
+        }
+      }
     }
 
     if(!fetchedDescription){
-      fetchedDescription = await fetchGoogleBooksDescription(
+      const googleResult = await fetchGoogleBooksDescription(
         item?.title || title,
         item?.creator || ""
       );
+
+      fetchedDescription = googleResult.text || "";
+      matchedLanguage = googleResult.matchedLanguage || false;
     }
 
     if(fetchedDescription){
-      item.description = item.description || fetchedDescription;
+      item.description = fetchedDescription;
 
-      if(currentLanguage === "ru"){
-        item.description_ru = fetchedDescription;
+      if(matchedLanguage){
+        if(currentLanguage === "ru"){
+          item.description_ru = fetchedDescription;
+        }
+
+        if(currentLanguage === "en"){
+          item.description_en = fetchedDescription;
+        }
       }
 
-      if(currentLanguage === "en"){
-        item.description_en = fetchedDescription;
-      }
-
-      descriptionEl.textContent = getBestDescription(item);
+      descriptionEl.textContent = getBestDescription(item) || fetchedDescription;
 
       detailsDatabase[title] = {
         description: item.description || fetchedDescription
       };
 
       if(!isPublicView){
-        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+        await updateDescriptionInSupabase(
+          title,
+          currentCategory,
+          fetchedDescription,
+          matchedLanguage
+        );
       }
     } else {
       descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
@@ -1654,25 +1733,36 @@
       return true;
     }
 
-    async function updateStatusInSupabase(title, category, status){
-      const { data: authData } = await supabaseClient.auth.getUser();
-      if(!authData.user) return false;
+    async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
+  if(!description) return false;
 
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update({ status: status })
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
+  const updateData = {
+    description: description
+  };
 
-      if(error){
-        console.error("Supabase update error:", error);
-        alert(t().labels.dbUpdateError + ": " + error.message);
-        return false;
-      }
-
-      return true;
+  if(matchedLanguage){
+    if(currentLanguage === "ru"){
+      updateData.description_ru = description;
     }
+
+    if(currentLanguage === "en"){
+      updateData.description_en = description;
+    }
+  }
+
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update(updateData)
+    .eq("title", title)
+    .eq("category", category);
+
+  if(error){
+    console.error("Supabase description update error:", error);
+    return false;
+  }
+
+  return true;
+}
 
     async function loadCategoryFromSupabase(category){
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
