@@ -1470,7 +1470,7 @@ function looksLikeEnglish(text){
   return /[A-Za-z]/.test(text);
 }
 
-    async function fetchGoogleBooksDescription(title, author = ""){
+   async function fetchGoogleBooksDescription(title, author = ""){
   try {
     const targetLang = currentLanguage === "ru" ? "ru" : "en";
 
@@ -1504,7 +1504,16 @@ function looksLikeEnglish(text){
     for(const book of items){
       const info = book.volumeInfo || {};
       const description = info.description || "";
-      if(description){
+
+      if(!description){
+        continue;
+      }
+
+      if(targetLang === "ru" && looksLikeRussian(description)){
+        return description;
+      }
+
+      if(targetLang === "en" && looksLikeEnglish(description)){
         return description;
       }
     }
