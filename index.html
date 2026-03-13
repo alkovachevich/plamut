@@ -1360,35 +1360,35 @@
     }
 
     async function updateDescriptionInSupabase(title, category, description){
-      const { data: authData } = await supabaseClient.auth.getUser();
-      if(!authData.user) return false;
+  const updateData = {};
 
-      const updateData = {
-        description: description
-      };
+  if(!description) return false;
 
-      if(currentLanguage === "ru"){
-        updateData.description_ru = description;
-      }
+  if(currentLanguage === "ru"){
+    updateData.description_ru = description;
+  }
 
-      if(currentLanguage === "en"){
-        updateData.description_en = description;
-      }
+  if(currentLanguage === "en"){
+    updateData.description_en = description;
+  }
 
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update(updateData)
-        .eq("user_id", authData.user.id)
-        .eq("title", title)
-        .eq("category", category);
+  if(Object.keys(updateData).length === 0){
+    updateData.description = description;
+  }
 
-      if(error){
-        console.error("Supabase description update error:", error);
-        return false;
-      }
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update(updateData)
+    .eq("title", title)
+    .eq("category", category);
 
-      return true;
-    }
+  if(error){
+    console.error("Supabase description update error:", error);
+    return false;
+  }
+
+  return true;
+}
 
     async function saveCanonicalKey(){
       const keyInput = document.getElementById("canonical-key-input");
@@ -1440,85 +1440,88 @@
     }
 
     async function openCard(title){
-      currentOpenTitle = title;
+  currentOpenTitle = title;
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
-      let description = getBestDescription(item);
+  const item = (demoData[currentCategory] || []).find(x => x.title === title);
 
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
 
-      document.getElementById("details-title").textContent = title;
-      document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
+  document.getElementById("details-title").textContent = title;
+  document.getElementById("details-creator").textContent = item?.creator || "";
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
 
-      const coverBox = document.getElementById("details-cover-box");
+  const coverBox = document.getElementById("details-cover-box");
 
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
+  if(item && item.cover){
+    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
+  } else {
+    coverBox.textContent = t().labels.cover;
+  }
+
+  const descriptionEl = document.getElementById("details-description");
+
+  const hasCurrentLanguageDescription =
+    (currentLanguage === "ru" && item?.description_ru) ||
+    (currentLanguage === "en" && item?.description_en);
+
+  if(hasCurrentLanguageDescription){
+    descriptionEl.textContent = getBestDescription(item);
+  } else if(item && item.work_key){
+    descriptionEl.textContent = t().labels.searching;
+
+    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+    if(fetchedDescription){
+      item.description = item.description || fetchedDescription;
+
+      if(currentLanguage === "ru"){
+        item.description_ru = fetchedDescription;
       }
 
-      const descriptionEl = document.getElementById("details-description");
-
-      if(description){
-        descriptionEl.textContent = description;
-      } else if(item && item.work_key){
-        descriptionEl.textContent = t().labels.searching;
-
-        const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-
-        if(fetchedDescription){
-          descriptionEl.textContent = fetchedDescription;
-
-          item.description = fetchedDescription;
-
-          if(currentLanguage === "ru"){
-            item.description_ru = fetchedDescription;
-          }
-
-          if(currentLanguage === "en"){
-            item.description_en = fetchedDescription;
-          }
-
-          detailsDatabase[title] = {
-            description: fetchedDescription
-          };
-
-          if(!isPublicView){
-            await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
-          }
-        } else {
-          descriptionEl.textContent = t().labels.noDescription;
-        }
-      } else {
-        descriptionEl.textContent = t().labels.noDescription;
+      if(currentLanguage === "en"){
+        item.description_en = fetchedDescription;
       }
 
-      const canonicalSection = document.getElementById("canonical-key-section");
-      const canonicalInput = document.getElementById("canonical-key-input");
+      descriptionEl.textContent = getBestDescription(item);
 
-      if(canonicalInput && canonicalSection){
-        if(isPublicView){
-          canonicalSection.classList.add("hidden");
-        } else {
-          canonicalSection.classList.remove("hidden");
-          canonicalInput.value = item?.canonical_key || "";
-        }
+      detailsDatabase[title] = {
+        description: item.description || fetchedDescription
+      };
+
+      if(!isPublicView){
+        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
       }
-
-      const statusBtn = document.getElementById("change-status-details-btn");
-
-      if(statusBtn){
-        if(isPublicView){
-          statusBtn.classList.add("hidden");
-        } else {
-          statusBtn.classList.remove("hidden");
-        }
-      }
+    } else {
+      descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
     }
+  } else {
+    descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+  }
+
+  const canonicalSection = document.getElementById("canonical-key-section");
+  const canonicalInput = document.getElementById("canonical-key-input");
+
+  if(canonicalInput && canonicalSection){
+    if(isPublicView){
+      canonicalSection.classList.add("hidden");
+    } else {
+      canonicalSection.classList.remove("hidden");
+      canonicalInput.value = item?.canonical_key || "";
+    }
+  }
+
+  const statusBtn = document.getElementById("change-status-details-btn");
+
+  if(statusBtn){
+    if(isPublicView){
+      statusBtn.classList.add("hidden");
+    } else {
+      statusBtn.classList.remove("hidden");
+    }
+  }
+}
 
     async function saveItemToSupabase(
       title,
