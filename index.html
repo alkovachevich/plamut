@@ -1551,8 +1551,32 @@ function looksLikeEnglish(text){
     return { text: "", matchedLanguage: false };
   }
 }
+
+    async function translateTextToRussian(text){
+  if(!text) return "";
+
+  try {
+    const url =
+      "https://api.mymemory.translated.net/get?q=" +
+      encodeURIComponent(text) +
+      "&langpair=" +
+      encodeURIComponent("en|ru");
+
+    const response = await fetch(url);
+
+    if(!response.ok){
+      throw new Error("HTTP " + response.status);
+    }
+
+    const data = await response.json();
+    return data?.responseData?.translatedText || "";
+  } catch (error) {
+    console.error("Translation error:", error);
+    return "";
+  }
+}
     
-   async function openCard(title){
+async function openCard(title){
   currentOpenTitle = title;
 
   const item = (demoData[currentCategory] || []).find(x => x.title === title);
@@ -1575,40 +1599,42 @@ function looksLikeEnglish(text){
 
   const descriptionEl = document.getElementById("details-description");
 
-  const hasCurrentLanguageDescription =
-    (currentLanguage === "ru" && item?.description_ru) ||
-    (currentLanguage === "en" && item?.description_en);
-
-  if(hasCurrentLanguageDescription){
-    descriptionEl.textContent = getBestDescription(item);
-  } else {
+  if(currentLanguage === "ru" && item?.description_ru){
+    descriptionEl.textContent = item.description_ru;
+  } else if(currentLanguage === "en" && item?.description_en){
+    descriptionEl.textContent = item.description_en;
+  } else if(currentLanguage === "ru" && item?.description){
     descriptionEl.textContent = t().labels.searching;
 
-    let fetchedDescription = "";
-    let matchedLanguage = false;
+    const translated = await translateTextToRussian(item.description);
 
-    if(item && item.work_key){
-      const openLibraryDescription = await fetchOpenLibraryDescription(item.work_key);
+    if(translated){
+      item.description_ru = translated;
+      descriptionEl.textContent = translated;
 
-      if(openLibraryDescription){
-        fetchedDescription = openLibraryDescription;
-
-        if(currentLanguage === "en" && looksLikeEnglish(openLibraryDescription)){
-          matchedLanguage = true;
-        }
+      if(!isPublicView){
+        await supabaseClient
+          .from("user_media")
+          .update({ description_ru: translated })
+          .eq("title", title)
+          .eq("category", currentCategory);
       }
+    } else {
+      descriptionEl.textContent = item.description;
     }
+  } else if(item?.description){
+    descriptionEl.textContent = item.description;
+  } else if(item && item.work_key){
+    descriptionEl.textContent = t().labels.searching;
+
+    let fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
 
     if(!fetchedDescription){
       const googleResult = await fetchGoogleBooksDescription(
         item?.title || title,
         item?.creator || ""
       );
-
-      if(googleResult.text){
-        fetchedDescription = googleResult.text;
-        matchedLanguage = googleResult.matchedLanguage || false;
-      }
+      fetchedDescription = googleResult.text || "";
     }
 
     if(fetchedDescription){
@@ -1618,23 +1644,45 @@ function looksLikeEnglish(text){
         item.description_en = fetchedDescription;
       }
 
-      descriptionEl.textContent = getBestDescription(item)  item.description  t().labels.noDescription;
+      if(currentLanguage === "ru"){
+        const translated = await translateTextToRussian(fetchedDescription);
 
-      detailsDatabase[title] = {
-        description: item.description || fetchedDescription
-      };
+        if(translated){
+          item.description_ru = translated;
+        }
+      }
+
+      const bestDescription =
+        currentLanguage === "ru"
+          ? (item.description_ru || item.description)
+          : (item.description_en || item.description);
+
+      descriptionEl.textContent = bestDescription || t().labels.noDescription;
 
       if(!isPublicView){
-        await updateDescriptionInSupabase(
-          title,
-          currentCategory,
-          fetchedDescription,
-          matchedLanguage
-        );
+        const updateData = {
+          description: item.description || fetchedDescription
+        };
+
+        if(item.description_en){
+          updateData.description_en = item.description_en;
+        }
+
+        if(item.description_ru){
+          updateData.description_ru = item.description_ru;
+        }
+
+        await supabaseClient
+          .from("user_media")
+          .update(updateData)
+          .eq("title", title)
+          .eq("category", currentCategory);
       }
     } else {
-      descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+      descriptionEl.textContent = t().labels.noDescription;
     }
+  } else {
+    descriptionEl.textContent = t().labels.noDescription;
   }
 
   const canonicalSection = document.getElementById("canonical-key-section");
