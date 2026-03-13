@@ -893,7 +893,7 @@
           <div class="media-info">
             <h3 class="media-title">${escapeHtml(item.title)}</h3>
             ${creatorLine}
-            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status))}</div>
+            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
             ${actionsHtml}
           </div>
         `;
@@ -1089,75 +1089,83 @@
     }
 
     async function fetchOpenLibraryDescription(workKey){
-  if(!workKey) return "";
+      if(!workKey) return "";
 
-  try {
-    const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
-    const workUrl = "https://openlibrary.org" + cleanKey + ".json";
+      try {
+        const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
+        const workUrl = "https://openlibrary.org" + cleanKey + ".json";
 
-    // 1. Сначала пробуем получить work
-    const workResponse = await fetch(workUrl);
-    if(!workResponse.ok){
-      throw new Error("HTTP " + workResponse.status);
-    }
+        const workResponse = await fetch(workUrl);
+        if(!workResponse.ok){
+          throw new Error("HTTP " + workResponse.status);
+        }
 
-    const workData = await workResponse.json();
+        const workData = await workResponse.json();
 
-    function extractDescription(obj){
-      if(!obj) return "";
-      if(typeof obj.description === "string") return obj.description;
-      if(obj.description && typeof obj.description.value === "string") return obj.description.value;
-      return "";
-    }
+        function extractDescription(obj){
+          if(!obj) return "";
+          if(typeof obj.description === "string") return obj.description.trim();
+          if(obj.description && typeof obj.description.value === "string") return obj.description.value.trim();
+          return "";
+        }
 
-    // 2. Ищем описание в editions на языке системы
-    const editionsUrl = "https://openlibrary.org" + cleanKey + "/editions.json";
-    const editionsResponse = await fetch(editionsUrl);
+        const targetLangKey =
+          currentLanguage === "ru"
+            ? "/languages/rus"
+            : currentLanguage === "en"
+              ? "/languages/eng"
+              : "";
 
-    if(editionsResponse.ok){
-      const editionsData = await editionsResponse.json();
-      const entries = editionsData.entries  editionsData.docs  [];
+        if(targetLangKey){
+          const editionsUrl = "https://openlibrary.org" + cleanKey + "/editions.json?limit=20";
+          const editionsResponse = await fetch(editionsUrl);
 
-      const targetLangKey =
-        currentLanguage === "ru"
-          ? "/languages/rus"
-          : currentLanguage === "en"
-            ? "/languages/eng"
-            : "";
+          if(editionsResponse.ok){
+            const editionsData = await editionsResponse.json();
+            const entries = Array.isArray(editionsData.entries)
+              ? editionsData.entries
+              : Array.isArray(editionsData.docs)
+                ? editionsData.docs
+                : [];
 
-      if(targetLangKey){
-        for(const edition of entries){
-          const languages = edition.languages || [];
-          const hasTargetLanguage = languages.some(lang => {
-            return lang && (lang.key === targetLangKey || lang === targetLangKey);
-          });
+            for(const edition of entries){
+              const languages = Array.isArray(edition.languages) ? edition.languages : [];
+              const hasTargetLanguage = languages.some(lang => {
+                if (!lang) return false;
+                if (typeof lang === "string") return lang === targetLangKey;
+                return lang.key === targetLangKey;
+              });
 
-          if(!hasTargetLanguage) continue;
+              if(!hasTargetLanguage) continue;
 
-          const editionKey = edition.key || "";
-          if(!editionKey) continue;
+              const editionDescription = extractDescription(edition);
+              if(editionDescription){
+                return editionDescription;
+              }
 
-          const editionUrl = "https://openlibrary.org" + editionKey + ".json";
-          const editionResponse = await fetch(editionUrl);
-          if(!editionResponse.ok) continue;
+              const editionKey = edition.key || "";
+              if(!editionKey) continue;
 
-          const editionData = await editionResponse.json();
-          const editionDescription = extractDescription(editionData);
+              const editionUrl = "https://openlibrary.org" + editionKey + ".json";
+              const editionResponse = await fetch(editionUrl);
+              if(!editionResponse.ok) continue;
 
-          if(editionDescription){
-            return editionDescription;
+              const editionData = await editionResponse.json();
+              const fullEditionDescription = extractDescription(editionData);
+
+              if(fullEditionDescription){
+                return fullEditionDescription;
+              }
+            }
           }
         }
+
+        return extractDescription(workData);
+      } catch (error) {
+        console.error("Open Library description error:", error);
+        return "";
       }
     }
-
-    // 3. Fallback: описание work
-    return extractDescription(workData);
-  } catch (error) {
-    console.error("Open Library description error:", error);
-    return "";
-  }
-}
 
     function isDuplicateItem(category, title, workKey = ""){
       const items = demoData[category] || [];
@@ -1167,7 +1175,7 @@
           return true;
         }
 
-        return item.title.trim().toLowerCase() === title.trim().toLowerCase();
+        return (item.title || "").trim().toLowerCase() === title.trim().toLowerCase();
       });
     }
 
@@ -1249,7 +1257,9 @@
         description: description,
         creator: authors,
         work_key: workKey,
-        canonical_key: canonicalKey
+        canonical_key: canonicalKey,
+        description_ru: currentLanguage === "ru" ? description : "",
+        description_en: currentLanguage === "en" ? description : ""
       });
 
       closeAddModal();
@@ -1305,7 +1315,9 @@
         description: description,
         creator: creator,
         work_key: "",
-        canonical_key: canonicalKey
+        canonical_key: canonicalKey,
+        description_ru: currentLanguage === "ru" ? description : "",
+        description_en: currentLanguage === "en" ? description : ""
       });
 
       closeManualModal();
@@ -1314,6 +1326,7 @@
     }
 
     function changeStatus(index){
+      if (!demoData[currentCategory] || !demoData[currentCategory][index]) return;
       currentStatusIndex = index;
       currentOpenTitle = demoData[currentCategory][index].title;
       document.getElementById("status-modal").classList.remove("hidden");
@@ -1360,35 +1373,41 @@
     }
 
     async function updateDescriptionInSupabase(title, category, description){
-  const updateData = {};
+      const updateData = {};
 
-  if(!description) return false;
+      if(!description) return false;
 
-  if(currentLanguage === "ru"){
-    updateData.description_ru = description;
-  }
+      if(currentLanguage === "ru"){
+        updateData.description_ru = description;
+      }
 
-  if(currentLanguage === "en"){
-    updateData.description_en = description;
-  }
+      if(currentLanguage === "en"){
+        updateData.description_en = description;
+      }
 
-  if(Object.keys(updateData).length === 0){
-    updateData.description = description;
-  }
+      if(Object.keys(updateData).length === 0){
+        updateData.description = description;
+      }
 
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update(updateData)
-    .eq("title", title)
-    .eq("category", category);
+      const { data: authData } = await supabaseClient.auth.getUser();
+      if(!authData.user){
+        return false;
+      }
 
-  if(error){
-    console.error("Supabase description update error:", error);
-    return false;
-  }
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update(updateData)
+        .eq("user_id", authData.user.id)
+        .eq("title", title)
+        .eq("category", category);
 
-  return true;
-}
+      if(error){
+        console.error("Supabase description update error:", error);
+        return false;
+      }
+
+      return true;
+    }
 
     async function saveCanonicalKey(){
       const keyInput = document.getElementById("canonical-key-input");
@@ -1440,88 +1459,88 @@
     }
 
     async function openCard(title){
-  currentOpenTitle = title;
+      currentOpenTitle = title;
 
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
 
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
 
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
 
-  const coverBox = document.getElementById("details-cover-box");
+      const coverBox = document.getElementById("details-cover-box");
 
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
-  }
-
-  const descriptionEl = document.getElementById("details-description");
-
-  const hasCurrentLanguageDescription =
-    (currentLanguage === "ru" && item?.description_ru) ||
-    (currentLanguage === "en" && item?.description_en);
-
-  if(hasCurrentLanguageDescription){
-    descriptionEl.textContent = getBestDescription(item);
-  } else if(item && item.work_key){
-    descriptionEl.textContent = t().labels.searching;
-
-    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-
-    if(fetchedDescription){
-      item.description = item.description || fetchedDescription;
-
-      if(currentLanguage === "ru"){
-        item.description_ru = fetchedDescription;
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
       }
 
-      if(currentLanguage === "en"){
-        item.description_en = fetchedDescription;
+      const descriptionEl = document.getElementById("details-description");
+
+      const hasCurrentLanguageDescription =
+        (currentLanguage === "ru" && item?.description_ru) ||
+        (currentLanguage === "en" && item?.description_en);
+
+      if(hasCurrentLanguageDescription){
+        descriptionEl.textContent = getBestDescription(item);
+      } else if(item && item.work_key){
+        descriptionEl.textContent = t().labels.searching;
+
+        const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+        if(fetchedDescription){
+          item.description = item.description || fetchedDescription;
+
+          if(currentLanguage === "ru"){
+            item.description_ru = fetchedDescription;
+          }
+
+          if(currentLanguage === "en"){
+            item.description_en = fetchedDescription;
+          }
+
+          descriptionEl.textContent = getBestDescription(item);
+
+          detailsDatabase[title] = {
+            description: item.description || fetchedDescription
+          };
+
+          if(!isPublicView){
+            await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+          }
+        } else {
+          descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+        }
+      } else {
+        descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
       }
 
-      descriptionEl.textContent = getBestDescription(item);
+      const canonicalSection = document.getElementById("canonical-key-section");
+      const canonicalInput = document.getElementById("canonical-key-input");
 
-      detailsDatabase[title] = {
-        description: item.description || fetchedDescription
-      };
-
-      if(!isPublicView){
-        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+      if(canonicalInput && canonicalSection){
+        if(isPublicView){
+          canonicalSection.classList.add("hidden");
+        } else {
+          canonicalSection.classList.remove("hidden");
+          canonicalInput.value = item?.canonical_key || "";
+        }
       }
-    } else {
-      descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
+
+      const statusBtn = document.getElementById("change-status-details-btn");
+
+      if(statusBtn){
+        if(isPublicView){
+          statusBtn.classList.add("hidden");
+        } else {
+          statusBtn.classList.remove("hidden");
+        }
+      }
     }
-  } else {
-    descriptionEl.textContent = getBestDescription(item) || t().labels.noDescription;
-  }
-
-  const canonicalSection = document.getElementById("canonical-key-section");
-  const canonicalInput = document.getElementById("canonical-key-input");
-
-  if(canonicalInput && canonicalSection){
-    if(isPublicView){
-      canonicalSection.classList.add("hidden");
-    } else {
-      canonicalSection.classList.remove("hidden");
-      canonicalInput.value = item?.canonical_key || "";
-    }
-  }
-
-  const statusBtn = document.getElementById("change-status-details-btn");
-
-  if(statusBtn){
-    if(isPublicView){
-      statusBtn.classList.add("hidden");
-    } else {
-      statusBtn.classList.remove("hidden");
-    }
-  }
-}
 
     async function saveItemToSupabase(
       title,
@@ -1629,7 +1648,7 @@
         const dedupeKey =
           item.canonical_key ||
           item.work_key ||
-          item.title.trim().toLowerCase();
+          (item.title || "").trim().toLowerCase();
 
         if(seen.has(dedupeKey)){
           return;
@@ -1840,17 +1859,17 @@
       if(profileError){
         console.error(profileError);
         alert(t().labels.profileLookupError);
-        return;
+        return false;
       }
 
       if(!profile){
         alert(t().labels.userNotFound);
-        return;
+        return false;
       }
 
       if(profile.is_public === false){
         alert(t().labels.libraryPrivate);
-        return;
+        return false;
       }
 
       const { data, error } = await supabaseClient
@@ -1861,7 +1880,7 @@
 
       if(error){
         console.error(error);
-        return;
+        return false;
       }
 
       isPublicView = true;
@@ -1882,7 +1901,7 @@
         const dedupeKey =
           item.canonical_key ||
           item.work_key ||
-          item.title.trim().toLowerCase();
+          (item.title || "").trim().toLowerCase();
 
         const fullKey = `${item.category}:${dedupeKey}`;
 
@@ -1934,18 +1953,21 @@
         currentPublicProfileName + " — " + translateCategory("Books");
 
       renderShelf();
+      return true;
     }
 
-    function checkPublicRoute(){
+    async function checkPublicRoute(){
       const path = window.location.pathname;
 
       if(path.startsWith("/u/")){
         const username = path.replace("/u/", "").trim();
 
         if(username){
-          loadPublicLibrary(username);
+          return await loadPublicLibrary(username);
         }
       }
+
+      return false;
     }
 
     async function shareLibrary(){
@@ -1977,9 +1999,16 @@
       }
     }
 
-    applyTranslations();
-    checkPublicRoute();
-    checkAuth();
+    async function init(){
+      applyTranslations();
+      const openedPublic = await checkPublicRoute();
+
+      if(!openedPublic){
+        await checkAuth();
+      }
+    }
+
+    init();
   </script>
 
 </body>
