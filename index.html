@@ -31,7 +31,10 @@
 
     .top-right{
       display:flex;
-      justify-content:flex-end;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
       margin-bottom:20px;
     }
 
@@ -305,18 +308,18 @@
 
 <body>
 
-  <div class="top-right" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-  <div class="lang-switch">
-    <button class="button" onclick="setLanguage('en')">EN</button>
-    <button class="button" onclick="setLanguage('ru')">RU</button>
-  </div>
+  <div class="top-right">
+    <div class="lang-switch">
+      <button class="button" onclick="setLanguage('en')">EN</button>
+      <button class="button" onclick="setLanguage('ru')">RU</button>
+    </div>
 
-  <div style="display:flex;gap:8px;align-items:center;">
-    <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
-    <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
-    <button id="logout-top-btn" class="button hidden" onclick="logout()">Logout</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
+      <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
+      <button id="logout-top-btn" class="button hidden" onclick="logout()">Logout</button>
+    </div>
   </div>
-</div>
 
   <div id="auth-screen">
     <h2>Plamut Login</h2>
@@ -330,42 +333,42 @@
     </div>
   </div>
 
-  <div id="home-screen">
-  <h1>Plamut</h1>
-  <div class="subtitle" id="home-subtitle"></div>
+  <div id="home-screen" class="hidden">
+    <h1>Plamut</h1>
+    <div class="subtitle" id="home-subtitle"></div>
 
-  <div class="grid">
-    <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
-    <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
-    <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
-    <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
-    <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
-    <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+    <div class="grid">
+      <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
+      <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
+      <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
+      <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
+      <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
+      <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+    </div>
+
+    <div style="margin-top:16px;">
+      <button class="button" onclick="shareLibrary()">Share Library</button>
+    </div>
   </div>
 
-  <div style="margin-top:16px;">
-    <button class="button" onclick="shareLibrary()">Share Library</button>
-  </div>
-</div>
+  <div id="category-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="goHome()" id="back-home-btn"></button>
+      <h2 id="category-title" style="margin:0;"></h2>
+      <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
+    </div>
 
- <div id="category-screen" class="hidden">
-  <div class="topbar">
-    <button class="button" onclick="goHome()" id="back-home-btn"></button>
-    <h2 id="category-title" style="margin:0;"></h2>
-    <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
-  </div>
+    <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
+      <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
+      <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
+      <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
+      <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
+      <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+    </div>
 
-  <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-    <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
-    <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
-    <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
-    <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
-    <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
-    <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+    <div class="shelf" id="shelf"></div>
   </div>
-
-  <div class="shelf" id="shelf"></div>
-</div>
 
   <div id="details-screen" class="hidden">
     <div class="topbar">
@@ -443,19 +446,19 @@
   </div>
 
   <div id="profile-modal" class="modal hidden">
-  <div class="modal-box">
-    <h3>Profile</h3>
+    <div class="modal-box">
+      <h3>Profile</h3>
 
-    <input id="profile-username" class="input" placeholder="Username">
-    <input id="profile-display-name" class="input" placeholder="Display name">
+      <input id="profile-username" class="input" placeholder="Username">
+      <input id="profile-display-name" class="input" placeholder="Display name">
 
-    <div class="modal-actions">
-      <button class="button" onclick="closeProfileModal()">Close</button>
-      <button class="button" onclick="saveProfile()">Save Profile</button>
+      <div class="modal-actions">
+        <button class="button" onclick="closeProfileModal()">Close</button>
+        <button class="button" onclick="saveProfile()">Save Profile</button>
+      </div>
     </div>
   </div>
-</div>
-  
+
   <div id="status-modal" class="modal hidden">
     <div class="modal-box">
       <h3 id="status-modal-title"></h3>
@@ -712,75 +715,78 @@
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
-   async function openCategory(name){
-  isPublicView = false;
-  currentCategory = name;
+    async function openCategory(name){
+      isPublicView = false;
+      currentCategory = name;
 
-  hideAllScreens();
-  document.getElementById("category-screen").classList.remove("hidden");
-  document.getElementById("category-title").textContent = translateCategory(name);
+      hideAllScreens();
+      document.getElementById("category-screen").classList.remove("hidden");
+      document.getElementById("category-title").textContent = translateCategory(name);
 
-  const addBtn = document.getElementById("add-new-btn");
-  if(addBtn){
-    addBtn.classList.remove("hidden");
-    addBtn.style.display = "";
-  }
+      const addBtn = document.getElementById("add-new-btn");
+      if(addBtn){
+        addBtn.classList.remove("hidden");
+        addBtn.style.display = "";
+      }
 
-  const tabs = document.getElementById("public-category-tabs");
-  if(tabs){
-    tabs.classList.add("hidden");
-    tabs.style.display = "none";
-  }
+      const tabs = document.getElementById("public-category-tabs");
+      if(tabs){
+        tabs.classList.add("hidden");
+        tabs.style.display = "none";
+      }
 
-  await loadCategoryFromSupabase(name);
-}
+      await loadCategoryFromSupabase(name);
+    }
 
-   function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  if(!shelf) return;
+    function renderShelf(){
+      const shelf = document.getElementById("shelf");
+      if(!shelf) return;
 
-  shelf.innerHTML = "";
+      shelf.innerHTML = "";
 
-  const items = demoData[currentCategory] || [];
+      const items = demoData[currentCategory] || [];
 
-  items.forEach((item, index) => {
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const coverHtml = item.cover
-      ? <img src="${item.cover}" alt="${item.title}">
-      : t().labels.cover;
+      items.forEach((item, index) => {
+        const safeTitle = item.title.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
-    const creatorLine = item.creator
-      ? <div class="media-meta">${item.creator}</div>
-      : "";
+        const coverHtml = item.cover
+          ? `<img src="${item.cover}" alt="${item.title}">`
+          : t().labels.cover;
 
-    const actionsHtml = isPublicView
-      ? <div class="media-actions">
-           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-         </div>
-      : <div class="media-actions">
-           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-         </div>;
+        const creatorLine = item.creator
+          ? `<div class="media-meta">${item.creator}</div>`
+          : "";
 
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = 
-      <div class="media-cover">${coverHtml}</div>
-      <div class="media-info">
-        <h3 class="media-title">${item.title}</h3>
-        ${creatorLine}
-        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-        ${actionsHtml}
-      </div>
-    ;
-    shelf.appendChild(card);
-  });
-}
+        const actionsHtml = isPublicView
+          ? `<div class="media-actions">
+               <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+             </div>`
+          : `<div class="media-actions">
+               <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+               <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+             </div>`;
+
+        const card = document.createElement("div");
+        card.className = "media-card";
+        card.innerHTML = `
+          <div class="media-cover">${coverHtml}</div>
+          <div class="media-info">
+            <h3 class="media-title">${item.title}</h3>
+            ${creatorLine}
+            <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+            ${actionsHtml}
+          </div>
+        `;
+
+        shelf.appendChild(card);
+      });
+    }
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
       document.getElementById("details-screen").classList.add("hidden");
+      document.getElementById("auth-screen").classList.add("hidden");
     }
 
     function goHome(){
@@ -1113,6 +1119,8 @@
 
     async function setStatus(status){
       const item = demoData[currentCategory][currentStatusIndex];
+      if(!item) return;
+
       const oldStatus = item.status;
 
       item.status = status;
@@ -1392,105 +1400,105 @@
       alert("User created. Check your email.");
     }
 
-   async function login(){
-  const email = document.getElementById("login-email").value;
-  const password = document.getElementById("login-password").value;
+    async function login(){
+      const email = document.getElementById("login-email").value;
+      const password = document.getElementById("login-password").value;
 
-  const { error } = await supabaseClient.auth.signInWithPassword({
-    email: email,
-    password: password
-  });
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
 
-  if(error){
-    alert(error.message);
-    return;
-  }
+      if(error){
+        alert(error.message);
+        return;
+      }
 
-  document.getElementById("auth-screen").classList.add("hidden");
-  document.getElementById("home-screen").classList.remove("hidden");
+      document.getElementById("auth-screen").classList.add("hidden");
+      document.getElementById("home-screen").classList.remove("hidden");
 
-  const loginBtn = document.getElementById("login-top-btn");
-  const logoutBtn = document.getElementById("logout-top-btn");
-  const profileBtn = document.getElementById("profile-btn");
+      const loginBtn = document.getElementById("login-top-btn");
+      const logoutBtn = document.getElementById("logout-top-btn");
+      const profileBtn = document.getElementById("profile-btn");
 
-  if(loginBtn) loginBtn.classList.add("hidden");
-  if(logoutBtn) logoutBtn.classList.remove("hidden");
-  if(profileBtn) profileBtn.classList.remove("hidden");
+      if(loginBtn) loginBtn.classList.add("hidden");
+      if(logoutBtn) logoutBtn.classList.remove("hidden");
+      if(profileBtn) profileBtn.classList.remove("hidden");
 
-  await loadProfile();
-}
+      await loadProfile();
+    }
 
     async function logout(){
       await supabaseClient.auth.signOut();
       location.reload();
     }
 
-   async function checkAuth(){
-  const { data } = await supabaseClient.auth.getUser();
+    async function checkAuth(){
+      const { data } = await supabaseClient.auth.getUser();
 
-  const loginBtn = document.getElementById("login-top-btn");
-  const logoutBtn = document.getElementById("logout-top-btn");
-  const profileBtn = document.getElementById("profile-btn");
+      const loginBtn = document.getElementById("login-top-btn");
+      const logoutBtn = document.getElementById("logout-top-btn");
+      const profileBtn = document.getElementById("profile-btn");
 
-  if(!data.user){
-    document.getElementById("auth-screen").classList.remove("hidden");
-    document.getElementById("home-screen").classList.add("hidden");
+      if(!data.user){
+        document.getElementById("auth-screen").classList.remove("hidden");
+        document.getElementById("home-screen").classList.add("hidden");
 
-    if(loginBtn) loginBtn.classList.remove("hidden");
-    if(logoutBtn) logoutBtn.classList.add("hidden");
-    if(profileBtn) profileBtn.classList.add("hidden");
-  } else {
-    document.getElementById("auth-screen").classList.add("hidden");
-    document.getElementById("home-screen").classList.remove("hidden");
+        if(loginBtn) loginBtn.classList.remove("hidden");
+        if(logoutBtn) logoutBtn.classList.add("hidden");
+        if(profileBtn) profileBtn.classList.add("hidden");
+      } else {
+        document.getElementById("auth-screen").classList.add("hidden");
+        document.getElementById("home-screen").classList.remove("hidden");
 
-    if(loginBtn) loginBtn.classList.add("hidden");
-    if(logoutBtn) logoutBtn.classList.remove("hidden");
-    if(profileBtn) profileBtn.classList.remove("hidden");
+        if(loginBtn) loginBtn.classList.add("hidden");
+        if(logoutBtn) logoutBtn.classList.remove("hidden");
+        if(profileBtn) profileBtn.classList.remove("hidden");
 
-    await loadProfile();
-  }
-}
+        await loadProfile();
+      }
+    }
 
     function openProfileModal(){
-  document.getElementById("profile-modal").classList.remove("hidden");
-}
+      document.getElementById("profile-modal").classList.remove("hidden");
+    }
 
-function closeProfileModal(){
-  document.getElementById("profile-modal").classList.add("hidden");
-}
+    function closeProfileModal(){
+      document.getElementById("profile-modal").classList.add("hidden");
+    }
 
-function showAuthScreen(){
-  hideAllScreens();
-  document.getElementById("auth-screen").classList.remove("hidden");
-}
-    
-   async function saveProfile(){
-  const username = document.getElementById("profile-username").value.trim();
-  const displayName = document.getElementById("profile-display-name").value.trim();
+    function showAuthScreen(){
+      hideAllScreens();
+      document.getElementById("auth-screen").classList.remove("hidden");
+    }
 
-  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+    async function saveProfile(){
+      const username = document.getElementById("profile-username").value.trim();
+      const displayName = document.getElementById("profile-display-name").value.trim();
 
-  if(authError || !authData.user){
-    alert("You must be logged in");
-    return;
-  }
+      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-  const { error } = await supabaseClient
-    .from("profiles")
-    .upsert({
-      id: authData.user.id,
-      username: username || null,
-      display_name: displayName || null
-    });
+      if(authError || !authData.user){
+        alert("You must be logged in");
+        return;
+      }
 
-  if(error){
-    alert(error.message);
-    return;
-  }
+      const { error } = await supabaseClient
+        .from("profiles")
+        .upsert({
+          id: authData.user.id,
+          username: username || null,
+          display_name: displayName || null
+        });
 
-  closeProfileModal();
-  alert("Profile saved");
-}
+      if(error){
+        alert(error.message);
+        return;
+      }
+
+      closeProfileModal();
+      alert("Profile saved");
+    }
 
     async function loadProfile(){
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
@@ -1503,7 +1511,7 @@ function showAuthScreen(){
         .from("profiles")
         .select("*")
         .eq("id", authData.user.id)
-        .single();
+        .maybeSingle();
 
       if(error || !data){
         return;
@@ -1649,46 +1657,44 @@ function showAuthScreen(){
     }
 
     function checkPublicRoute(){
-  const path = window.location.pathname;
+      const path = window.location.pathname;
 
-  if(path.startsWith("/u/")){
-    const username = path.replace("/u/", "").trim();
+      if(path.startsWith("/u/")){
+        const username = path.replace("/u/", "").trim();
 
-    if(username){
-      loadPublicLibrary(username);
+        if(username){
+          loadPublicLibrary(username);
+        }
+      }
     }
-  }
-}
 
     async function shareLibrary(){
+      const { data: authData } = await supabaseClient.auth.getUser();
 
-  const { data: authData } = await supabaseClient.auth.getUser();
+      if(!authData.user){
+        alert("You must be logged in");
+        return;
+      }
 
-  if(!authData.user){
-    alert("You must be logged in");
-    return;
-  }
+      const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("username")
+        .eq("id", authData.user.id)
+        .single();
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("username")
-    .eq("id", authData.user.id)
-    .single();
+      if(error || !data?.username){
+        alert("Set username first");
+        return;
+      }
 
-  if(error || !data?.username){
-    alert("Set username first");
-    return;
-  }
+      const url = window.location.origin + "/u/" + data.username;
 
-  const url = window.location.origin + "/u/" + data.username;
-
-  navigator.clipboard.writeText(url);
-
-  alert("Library link copied:\n" + url);
-}
+      await navigator.clipboard.writeText(url);
+      alert("Library link copied:\n" + url);
+    }
 
     applyTranslations();
-checkPublicRoute();
+    checkPublicRoute();
     checkAuth();
   </script>
 
