@@ -1475,6 +1475,7 @@ let currentPublicProfileName = "Library";
 }
     
  async function loadPublicLibrary(username){
+
   const { data: profile, error: profileError } = await supabaseClient
     .from("profiles")
     .select("id, username, display_name, is_public")
@@ -1509,7 +1510,9 @@ let currentPublicProfileName = "Library";
   }
 
   isPublicView = true;
-  currentPublicProfileName = profile.display_name  profile.username  "Library";
+
+  currentPublicProfileName =
+    profile.display_name  profile.username  "Library";
 
   demoData.Books = [];
   demoData.Movies = [];
@@ -1521,6 +1524,7 @@ let currentPublicProfileName = "Library";
   const seen = new Set();
 
   data.forEach(item => {
+
     const dedupeKey =
       item.canonical_key ||
       item.work_key ||
@@ -1534,7 +1538,7 @@ let currentPublicProfileName = "Library";
 
     seen.add(fullKey);
 
-    if (!demoData[item.category]) {
+    if(!demoData[item.category]){
       demoData[item.category] = [];
     }
 
@@ -1551,6 +1555,7 @@ let currentPublicProfileName = "Library";
     detailsDatabase[item.title] = {
       description: item.description || t().labels.noDescription
     };
+
   });
 
   hideAllScreens();
@@ -1558,17 +1563,16 @@ let currentPublicProfileName = "Library";
 
   const addBtn = document.getElementById("add-new-btn");
   if(addBtn){
-    addBtn.classList.add("hidden");
     addBtn.style.display = "none";
   }
 
   const tabs = document.getElementById("public-category-tabs");
   if(tabs){
-    tabs.classList.remove("hidden");
     tabs.style.display = "flex";
   }
 
   currentCategory = "Books";
+
   document.getElementById("category-title").textContent =
     currentPublicProfileName + " — " + translateCategory("Books");
 
