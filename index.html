@@ -1383,7 +1383,55 @@ async function loadProfile(){
   if(usernameInput) usernameInput.value = data.username || "";
   if(displayNameInput) displayNameInput.value = data.display_name || "";
 }
-    
+
+    async function loadPublicLibrary(username){
+
+  const { data: profile, error: profileError } = await supabaseClient
+    .from("profiles")
+    .select("id")
+    .eq("username", username)
+    .single();
+
+  if(profileError || !profile){
+    alert("User not found");
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", profile.id)
+    .order("id", { ascending: false });
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  demoData.Books = [];
+
+  data.forEach(item => {
+
+    demoData[item.category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      creator: item.creator || "",
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || ""
+    });
+
+  });
+
+  currentCategory = "Books";
+
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+
+  renderShelf();
+}
+
     applyTranslations();
   </script>
 
