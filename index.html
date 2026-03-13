@@ -915,148 +915,100 @@
       document.getElementById("manual-modal").classList.add("hidden");
     }
 
-   async function renderSearchResults() {
-  const container = document.getElementById("search-results");
-  const input = document.getElementById("search-input");
+    async function renderSearchResults() {
+      const container = document.getElementById("search-results");
+      const input = document.getElementById("search-input");
 
-  if (!container || !input) return;
+      if (!container || !input) return;
 
-  const query = input.value.trim();
-  container.innerHTML = "";
+      const query = input.value.trim();
+      container.innerHTML = "";
 
-  if (!query) {
-    container.innerHTML = <div class="small">${t().labels.noResults}</div>;
-    return;
-  }
-
-  if (currentCategory === "Books") {
-    container.innerHTML = <div class="small">${t().labels.searching}</div>;
-
-    try {
-      let items = [];
-      const tried = new Set();
-
-      async function fetchBooks(url) {
-        if (tried.has(url)) return [];
-        tried.add(url);
-
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error("HTTP " + response.status);
-        }
-
-        const data = await response.json();
-        return data.docs || [];
-      }
-
-      const normalizedQuery = query.replace(/\s+/g, " ").trim();
-
-      const generalUrl =
-        "https://openlibrary.org/search.json?q=" +
-        encodeURIComponent(normalizedQuery) +
-        "&limit=10";
-
-      items = await fetchBooks(generalUrl);
-
-      if (items.length === 0) {
-        const titleUrl =
-          "https://openlibrary.org/search.json?title=" +
-          encodeURIComponent(normalizedQuery) +
-          "&limit=10";
-
-        items = await fetchBooks(titleUrl);
-      }
-
-      if (items.length === 0) {
-        const authorUrl =
-          "https://openlibrary.org/search.json?author=" +
-          encodeURIComponent(normalizedQuery) +
-          "&limit=10";
-
-        items = await fetchBooks(authorUrl);
-      }
-
-      if (items.length === 0) {
-        const words = normalizedQuery.split(" ").filter(Boolean);
-
-        if (words.length >= 2) {
-          const firstHalf = words.slice(0, Math.ceil(words.length / 2)).join(" ");
-          const secondHalf = words.slice(Math.ceil(words.length / 2)).join(" ");
-
-          const comboUrl1 =
-            "https://openlibrary.org/search.json?title=" +
-            encodeURIComponent(firstHalf) +
-            "&author=" +
-            encodeURIComponent(secondHalf) +
-            "&limit=10";
-
-          items = await fetchBooks(comboUrl1);
-
-          if (items.length === 0) {
-            const comboUrl2 =
-              "https://openlibrary.org/search.json?title=" +
-              encodeURIComponent(secondHalf) +
-              "&author=" +
-              encodeURIComponent(firstHalf) +
-              "&limit=10";
-
-            items = await fetchBooks(comboUrl2);
-          }
-        }
-      }
-
-      if (items.length === 0) {
-        currentBookResults = [];
-        container.innerHTML = 
-          <div class="small">${t().labels.noBooksFound}</div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-            <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-          </div>
-        ;
+      if (!query) {
+        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
         return;
       }
 
-      currentBookResults = items;
-      container.innerHTML = "";
+      if (currentCategory === "Books") {
+        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
 
-      items.forEach(function (book, index) {
-        const title = book.title || "Untitled";
-        const authors = (book.author_name || []).join(", ");
-        const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+        try {
+          let items = [];
 
-        const row = document.createElement("div");
-        row.className = "search-item";
-        row.innerHTML = 
-          <div class="search-item-left">
-            <div class="search-item-title">${title}</div>
-            <div class="search-item-meta">${authors || "Book"}${year}</div>
-          </div>
-          <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
-        ;
-        container.appendChild(row);
-      });
+          const url1 =
+            "https://openlibrary.org/search.json?title=" +
+            encodeURIComponent(query) +
+            "&lang=" + encodeURIComponent(currentLanguage) +
+            "&limit=10";
 
-      return;
-    } catch (error) {
-      console.error("Open Library API error:", error);
-currentBookResults = [];
-      container.innerHTML = 
-        <div class="small">${t().labels.apiError}: ${error.message}</div>
+          const response1 = await fetch(url1);
+          const data1 = await response1.json();
+          items = data1.docs || [];
+
+          if (items.length === 0) {
+            const url2 =
+              "https://openlibrary.org/search.json?q=" +
+              encodeURIComponent(query) +
+              "&lang=" + encodeURIComponent(currentLanguage) +
+              "&limit=10";
+
+            const response2 = await fetch(url2);
+            const data2 = await response2.json();
+            items = data2.docs || [];
+          }
+
+          if (items.length === 0) {
+            currentBookResults = [];
+            container.innerHTML = `
+              <div class="small">${t().labels.noBooksFound}</div>
+              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+              </div>
+            `;
+            return;
+          }
+
+          currentBookResults = items;
+          container.innerHTML = "";
+
+          items.forEach(function (book, index) {
+            const title = book.title || "Untitled";
+            const authors = (book.author_name || []).join(", ");
+            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
+
+            const row = document.createElement("div");
+            row.className = "search-item";
+            row.innerHTML = `
+              <div class="search-item-left">
+                <div class="search-item-title">${title}</div>
+                <div class="search-item-meta">${authors || "Book"}${year}</div>
+              </div>
+              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+            `;
+            container.appendChild(row);
+          });
+
+          return;
+        } catch (error) {
+          console.error("Open Library API error:", error);
+          currentBookResults = [];
+          container.innerHTML = `
+            <div class="small">${t().labels.apiError}</div>
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+            </div>
+          `;
+          return;
+        }
+      }
+
+      container.innerHTML = `
+        <div class="small">${t().labels.noResults}</div>
         <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
           <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
         </div>
-      ;
-      return;
+      `;
     }
-  }
-
-  container.innerHTML = 
-    <div class="small">${t().labels.noResults}</div>
-    <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-      <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-    </div>
-  ;
-}
 
     async function fetchOpenLibraryDescription(workKey){
       if(!workKey) return "";
@@ -1811,30 +1763,29 @@ currentBookResults = [];
     }
 
     async function shareLibrary(){
-  const { data: authData } = await supabaseClient.auth.getUser();
+      const { data: authData } = await supabaseClient.auth.getUser();
 
-  if(!authData.user){
-    alert("You must be logged in");
-    return;
-  }
+      if(!authData.user){
+        alert(t().labels.mustBeLoggedIn);
+        return;
+      }
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("username")
-    .eq("id", authData.user.id)
-    .single();
+      const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("username")
+        .eq("id", authData.user.id)
+        .single();
 
-  if(error || !data?.username){
-    alert("Set username in profile first");
-    return;
-  }
+      if(error || !data?.username){
+        alert(t().labels.setUsernameFirst);
+        return;
+      }
 
-  const link = window.location.origin + "/u/" + data.username;
+      const url = window.location.origin + "/u/" + data.username;
 
-  await navigator.clipboard.writeText(link);
-
-  alert("Library link copied:\n" + link);
-}
+      await navigator.clipboard.writeText(url);
+      alert(t().labels.libraryLinkCopied + "\n" + url);
+    }
 
     applyTranslations();
     checkPublicRoute();
