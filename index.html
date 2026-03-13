@@ -371,14 +371,14 @@
     <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
   </div>
 
-  <div id="public-category-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-    <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
-    <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
-    <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
-    <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
-    <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
-    <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
-  </div>
+  <div id="public-category-tabs" class="hidden" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+  <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
+  <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
+  <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
+  <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
+  <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
+  <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+</div>
 
   <div class="shelf" id="shelf"></div>
 </div>
@@ -713,6 +713,7 @@ let currentPublicProfileName = "Library";
   async function openCategory(name){
   isPublicView = false;
   currentCategory = name;
+
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   document.getElementById("category-title").textContent = translateCategory(name);
@@ -720,11 +721,13 @@ let currentPublicProfileName = "Library";
   const addBtn = document.getElementById("add-new-btn");
   if(addBtn){
     addBtn.classList.remove("hidden");
+    addBtn.style.display = "";
   }
 
   const tabs = document.getElementById("public-category-tabs");
   if(tabs){
     tabs.classList.add("hidden");
+    tabs.style.display = "none";
   }
 
   await loadCategoryFromSupabase(name);
@@ -1553,14 +1556,16 @@ let currentPublicProfileName = "Library";
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
 
-   const tabs = document.getElementById("public-category-tabs");
-if(tabs){
-  tabs.classList.remove("hidden");
-}
-   
   const addBtn = document.getElementById("add-new-btn");
   if(addBtn){
     addBtn.classList.add("hidden");
+    addBtn.style.display = "none";
+  }
+
+  const tabs = document.getElementById("public-category-tabs");
+  if(tabs){
+    tabs.classList.remove("hidden");
+    tabs.style.display = "flex";
   }
 
   currentCategory = "Books";
