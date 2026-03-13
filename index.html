@@ -464,1068 +464,1071 @@
   </div>
 
   <script>
-    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
+  const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
 
-    const supabaseClient = supabase.createClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY
-    );
+  const supabaseClient = supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY
+  );
 
-    const translations = {
-      en: {
-        subtitle: "Personal Library and Media Universe Tracker",
-        categories: {
-          Books: "📚 Books",
-          Movies: "🎬 Movies",
-          Series: "📺 Series",
-          Anime: "🍥 Anime",
-          Manga: "📖 Manga",
-          Blacklist: "🚫 Blacklist"
-        },
-        buttons: {
-          backHome: "← Back",
-          addNew: "+ Add new",
-          backShelf: "← Back to shelf",
-          close: "Close",
-          changeStatus: "Change status",
-          open: "Open",
-          add: "Add",
-          cancel: "Cancel",
-          manualAdd: "Add manually",
-          save: "Save"
-        },
-        modals: {
-          searchTitle: "Search and add",
-          searchSubtitle: "Books use Open Library API. Other categories can be added manually.",
-          searchPlaceholder: "Enter title",
-          statusTitle: "Select status",
-          manualTitle: "Add manually",
-          manualSubtitle: "Use this when search does not find what you need."
-        },
-        labels: {
-          cover: "Cover",
-          description: "Description",
-          noResults: "No results found",
-          alreadyExists: "This item is already on the shelf.",
-          itemNotFound: "Item not found on shelf.",
-          statusLabel: "Status",
-          searching: "Searching...",
-          noBooksFound: "No books found",
-          apiError: "API error",
-          dbSaveError: "Error saving item to database",
-          dbUpdateError: "Supabase update error",
-          dbStatusNotSaved: "Status was not saved to database",
-          name: "Title",
-          creator: "Author / Director / Studio",
-          coverUrl: "Cover URL",
-          descriptionPlaceholder: "Description",
-          manualNameRequired: "Title is required",
-          noDescription: "No description available."
-        },
-        statuses: {
-          Planned: "Planned",
-          "In progress": "In progress",
-          Done: "Done",
-          Dropped: "Dropped",
-          Info: "Info"
-        },
-        categoryNames: {
-          Books: "Books",
-          Movies: "Movies",
-          Series: "Series",
-          Anime: "Anime",
-          Manga: "Manga",
-          Blacklist: "Blacklist"
-        }
+  const translations = {
+    en: {
+      subtitle: "Personal Library and Media Universe Tracker",
+      categories: {
+        Books: "📚 Books",
+        Movies: "🎬 Movies",
+        Series: "📺 Series",
+        Anime: "🍥 Anime",
+        Manga: "📖 Manga",
+        Blacklist: "🚫 Blacklist"
       },
-      ru: {
-        subtitle: "Персональная библиотека и трекер медиа-вселенных",
-        categories: {
-          Books: "📚 Книги",
-          Movies: "🎬 Фильмы",
-          Series: "📺 Сериалы",
-          Anime: "🍥 Аниме",
-          Manga: "📖 Манга",
-          Blacklist: "🚫 Чёрный список"
-        },
-        buttons: {
-          backHome: "← Назад",
-          addNew: "+ Добавить",
-          backShelf: "← Назад к полке",
-          close: "Закрыть",
-          changeStatus: "Изменить статус",
-          open: "Открыть",
-          add: "Добавить",
-          cancel: "Отмена",
-          manualAdd: "Добавить вручную",
-          save: "Сохранить"
-        },
-        modals: {
-          searchTitle: "Поиск и добавление",
-          searchSubtitle: "Для книг используется Open Library API. Остальные категории можно добавлять вручную.",
-          searchPlaceholder: "Введите название",
-          statusTitle: "Выберите статус",
-          manualTitle: "Добавить вручную",
-          manualSubtitle: "Используйте это, если поиск не нашёл нужное произведение."
-        },
-        labels: {
-          cover: "Обложка",
-          description: "Описание",
-          noResults: "Ничего не найдено",
-          alreadyExists: "Это произведение уже есть на полке.",
-          itemNotFound: "Произведение не найдено на полке.",
-          statusLabel: "Статус",
-          searching: "Поиск...",
-          noBooksFound: "Книги не найдены",
-          apiError: "Ошибка API",
-          dbSaveError: "Ошибка сохранения в базу данных",
-          dbUpdateError: "Ошибка обновления Supabase",
-          dbStatusNotSaved: "Статус не был сохранён в базу",
-          name: "Название",
-          creator: "Автор / Режиссёр / Студия",
-          coverUrl: "Ссылка на обложку",
-          descriptionPlaceholder: "Описание",
-          manualNameRequired: "Название обязательно",
-          noDescription: "Описание отсутствует."
-        },
-        statuses: {
-          Planned: "Запланировано",
-          "In progress": "В процессе",
-          Done: "Завершено",
-          Dropped: "Брошено",
-          Info: "Инфо"
-        },
-        categoryNames: {
-          Books: "Книги",
-          Movies: "Фильмы",
-          Series: "Сериалы",
-          Anime: "Аниме",
-          Manga: "Манга",
-          Blacklist: "Чёрный список"
-        }
+      buttons: {
+        backHome: "← Back",
+        addNew: "+ Add new",
+        backShelf: "← Back to shelf",
+        close: "Close",
+        changeStatus: "Change status",
+        open: "Open",
+        add: "Add",
+        cancel: "Cancel",
+        manualAdd: "Add manually",
+        save: "Save"
+      },
+      modals: {
+        searchTitle: "Search and add",
+        searchSubtitle: "Books use Open Library API. Other categories can be added manually.",
+        searchPlaceholder: "Enter title",
+        statusTitle: "Select status",
+        manualTitle: "Add manually",
+        manualSubtitle: "Use this when search does not find what you need."
+      },
+      labels: {
+        cover: "Cover",
+        description: "Description",
+        noResults: "No results found",
+        alreadyExists: "This item is already on the shelf.",
+        itemNotFound: "Item not found on shelf.",
+        statusLabel: "Status",
+        searching: "Searching...",
+        noBooksFound: "No books found",
+        apiError: "API error",
+        dbSaveError: "Error saving item to database",
+        dbUpdateError: "Supabase update error",
+        dbStatusNotSaved: "Status was not saved to database",
+        name: "Title",
+        creator: "Author / Director / Studio",
+        coverUrl: "Cover URL",
+        descriptionPlaceholder: "Description",
+        manualNameRequired: "Title is required",
+        noDescription: "No description available."
+      },
+      statuses: {
+        Planned: "Planned",
+        "In progress": "In progress",
+        Done: "Done",
+        Dropped: "Dropped",
+        Info: "Info"
+      },
+      categoryNames: {
+        Books: "Books",
+        Movies: "Movies",
+        Series: "Series",
+        Anime: "Anime",
+        Manga: "Manga",
+        Blacklist: "Blacklist"
       }
-    };
-
-    let currentLanguage = "en";
-    let currentCategory = null;
-    let currentStatusIndex = null;
-    let currentOpenTitle = null;
-    let currentBookResults = [];
-    let isPublicView = false;
-    
-    const demoData = {
-      Books: [],
-      Movies: [],
-      Series: [],
-      Anime: [],
-      Manga: [],
-      Blacklist: []
-    };
-
-    const detailsDatabase = {};
-
-    function t() {
-      return translations[currentLanguage];
-    }
-
-    function setLanguage(lang) {
-      currentLanguage = lang;
-      document.documentElement.lang = lang;
-      applyTranslations();
-      rerenderCurrentScreen();
-    }
-
-    function applyTranslations() {
-      document.getElementById("home-subtitle").textContent = t().subtitle;
-
-      document.getElementById("cat-books").textContent = t().categories.Books;
-      document.getElementById("cat-movies").textContent = t().categories.Movies;
-      document.getElementById("cat-series").textContent = t().categories.Series;
-      document.getElementById("cat-anime").textContent = t().categories.Anime;
-      document.getElementById("cat-manga").textContent = t().categories.Manga;
-      document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
-
-      document.getElementById("back-home-btn").textContent = t().buttons.backHome;
-      document.getElementById("add-new-btn").textContent = t().buttons.addNew;
-      document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
-      document.getElementById("description-label").textContent = t().labels.description;
-      document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
-
-      document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
-      document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
-      document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
-      document.getElementById("close-search-btn").textContent = t().buttons.close;
-      document.getElementById("manual-add-btn").textContent = t().buttons.manualAdd;
-
-      document.getElementById("manual-title").textContent = t().modals.manualTitle;
-      document.getElementById("manual-subtitle").textContent = t().modals.manualSubtitle;
-      document.getElementById("manual-name").placeholder = t().labels.name;
-      document.getElementById("manual-creator").placeholder = t().labels.creator;
-      document.getElementById("manual-cover").placeholder = t().labels.coverUrl;
-      document.getElementById("manual-description").placeholder = t().labels.descriptionPlaceholder;
-      document.getElementById("manual-cancel-btn").textContent = t().buttons.cancel;
-      document.getElementById("manual-save-btn").textContent = t().buttons.save;
-
-      document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
-      document.getElementById("status-planned").textContent = t().statuses.Planned;
-      document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
-      document.getElementById("status-done").textContent = t().statuses.Done;
-      document.getElementById("status-dropped").textContent = t().statuses.Dropped;
-      document.getElementById("status-cancel").textContent = t().buttons.cancel;
-    }
-
-    function rerenderCurrentScreen() {
-      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
-        document.getElementById("category-title").textContent = translateCategory(currentCategory);
-        renderShelf();
-      }
-
-      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
-        openCard(currentOpenTitle);
+    },
+    ru: {
+      subtitle: "Персональная библиотека и трекер медиа-вселенных",
+      categories: {
+        Books: "📚 Книги",
+        Movies: "🎬 Фильмы",
+        Series: "📺 Сериалы",
+        Anime: "🍥 Аниме",
+        Manga: "📖 Манга",
+        Blacklist: "🚫 Чёрный список"
+      },
+      buttons: {
+        backHome: "← Назад",
+        addNew: "+ Добавить",
+        backShelf: "← Назад к полке",
+        close: "Закрыть",
+        changeStatus: "Изменить статус",
+        open: "Открыть",
+        add: "Добавить",
+        cancel: "Отмена",
+        manualAdd: "Добавить вручную",
+        save: "Сохранить"
+      },
+      modals: {
+        searchTitle: "Поиск и добавление",
+        searchSubtitle: "Для книг используется Open Library API. Остальные категории можно добавлять вручную.",
+        searchPlaceholder: "Введите название",
+        statusTitle: "Выберите статус",
+        manualTitle: "Добавить вручную",
+        manualSubtitle: "Используйте это, если поиск не нашёл нужное произведение."
+      },
+      labels: {
+        cover: "Обложка",
+        description: "Описание",
+        noResults: "Ничего не найдено",
+        alreadyExists: "Это произведение уже есть на полке.",
+        itemNotFound: "Произведение не найдено на полке.",
+        statusLabel: "Статус",
+        searching: "Поиск...",
+        noBooksFound: "Книги не найдены",
+        apiError: "Ошибка API",
+        dbSaveError: "Ошибка сохранения в базу данных",
+        dbUpdateError: "Ошибка обновления Supabase",
+        dbStatusNotSaved: "Статус не был сохранён в базу",
+        name: "Название",
+        creator: "Автор / Режиссёр / Студия",
+        coverUrl: "Ссылка на обложку",
+        descriptionPlaceholder: "Описание",
+        manualNameRequired: "Название обязательно",
+        noDescription: "Описание отсутствует."
+      },
+      statuses: {
+        Planned: "Запланировано",
+        "In progress": "В процессе",
+        Done: "Завершено",
+        Dropped: "Брошено",
+        Info: "Инфо"
+      },
+      categoryNames: {
+        Books: "Книги",
+        Movies: "Фильмы",
+        Series: "Сериалы",
+        Anime: "Аниме",
+        Manga: "Манга",
+        Blacklist: "Чёрный список"
       }
     }
+  };
 
-    function translateStatus(status) {
-      return t().statuses[status] || status;
-    }
+  let currentLanguage = "en";
+  let currentCategory = null;
+  let currentStatusIndex = null;
+  let currentOpenTitle = null;
+  let currentBookResults = [];
+  let isPublicView = false;
 
-    function translateCategory(category) {
-      return t().categoryNames[category] || category;
-    }
+  const demoData = {
+    Books: [],
+    Movies: [],
+    Series: [],
+    Anime: [],
+    Manga: [],
+    Blacklist: []
+  };
 
-    function getOpenLibraryCoverUrl(coverId){
-      if(!coverId) return "";
-      return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
-    }
+  const detailsDatabase = {};
 
-    async function openCategory(name){
-  isPublicView = false;
-  currentCategory = name;
-  hideAllScreens();
-  document.getElementById("category-screen").classList.remove("hidden");
-  document.getElementById("category-title").textContent = translateCategory(name);
-
-  const addBtn = document.getElementById("add-new-btn");
-  if(addBtn){
-    addBtn.classList.remove("hidden");
+  function t() {
+    return translations[currentLanguage];
   }
 
-  await loadCategoryFromSupabase(name);
-}
+  function setLanguage(lang) {
+    currentLanguage = lang;
+    document.documentElement.lang = lang;
+    applyTranslations();
+    rerenderCurrentScreen();
+  }
 
-    function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  shelf.innerHTML = "";
+  function applyTranslations() {
+    document.getElementById("home-subtitle").textContent = t().subtitle;
 
-  const items = demoData[currentCategory] || [];
+    document.getElementById("cat-books").textContent = t().categories.Books;
+    document.getElementById("cat-movies").textContent = t().categories.Movies;
+    document.getElementById("cat-series").textContent = t().categories.Series;
+    document.getElementById("cat-anime").textContent = t().categories.Anime;
+    document.getElementById("cat-manga").textContent = t().categories.Manga;
+    document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
 
-  items.forEach((item, index) => {
-    const safeTitle = item.title.replace(/'/g, "\\'");
-    const coverHtml = item.cover
-      ? <img src="${item.cover}" alt="${item.title}">
-      : t().labels.cover;
+    document.getElementById("back-home-btn").textContent = t().buttons.backHome;
+    document.getElementById("add-new-btn").textContent = t().buttons.addNew;
+    document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
+    document.getElementById("description-label").textContent = t().labels.description;
+    document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
 
-    const creatorLine = item.creator
-      ? <div class="media-meta">${item.creator}</div>
-      : "";
+    document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
+    document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
+    document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
+    document.getElementById("close-search-btn").textContent = t().buttons.close;
+    document.getElementById("manual-add-btn").textContent = t().buttons.manualAdd;
 
-    const actionsHtml = isPublicView
-      ? <div class="media-actions">
-           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-         </div>
-      : <div class="media-actions">
-           <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
-           <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
-         </div>;
+    document.getElementById("manual-title").textContent = t().modals.manualTitle;
+    document.getElementById("manual-subtitle").textContent = t().modals.manualSubtitle;
+    document.getElementById("manual-name").placeholder = t().labels.name;
+    document.getElementById("manual-creator").placeholder = t().labels.creator;
+    document.getElementById("manual-cover").placeholder = t().labels.coverUrl;
+    document.getElementById("manual-description").placeholder = t().labels.descriptionPlaceholder;
+    document.getElementById("manual-cancel-btn").textContent = t().buttons.cancel;
+    document.getElementById("manual-save-btn").textContent = t().buttons.save;
 
-    const card = document.createElement("div");
-    card.className = "media-card";
-    card.innerHTML = 
-      <div class="media-cover">${coverHtml}</div>
-      <div class="media-info">
-        <h3 class="media-title">${item.title}</h3>
-        ${creatorLine}
-        <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
-        ${actionsHtml}
-      </div>
-    ;
-    shelf.appendChild(card);
-  });
-}
+    document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
+    document.getElementById("status-planned").textContent = t().statuses.Planned;
+    document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
+    document.getElementById("status-done").textContent = t().statuses.Done;
+    document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+    document.getElementById("status-cancel").textContent = t().buttons.cancel;
+  }
 
-    function hideAllScreens(){
-      document.getElementById("home-screen").classList.add("hidden");
-      document.getElementById("category-screen").classList.add("hidden");
-      document.getElementById("details-screen").classList.add("hidden");
+  function rerenderCurrentScreen() {
+    if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
+      document.getElementById("category-title").textContent = translateCategory(currentCategory);
+      renderShelf();
     }
 
-    function goHome(){
-      hideAllScreens();
-      document.getElementById("home-screen").classList.remove("hidden");
+    if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
+      openCard(currentOpenTitle);
+    }
+  }
+
+  function translateStatus(status) {
+    return t().statuses[status] || status;
+  }
+
+  function translateCategory(category) {
+    return t().categoryNames[category] || category;
+  }
+
+  function getOpenLibraryCoverUrl(coverId){
+    if(!coverId) return "";
+    return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
+  }
+
+  async function openCategory(name){
+    isPublicView = false;
+    currentCategory = name;
+    hideAllScreens();
+    document.getElementById("category-screen").classList.remove("hidden");
+    document.getElementById("category-title").textContent = translateCategory(name);
+
+    const addBtn = document.getElementById("add-new-btn");
+    if(addBtn){
+      addBtn.classList.remove("hidden");
     }
 
-    function backToCategory(){
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
+    await loadCategoryFromSupabase(name);
+  }
+
+  function renderShelf(){
+    const shelf = document.getElementById("shelf");
+    shelf.innerHTML = "";
+
+    const items = demoData[currentCategory] || [];
+
+    items.forEach((item, index) => {
+      const safeTitle = item.title.replace(/'/g, "\\'");
+      const coverHtml = item.cover
+        ? `<img src="${item.cover}" alt="${item.title}">`
+        : t().labels.cover;
+
+      const creatorLine = item.creator
+        ? `<div class="media-meta">${item.creator}</div>`
+        : "";
+
+      const actionsHtml = isPublicView
+        ? `<div class="media-actions">
+             <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+           </div>`
+        : `<div class="media-actions">
+             <button class="add-btn" onclick="changeStatus(${index})">${t().buttons.changeStatus}</button>
+             <button class="add-btn" onclick="openCard('${safeTitle}')">${t().buttons.open}</button>
+           </div>`;
+
+      const card = document.createElement("div");
+      card.className = "media-card";
+      card.innerHTML = `
+        <div class="media-cover">${coverHtml}</div>
+        <div class="media-info">
+          <h3 class="media-title">${item.title}</h3>
+          ${creatorLine}
+          <div class="media-status">${t().labels.statusLabel}: ${translateStatus(item.status)}</div>
+          ${actionsHtml}
+        </div>
+      `;
+      shelf.appendChild(card);
+    });
+  }
+
+  function hideAllScreens(){
+    document.getElementById("home-screen").classList.add("hidden");
+    document.getElementById("category-screen").classList.add("hidden");
+    document.getElementById("details-screen").classList.add("hidden");
+  }
+
+  function goHome(){
+    hideAllScreens();
+    document.getElementById("home-screen").classList.remove("hidden");
+  }
+
+  function backToCategory(){
+    hideAllScreens();
+    document.getElementById("category-screen").classList.remove("hidden");
+  }
+
+  function openAddModal(){
+    document.getElementById("add-modal").classList.remove("hidden");
+    document.getElementById("search-input").value = "";
+    document.getElementById("search-results").innerHTML = "";
+    currentBookResults = [];
+    document.getElementById("search-input").focus();
+  }
+
+  function closeAddModal(){
+    document.getElementById("add-modal").classList.add("hidden");
+  }
+
+  function openManualModal(){
+    document.getElementById("manual-modal").classList.remove("hidden");
+    document.getElementById("manual-name").value = document.getElementById("search-input").value.trim();
+    document.getElementById("manual-creator").value = "";
+    document.getElementById("manual-cover").value = "";
+    document.getElementById("manual-description").value = "";
+    document.getElementById("manual-name").focus();
+  }
+
+  function closeManualModal(){
+    document.getElementById("manual-modal").classList.add("hidden");
+  }
+
+  async function renderSearchResults() {
+    const container = document.getElementById("search-results");
+    const input = document.getElementById("search-input");
+
+    if (!container || !input) return;
+
+    const query = input.value.trim();
+    container.innerHTML = "";
+
+    if (!query) {
+      container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
+      return;
     }
 
-    function openAddModal(){
-      document.getElementById("add-modal").classList.remove("hidden");
-      document.getElementById("search-input").value = "";
-      document.getElementById("search-results").innerHTML = "";
-      currentBookResults = [];
-      document.getElementById("search-input").focus();
-    }
+    if (currentCategory === "Books") {
+      container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
 
-    function closeAddModal(){
-      document.getElementById("add-modal").classList.add("hidden");
-    }
+      try {
+        let items = [];
 
-    function openManualModal(){
-      document.getElementById("manual-modal").classList.remove("hidden");
-      document.getElementById("manual-name").value = document.getElementById("search-input").value.trim();
-      document.getElementById("manual-creator").value = "";
-      document.getElementById("manual-cover").value = "";
-      document.getElementById("manual-description").value = "";
-      document.getElementById("manual-name").focus();
-    }
+        const url1 =
+          "https://openlibrary.org/search.json?title=" +
+          encodeURIComponent(query) +
+          "&lang=" + encodeURIComponent(currentLanguage) +
+          "&limit=10";
 
-    function closeManualModal(){
-      document.getElementById("manual-modal").classList.add("hidden");
-    }
+        const response1 = await fetch(url1);
+        const data1 = await response1.json();
+        items = data1.docs || [];
 
-    async function renderSearchResults() {
-      const container = document.getElementById("search-results");
-      const input = document.getElementById("search-input");
-
-      if (!container || !input) return;
-
-      const query = input.value.trim();
-      container.innerHTML = "";
-
-      if (!query) {
-        container.innerHTML = `<div class="small">${t().labels.noResults}</div>`;
-        return;
-      }
-
-      if (currentCategory === "Books") {
-        container.innerHTML = `<div class="small">${t().labels.searching}</div>`;
-
-        try {
-          let items = [];
-
-          const url1 =
-            "https://openlibrary.org/search.json?title=" +
+        if (items.length === 0) {
+          const url2 =
+            "https://openlibrary.org/search.json?q=" +
             encodeURIComponent(query) +
             "&lang=" + encodeURIComponent(currentLanguage) +
             "&limit=10";
 
-          const response1 = await fetch(url1);
-          const data1 = await response1.json();
-          items = data1.docs || [];
+          const response2 = await fetch(url2);
+          const data2 = await response2.json();
+          items = data2.docs || [];
+        }
 
-          if (items.length === 0) {
-            const url2 =
-              "https://openlibrary.org/search.json?q=" +
-              encodeURIComponent(query) +
-              "&lang=" + encodeURIComponent(currentLanguage) +
-              "&limit=10";
-
-            const response2 = await fetch(url2);
-            const data2 = await response2.json();
-            items = data2.docs || [];
-          }
-
-          if (items.length === 0) {
-            currentBookResults = [];
-            container.innerHTML = `
-              <div class="small">${t().labels.noBooksFound}</div>
-              <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-              </div>
-            `;
-            return;
-          }
-
-          currentBookResults = items;
-          container.innerHTML = "";
-
-          items.forEach(function (book, index) {
-            const title = book.title || "Untitled";
-            const authors = (book.author_name || []).join(", ");
-            const year = book.first_publish_year ? " • " + book.first_publish_year : "";
-
-            const row = document.createElement("div");
-            row.className = "search-item";
-            row.innerHTML = `
-              <div class="search-item-left">
-                <div class="search-item-title">${title}</div>
-                <div class="search-item-meta">${authors || "Book"}${year}</div>
-              </div>
-              <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
-            `;
-            container.appendChild(row);
-          });
-
-          return;
-        } catch (error) {
-          console.error("Open Library API error:", error);
+        if (items.length === 0) {
           currentBookResults = [];
           container.innerHTML = `
-            <div class="small">${t().labels.apiError}</div>
+            <div class="small">${t().labels.noBooksFound}</div>
             <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
               <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
             </div>
           `;
           return;
         }
-      }
 
-      container.innerHTML = `
-        <div class="small">${t().labels.noResults}</div>
-        <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-          <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
-        </div>
-      `;
-    }
-    
-async function fetchOpenLibraryDescription(workKey){
-  if(!workKey) return "";
+        currentBookResults = items;
+        container.innerHTML = "";
 
-  try {
-   const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
-    const url = "https://openlibrary.org" + cleanKey + ".json";
+        items.forEach(function (book, index) {
+          const title = book.title || "Untitled";
+          const authors = (book.author_name || []).join(", ");
+          const year = book.first_publish_year ? " • " + book.first_publish_year : "";
 
-    const response = await fetch(url);
-    const data = await response.json();
+          const row = document.createElement("div");
+          row.className = "search-item";
+          row.innerHTML = `
+            <div class="search-item-left">
+              <div class="search-item-title">${title}</div>
+              <div class="search-item-meta">${authors || "Book"}${year}</div>
+            </div>
+            <button class="button" onclick="addOpenLibraryBookResult(${index})">${t().buttons.add}</button>
+          `;
+          container.appendChild(row);
+        });
 
-    if(typeof data.description === "string"){
-      return data.description;
-    }
-
-    if(data.description && typeof data.description.value === "string"){
-      return data.description.value;
-    }
-
-    return "";
-  } catch (error) {
-    console.error("Open Library description error:", error);
-    return "";
-  }
-}
-
-    function isDuplicateItem(category, title, workKey = ""){
-  const items = demoData[category] || [];
-
-  return items.some(item => {
-    if(workKey && item.work_key && item.work_key === workKey){
-      return true;
-    }
-
-    return item.title.trim().toLowerCase() === title.trim().toLowerCase();
-  });
-}
-
-    async function existsInSupabase(category, title, workKey = ""){
-  let query = supabaseClient
-    .from("user_media")
-    .select("id, title, work_key")
-    .eq("category", category)
-    .limit(10);
-
-  if(workKey){
-    query = query.eq("work_key", workKey);
-  } else {
-    query = query.ilike("title", title);
-  }
-
-  const { data, error } = await query;
-
-  if(error){
-    console.error("Supabase duplicate check error:", error);
-    return false;
-  }
-
-  return Array.isArray(data) && data.length > 0;
-}
-    
-   async function addOpenLibraryBookResult(index){
-  const book = currentBookResults[index];
-  if(!book) return;
-
-  const title = book.title || "Untitled";
-  const cover = getOpenLibraryCoverUrl(book.cover_i);
-  const authors = (book.author_name || []).join(", ");
-  const workKey = book.key || "";
-  const description = await fetchOpenLibraryDescription(workKey);
-
-  const canonicalKey = workKey || title.trim().toLowerCase();
-
-  if(isDuplicateItem(currentCategory, title, workKey)){
-    alert(t().labels.alreadyExists);
-    return;
-  }
-
-  const existsInDb = await existsInSupabase(currentCategory, title, workKey);
-  if(existsInDb){
-    alert(t().labels.alreadyExists);
-    await loadCategoryFromSupabase(currentCategory);
-    return;
-  }
-
-  detailsDatabase[title] = {
-    description: description || t().labels.noDescription
-  };
-
-  const saved = await saveItemToSupabase(
-    title,
-    currentCategory,
-    "Planned",
-    cover,
-    description,
-    authors,
-    workKey,
-    canonicalKey
-  );
-
-  if(!saved) return;
-
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned",
-    cover: cover,
-    description: description,
-    creator: authors,
-    work_key: workKey,
-    canonical_key: canonicalKey
-  });
-
-  closeAddModal();
-  renderShelf();
-}
-
-   async function saveManualItem(){
-  const title = document.getElementById("manual-name").value.trim();
-  const creator = document.getElementById("manual-creator").value.trim();
-  const cover = document.getElementById("manual-cover").value.trim();
-  const description = document.getElementById("manual-description").value.trim();
-
-  if(!title){
-    alert(t().labels.manualNameRequired);
-    return;
-  }
-
-  const canonicalKey = title.trim().toLowerCase();
-
-  if(isDuplicateItem(currentCategory, title)){
-    alert(t().labels.alreadyExists);
-    return;
-  }
-
-  const existsInDb = await existsInSupabase(currentCategory, title);
-  if(existsInDb){
-    alert(t().labels.alreadyExists);
-    await loadCategoryFromSupabase(currentCategory);
-    return;
-  }
-
-  detailsDatabase[title] = {
-    description: description || t().labels.noDescription
-  };
-
-  const saved = await saveItemToSupabase(
-    title,
-    currentCategory,
-    "Planned",
-    cover,
-    description,
-    creator,
-    "",
-    canonicalKey
-  );
-
-  if(!saved) return;
-
-  demoData[currentCategory].unshift({
-    title: title,
-    status: "Planned",
-    cover: cover,
-    description: description,
-    creator: creator,
-    work_key: "",
-    canonical_key: canonicalKey
-  });
-
-  closeManualModal();
-  closeAddModal();
-  renderShelf();
-}
-
-    function changeStatus(index){
-      currentStatusIndex = index;
-      currentOpenTitle = demoData[currentCategory][index].title;
-      document.getElementById("status-modal").classList.remove("hidden");
-    }
-
-    function changeStatusFromDetails(){
-      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
-
-      if(index === -1){
-        alert(t().labels.itemNotFound);
+        return;
+      } catch (error) {
+        console.error("Open Library API error:", error);
+        currentBookResults = [];
+        container.innerHTML = `
+          <div class="small">${t().labels.apiError}</div>
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+            <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+          </div>
+        `;
         return;
       }
-
-      currentStatusIndex = index;
-      document.getElementById("status-modal").classList.remove("hidden");
     }
 
-    async function setStatus(status){
-      const item = demoData[currentCategory][currentStatusIndex];
-      const oldStatus = item.status;
+    container.innerHTML = `
+      <div class="small">${t().labels.noResults}</div>
+      <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+        <button class="button" onclick="openManualModal()">${t().buttons.manualAdd}</button>
+      </div>
+    `;
+  }
 
-      item.status = status;
+  async function fetchOpenLibraryDescription(workKey){
+    if(!workKey) return "";
+
+    try {
+      const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
+      const url = "https://openlibrary.org" + cleanKey + ".json";
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if(typeof data.description === "string"){
+        return data.description;
+      }
+
+      if(data.description && typeof data.description.value === "string"){
+        return data.description.value;
+      }
+
+      return "";
+    } catch (error) {
+      console.error("Open Library description error:", error);
+      return "";
+    }
+  }
+
+  function isDuplicateItem(category, title, workKey = ""){
+    const items = demoData[category] || [];
+
+    return items.some(item => {
+      if(workKey && item.work_key && item.work_key === workKey){
+        return true;
+      }
+
+      return item.title.trim().toLowerCase() === title.trim().toLowerCase();
+    });
+  }
+
+  async function existsInSupabase(category, title, workKey = ""){
+    let query = supabaseClient
+      .from("user_media")
+      .select("id, title, work_key")
+      .eq("category", category)
+      .limit(10);
+
+    if(workKey){
+      query = query.eq("work_key", workKey);
+    } else {
+      query = query.ilike("title", title);
+    }
+
+    const { data, error } = await query;
+
+    if(error){
+      console.error("Supabase duplicate check error:", error);
+      return false;
+    }
+
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  async function addOpenLibraryBookResult(index){
+    const book = currentBookResults[index];
+    if(!book) return;
+
+    const title = book.title || "Untitled";
+    const cover = getOpenLibraryCoverUrl(book.cover_i);
+    const authors = (book.author_name || []).join(", ");
+    const workKey = book.key || "";
+    const description = await fetchOpenLibraryDescription(workKey);
+
+    const canonicalKey = workKey || title.trim().toLowerCase();
+
+    if(isDuplicateItem(currentCategory, title, workKey)){
+      alert(t().labels.alreadyExists);
+      return;
+    }
+
+    const existsInDb = await existsInSupabase(currentCategory, title, workKey);
+    if(existsInDb){
+      alert(t().labels.alreadyExists);
+      await loadCategoryFromSupabase(currentCategory);
+      return;
+    }
+
+    detailsDatabase[title] = {
+      description: description || t().labels.noDescription
+    };
+
+    const saved = await saveItemToSupabase(
+      title,
+      currentCategory,
+      "Planned",
+      cover,
+      description,
+      authors,
+      workKey,
+      canonicalKey
+    );
+
+    if(!saved) return;
+
+    demoData[currentCategory].unshift({
+      title: title,
+      status: "Planned",
+      cover: cover,
+      description: description,
+      creator: authors,
+      work_key: workKey,
+      canonical_key: canonicalKey
+    });
+
+    closeAddModal();
+    renderShelf();
+  }
+
+  async function saveManualItem(){
+    const title = document.getElementById("manual-name").value.trim();
+    const creator = document.getElementById("manual-creator").value.trim();
+    const cover = document.getElementById("manual-cover").value.trim();
+    const description = document.getElementById("manual-description").value.trim();
+
+    if(!title){
+      alert(t().labels.manualNameRequired);
+      return;
+    }
+
+    const canonicalKey = title.trim().toLowerCase();
+
+    if(isDuplicateItem(currentCategory, title)){
+      alert(t().labels.alreadyExists);
+      return;
+    }
+
+    const existsInDb = await existsInSupabase(currentCategory, title);
+    if(existsInDb){
+      alert(t().labels.alreadyExists);
+      await loadCategoryFromSupabase(currentCategory);
+      return;
+    }
+
+    detailsDatabase[title] = {
+      description: description || t().labels.noDescription
+    };
+
+    const saved = await saveItemToSupabase(
+      title,
+      currentCategory,
+      "Planned",
+      cover,
+      description,
+      creator,
+      "",
+      canonicalKey
+    );
+
+    if(!saved) return;
+
+    demoData[currentCategory].unshift({
+      title: title,
+      status: "Planned",
+      cover: cover,
+      description: description,
+      creator: creator,
+      work_key: "",
+      canonical_key: canonicalKey
+    });
+
+    closeManualModal();
+    closeAddModal();
+    renderShelf();
+  }
+
+  function changeStatus(index){
+    currentStatusIndex = index;
+    currentOpenTitle = demoData[currentCategory][index].title;
+    document.getElementById("status-modal").classList.remove("hidden");
+  }
+
+  function changeStatusFromDetails(){
+    const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
+
+    if(index === -1){
+      alert(t().labels.itemNotFound);
+      return;
+    }
+
+    currentStatusIndex = index;
+    document.getElementById("status-modal").classList.remove("hidden");
+  }
+
+  async function setStatus(status){
+    const item = demoData[currentCategory][currentStatusIndex];
+    const oldStatus = item.status;
+
+    item.status = status;
+    renderShelf();
+    closeStatusModal();
+
+    const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+
+    if(!updated){
+      item.status = oldStatus;
       renderShelf();
-      closeStatusModal();
-
-      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
-
-      if(!updated){
-        item.status = oldStatus;
-        renderShelf();
-        alert(t().labels.dbStatusNotSaved);
-        return;
-      }
-
-      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
-        openCard(currentOpenTitle);
-      }
+      alert(t().labels.dbStatusNotSaved);
+      return;
     }
 
-    function closeStatusModal(){
-      document.getElementById("status-modal").classList.add("hidden");
+    if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
+      openCard(currentOpenTitle);
     }
-    
-async function updateDescriptionInSupabase(title, category, description){
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update({ description: description })
-    .eq("title", title)
-    .eq("category", category);
-
-  if(error){
-    console.error("Supabase description update error:", error);
-    return false;
   }
 
-  return true;
-}
-
-    async function saveCanonicalKey(){
-  const keyInput = document.getElementById("canonical-key-input");
-  if(!keyInput) return;
-
-  const key = keyInput.value.trim();
-  if(!key) return;
-
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update({ canonical_key: key })
-    .eq("title", currentOpenTitle)
-    .eq("category", currentCategory);
-
-  if(error){
-    console.error("Canonical key update error:", error);
-    alert("Error saving canonical key");
-    return;
+  function closeStatusModal(){
+    document.getElementById("status-modal").classList.add("hidden");
   }
 
-  await loadCategoryFromSupabase(currentCategory);
-  alert("Canonical key saved");
-}
+  async function updateDescriptionInSupabase(title, category, description){
+    const { error } = await supabaseClient
+      .from("user_media")
+      .update({ description: description })
+      .eq("title", title)
+      .eq("category", category);
 
-    async function openCard(title){
-  currentOpenTitle = title;
+    if(error){
+      console.error("Supabase description update error:", error);
+      return false;
+    }
 
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
-  let description = item?.description || "";
-
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
-
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-
-  const coverBox = document.getElementById("details-cover-box");
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${item.cover}" alt="${title}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
+    return true;
   }
 
-  const descriptionEl = document.getElementById("details-description");
+  async function saveCanonicalKey(){
+    const keyInput = document.getElementById("canonical-key-input");
+    if(!keyInput) return;
 
-  if(description){
-    descriptionEl.textContent = description;
-  } else if(item && item.work_key){
-    descriptionEl.textContent = t().labels.searching;
+    const key = keyInput.value.trim();
+    if(!key) return;
 
-    const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+    const { error } = await supabaseClient
+      .from("user_media")
+      .update({ canonical_key: key })
+      .eq("title", currentOpenTitle)
+      .eq("category", currentCategory);
 
-    if(fetchedDescription){
-      descriptionEl.textContent = fetchedDescription;
-      item.description = fetchedDescription;
-      detailsDatabase[title] = {
-        description: fetchedDescription
-      };
+    if(error){
+      console.error("Canonical key update error:", error);
+      alert("Error saving canonical key");
+      return;
+    }
 
-      if(!isPublicView){
-        await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+    await loadCategoryFromSupabase(currentCategory);
+    alert("Canonical key saved");
+  }
+
+  async function openCard(title){
+    currentOpenTitle = title;
+
+    const item = (demoData[currentCategory] || []).find(x => x.title === title);
+    let description = item?.description || "";
+
+    hideAllScreens();
+    document.getElementById("details-screen").classList.remove("hidden");
+
+    document.getElementById("details-title").textContent = title;
+    document.getElementById("details-creator").textContent = item?.creator || "";
+    document.getElementById("details-category").textContent = translateCategory(currentCategory);
+    document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
+
+    const coverBox = document.getElementById("details-cover-box");
+    if(item && item.cover){
+      coverBox.innerHTML = `<img src="${item.cover}" alt="${title}">`;
+    } else {
+      coverBox.textContent = t().labels.cover;
+    }
+
+    const descriptionEl = document.getElementById("details-description");
+
+    if(description){
+      descriptionEl.textContent = description;
+    } else if(item && item.work_key){
+      descriptionEl.textContent = t().labels.searching;
+
+      const fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+
+      if(fetchedDescription){
+        descriptionEl.textContent = fetchedDescription;
+        item.description = fetchedDescription;
+        detailsDatabase[title] = {
+          description: fetchedDescription
+        };
+
+        if(!isPublicView){
+          await updateDescriptionInSupabase(title, currentCategory, fetchedDescription);
+        }
+      } else {
+        descriptionEl.textContent = t().labels.noDescription;
       }
     } else {
       descriptionEl.textContent = t().labels.noDescription;
     }
-  } else {
-    descriptionEl.textContent = t().labels.noDescription;
-  }
 
-  const canonicalInput = document.getElementById("canonical-key-input");
-  if(canonicalInput){
-    if(isPublicView){
-      canonicalInput.parentElement.classList.add("hidden");
-    } else {
-      canonicalInput.parentElement.classList.remove("hidden");
-      canonicalInput.value = item?.canonical_key || "";
-    }
-  }
-
-  const statusBtn = document.getElementById("change-status-details-btn");
-  if(statusBtn){
-    if(isPublicView){
-      statusBtn.classList.add("hidden");
-    } else {
-      statusBtn.classList.remove("hidden");
-    }
-  }
-}
-
-    async function saveItemToSupabase(
-  title,
-  category,
-  status,
-  cover = "",
-  description = "",
-  creator = "",
-  workKey = "",
-  canonicalKey = ""
-){
-  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-  if(authError || !authData.user){
-    alert("You must be logged in");
-    return false;
-  }
-
-  const finalCanonicalKey =
-    canonicalKey ||
-    workKey ||
-    title.trim().toLowerCase();
-
-  const { error } = await supabaseClient
-    .from("user_media")
-    .insert([
-      {
-        user_id: authData.user.id,
-        title: title,
-        category: category,
-        status: status,
-        cover_url: cover,
-        description: description,
-        creator: creator,
-        work_key: workKey,
-        canonical_key: finalCanonicalKey
+    const canonicalInput = document.getElementById("canonical-key-input");
+    if(canonicalInput){
+      if(isPublicView){
+        canonicalInput.parentElement.classList.add("hidden");
+      } else {
+        canonicalInput.parentElement.classList.remove("hidden");
+        canonicalInput.value = item?.canonical_key || "";
       }
-    ]);
-
-  if(error){
-    console.error("Supabase insert error:", error);
-    alert(t().labels.dbSaveError + ": " + error.message);
-    return false;
-  }
-
-  return true;
-}
-    
-    async function updateStatusInSupabase(title, category, status){
-      const { error } = await supabaseClient
-        .from("user_media")
-        .update({ status: status })
-        .eq("title", title)
-        .eq("category", category);
-
-      if(error){
-        console.error("Supabase update error:", error);
-        alert(t().labels.dbUpdateError + ": " + error.message);
-        return false;
-      }
-
-      return true;
     }
 
-   async function loadCategoryFromSupabase(category){
-  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-  if(authError || !authData.user){
-    console.error("Auth load error:", authError);
-    return;
+    const statusBtn = document.getElementById("change-status-details-btn");
+    if(statusBtn){
+      if(isPublicView){
+        statusBtn.classList.add("hidden");
+      } else {
+        statusBtn.classList.remove("hidden");
+      }
+    }
   }
 
-  const { data, error } = await supabaseClient
-    .from("user_media")
-    .select("*")
-    .eq("user_id", authData.user.id)
-    .eq("category", category)
-    .order("id", { ascending: false });
+  async function saveItemToSupabase(
+    title,
+    category,
+    status,
+    cover = "",
+    description = "",
+    creator = "",
+    workKey = "",
+    canonicalKey = ""
+  ){
+    const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-  if(error){
-    console.error("Supabase load error:", error);
-    return;
+    if(authError || !authData.user){
+      alert("You must be logged in");
+      return false;
+    }
+
+    const finalCanonicalKey =
+      canonicalKey ||
+      workKey ||
+      title.trim().toLowerCase();
+
+    const { error } = await supabaseClient
+      .from("user_media")
+      .insert([
+        {
+          user_id: authData.user.id,
+          title: title,
+          category: category,
+          status: status,
+          cover_url: cover,
+          description: description,
+          creator: creator,
+          work_key: workKey,
+          canonical_key: finalCanonicalKey
+        }
+      ]);
+
+    if(error){
+      console.error("Supabase insert error:", error);
+      alert(t().labels.dbSaveError + ": " + error.message);
+      return false;
+    }
+
+    return true;
   }
 
-  demoData[category] = [];
-  const seen = new Set();
+  async function updateStatusInSupabase(title, category, status){
+    const { error } = await supabaseClient
+      .from("user_media")
+      .update({ status: status })
+      .eq("title", title)
+      .eq("category", category);
 
-  data.forEach(item => {
-    const dedupeKey =
-      item.canonical_key ||
-      item.work_key ||
-      item.title.trim().toLowerCase();
+    if(error){
+      console.error("Supabase update error:", error);
+      alert(t().labels.dbUpdateError + ": " + error.message);
+      return false;
+    }
 
-    if(seen.has(dedupeKey)){
+    return true;
+  }
+
+  async function loadCategoryFromSupabase(category){
+    const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+    if(authError || !authData.user){
+      console.error("Auth load error:", authError);
       return;
     }
 
-    seen.add(dedupeKey);
+    const { data, error } = await supabaseClient
+      .from("user_media")
+      .select("*")
+      .eq("user_id", authData.user.id)
+      .eq("category", category)
+      .order("id", { ascending: false });
 
-    demoData[category].push({
-      title: item.title,
-      status: item.status,
-      cover: item.cover_url || "",
-      description: item.description || "",
-      creator: item.creator || "",
-      work_key: item.work_key || "",
-      canonical_key: item.canonical_key || ""
+    if(error){
+      console.error("Supabase load error:", error);
+      return;
+    }
+
+    demoData[category] = [];
+    const seen = new Set();
+
+    data.forEach(item => {
+      const dedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        item.title.trim().toLowerCase();
+
+      if(seen.has(dedupeKey)){
+        return;
+      }
+
+      seen.add(dedupeKey);
+
+      demoData[category].push({
+        title: item.title,
+        status: item.status,
+        cover: item.cover_url || "",
+        description: item.description || "",
+        creator: item.creator || "",
+        work_key: item.work_key || "",
+        canonical_key: item.canonical_key || ""
+      });
+
+      detailsDatabase[item.title] = {
+        description: item.description || t().labels.noDescription
+      };
     });
 
-    detailsDatabase[item.title] = {
-      description: item.description || t().labels.noDescription
-    };
-  });
-
-  renderShelf();
-}
-
-    async function register(){
-
-  const email = document.getElementById("login-email").value;
-  const password = document.getElementById("login-password").value;
-
-  const { error } = await supabaseClient.auth.signUp({
-    email: email,
-    password: password
-  });
-
-  if(error){
-    alert(error.message);
-    return;
+    renderShelf();
   }
 
-  alert("User created. Check your email.");
-}
+  async function register(){
+    const email = document.getElementById("login-email").value;
+    const password = document.getElementById("login-password").value;
 
-    async function login(){
-  const email = document.getElementById("login-email").value;
-  const password = document.getElementById("login-password").value;
+    const { error } = await supabaseClient.auth.signUp({
+      email: email,
+      password: password
+    });
 
-  const { error } = await supabaseClient.auth.signInWithPassword({
-    email: email,
-    password: password
-  });
+    if(error){
+      alert(error.message);
+      return;
+    }
 
-  if(error){
-    alert(error.message);
-    return;
+    alert("User created. Check your email.");
   }
 
-  document.getElementById("auth-screen").classList.add("hidden");
-  document.getElementById("home-screen").classList.remove("hidden");
-  await loadProfile();
-}
+  async function login(){
+    const email = document.getElementById("login-email").value;
+    const password = document.getElementById("login-password").value;
 
-async function logout(){
-  await supabaseClient.auth.signOut();
-  location.reload();
-}
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: email,
+      password: password
+    });
 
-async function checkAuth(){
-  const { data } = await supabaseClient.auth.getUser();
+    if(error){
+      alert(error.message);
+      return;
+    }
 
-  if(!data.user){
-    document.getElementById("auth-screen").classList.remove("hidden");
-    document.getElementById("home-screen").classList.add("hidden");
-  } else {
     document.getElementById("auth-screen").classList.add("hidden");
     document.getElementById("home-screen").classList.remove("hidden");
     await loadProfile();
   }
-}
 
-checkAuth();
-
-async function saveProfile(){
-  const username = document.getElementById("profile-username").value.trim();
-  const displayName = document.getElementById("profile-display-name").value.trim();
-
-  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
-
-  if(authError || !authData.user){
-    alert("You must be logged in");
-    return;
+  async function logout(){
+    await supabaseClient.auth.signOut();
+    location.reload();
   }
 
-  const { error } = await supabaseClient
-    .from("profiles")
-    .upsert({
-      id: authData.user.id,
-      username: username || null,
-      display_name: displayName || null
-    });
+  async function checkAuth(){
+    const { data } = await supabaseClient.auth.getUser();
 
-  if(error){
-    alert(error.message);
-    return;
+    if(!data.user){
+      document.getElementById("auth-screen").classList.remove("hidden");
+      document.getElementById("home-screen").classList.add("hidden");
+    } else {
+      document.getElementById("auth-screen").classList.add("hidden");
+      document.getElementById("home-screen").classList.remove("hidden");
+      await loadProfile();
+    }
   }
 
-  alert("Profile saved");
-}
+  checkAuth();
 
-async function loadProfile(){
-  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+  async function saveProfile(){
+    const username = document.getElementById("profile-username").value.trim();
+    const displayName = document.getElementById("profile-display-name").value.trim();
 
-  if(authError || !authData.user){
-    return;
-  }
+    const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("id", authData.user.id)
-    .single();
-
-  if(error || !data){
-    return;
-  }
-
-  const usernameInput = document.getElementById("profile-username");
-  const displayNameInput = document.getElementById("profile-display-name");
-
-  if(usernameInput) usernameInput.value = data.username || "";
-  if(displayNameInput) displayNameInput.value = data.display_name || "";
-}
-
-   async function loadPublicLibrary(username){
-  const { data: profile, error: profileError } = await supabaseClient
-    .from("profiles")
-    .select("id, username, display_name, is_public")
-    .eq("username", username)
-    .maybeSingle();
-
-  if(profileError){
-    console.error(profileError);
-    alert("Profile lookup error");
-    return;
-  }
-
-  if(!profile){
-    alert("User not found");
-    return;
-  }
-
-  if(profile.is_public === false){
-    alert("Library is private");
-    return;
-  }
-
-  const { data, error } = await supabaseClient
-    .from("user_media")
-    .select("*")
-    .eq("user_id", profile.id)
-    .order("id", { ascending: false });
-
-  if(error){
-    console.error(error);
-    return;
-  }
-
-  isPublicView = true;
-
-  demoData.Books = [];
-  demoData.Movies = [];
-  demoData.Series = [];
-  demoData.Anime = [];
-  demoData.Manga = [];
-  demoData.Blacklist = [];
-
-  const seen = new Set();
-
-  data.forEach(item => {
-    const dedupeKey =
-      item.canonical_key ||
-      item.work_key ||
-      item.title.trim().toLowerCase();
-
-    const fullKey = ${item.category}:${dedupeKey};
-
-    if(seen.has(fullKey)){
+    if(authError || !authData.user){
+      alert("You must be logged in");
       return;
     }
 
-    seen.add(fullKey);
+    const { error } = await supabaseClient
+      .from("profiles")
+      .upsert({
+        id: authData.user.id,
+        username: username || null,
+        display_name: displayName || null
+      });
 
-    demoData[item.category].push({
-      title: item.title,
-      status: item.status,
-      cover: item.cover_url || "",
-      description: item.description || "",
-      creator: item.creator || "",
-      work_key: item.work_key || "",
-      canonical_key: item.canonical_key || ""
-    });
+    if(error){
+      alert(error.message);
+      return;
+    }
 
-    detailsDatabase[item.title] = {
-      description: item.description || t().labels.noDescription
-    };
-  });
-
-  hideAllScreens();
-  document.getElementById("category-screen").classList.remove("hidden");
-
-  const addBtn = document.getElementById("add-new-btn");
-  if(addBtn){
-    addBtn.classList.add("hidden");
+    alert("Profile saved");
   }
 
-  currentCategory = "Books";
-  document.getElementById("category-title").textContent =
-    (profile.display_name  profile.username  "Library") + " — " + translateCategory("Books");
+  async function loadProfile(){
+    const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-  renderShelf();
-}
+    if(authError || !authData.user){
+      return;
+    }
 
-    applyTranslations();
-  </script>
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .select("*")
+      .eq("id", authData.user.id)
+      .single();
+
+    if(error || !data){
+      return;
+    }
+
+    const usernameInput = document.getElementById("profile-username");
+    const displayNameInput = document.getElementById("profile-display-name");
+
+    if(usernameInput) usernameInput.value = data.username || "";
+    if(displayNameInput) displayNameInput.value = data.display_name || "";
+  }
+
+  async function loadPublicLibrary(username){
+    const { data: profile, error: profileError } = await supabaseClient
+      .from("profiles")
+      .select("id, username, display_name, is_public")
+      .eq("username", username)
+      .maybeSingle();
+
+    if(profileError){
+      console.error(profileError);
+      alert("Profile lookup error");
+      return;
+    }
+
+    if(!profile){
+      alert("User not found");
+      return;
+    }
+
+    if(profile.is_public === false){
+      alert("Library is private");
+      return;
+    }
+
+    const { data, error } = await supabaseClient
+      .from("user_media")
+      .select("*")
+      .eq("user_id", profile.id)
+      .order("id", { ascending: false });
+
+    if(error){
+      console.error(error);
+      return;
+    }
+
+    isPublicView = true;
+
+    demoData.Books = [];
+    demoData.Movies = [];
+    demoData.Series = [];
+    demoData.Anime = [];
+    demoData.Manga = [];
+    demoData.Blacklist = [];
+
+    const seen = new Set();
+
+    data.forEach(item => {
+      const dedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        item.title.trim().toLowerCase();
+
+      const fullKey = `${item.category}:${dedupeKey}`;
+
+      if(seen.has(fullKey)){
+        return;
+      }
+
+      seen.add(fullKey);
+
+      if (!demoData[item.category]) {
+        demoData[item.category] = [];
+      }
+
+      demoData[item.category].push({
+        title: item.title,
+        status: item.status,
+        cover: item.cover_url || "",
+        description: item.description || "",
+        creator: item.creator || "",
+        work_key: item.work_key || "",
+        canonical_key: item.canonical_key || ""
+      });
+
+      detailsDatabase[item.title] = {
+        description: item.description || t().labels.noDescription
+      };
+    });
+
+    hideAllScreens();
+    document.getElementById("category-screen").classList.remove("hidden");
+
+    const addBtn = document.getElementById("add-new-btn");
+    if(addBtn){
+      addBtn.classList.add("hidden");
+    }
+
+    currentCategory = "Books";
+    document.getElementById("category-title").textContent =
+      (profile.display_name || profile.username || "Library") + " — " + translateCategory("Books");
+
+    renderShelf();
+  }
+
+  applyTranslations();
+</script>
 
 </body>
 </html>
