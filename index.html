@@ -1596,7 +1596,20 @@
       renderShelf();
     }
 
+    function checkPublicRoute(){
+  const path = window.location.pathname;
+
+  if(path.startsWith("/u/")){
+    const username = path.replace("/u/", "").trim();
+
+    if(username){
+      loadPublicLibrary(username);
+    }
+  }
+}
+    
     applyTranslations();
+checkPublicRoute();
     checkAuth();
   </script>
 
