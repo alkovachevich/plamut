@@ -365,14 +365,23 @@
   </div>
 
   <div id="category-screen" class="hidden">
-    <div class="topbar">
-      <button class="button" onclick="goHome()" id="back-home-btn"></button>
-      <h2 id="category-title" style="margin:0;"></h2>
-      <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
-    </div>
-
-    <div class="shelf" id="shelf"></div>
+  <div class="topbar">
+    <button class="button" onclick="goHome()" id="back-home-btn"></button>
+    <h2 id="category-title" style="margin:0;"></h2>
+    <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
   </div>
+
+  <div id="public-category-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)">Books</button>
+    <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)">Movies</button>
+    <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)">Series</button>
+    <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)">Anime</button>
+    <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)">Manga</button>
+    <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)">Blacklist</button>
+  </div>
+
+  <div class="shelf" id="shelf"></div>
+</div>
 
   <div id="details-screen" class="hidden">
     <div class="topbar">
@@ -608,11 +617,13 @@
   };
 
   let currentLanguage = "en";
-  let currentCategory = null;
-  let currentStatusIndex = null;
-  let currentOpenTitle = null;
-  let currentBookResults = [];
-  let isPublicView = false;
+let currentCategory = null;
+let currentStatusIndex = null;
+let currentOpenTitle = null;
+let currentBookResults = [];
+let isPublicView = false;
+let currentPublicProfileName = "Library";
+
 
   const demoData = {
     Books: [],
@@ -700,19 +711,24 @@
   }
 
   async function openCategory(name){
-    isPublicView = false;
-    currentCategory = name;
-    hideAllScreens();
-    document.getElementById("category-screen").classList.remove("hidden");
-    document.getElementById("category-title").textContent = translateCategory(name);
+  isPublicView = false;
+  currentCategory = name;
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+  document.getElementById("category-title").textContent = translateCategory(name);
 
-    const addBtn = document.getElementById("add-new-btn");
-    if(addBtn){
-      addBtn.classList.remove("hidden");
-    }
-
-    await loadCategoryFromSupabase(name);
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.remove("hidden");
   }
+
+  const tabs = document.getElementById("public-category-tabs");
+  if(tabs){
+    tabs.classList.add("hidden");
+  }
+
+  await loadCategoryFromSupabase(name);
+}
 
   function renderShelf(){
     const shelf = document.getElementById("shelf");
@@ -1434,98 +1450,125 @@
     if(displayNameInput) displayNameInput.value = data.display_name || "";
   }
 
-  async function loadPublicLibrary(username){
-    const { data: profile, error: profileError } = await supabaseClient
-      .from("profiles")
-      .select("id, username, display_name, is_public")
-      .eq("username", username)
-      .maybeSingle();
+    function openPublicCategory(name, profileName = "Library"){
+  if(!isPublicView){
+    return;
+  }
 
-    if(profileError){
-      console.error(profileError);
-      alert("Profile lookup error");
+  currentCategory = name;
+
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.add("hidden");
+  }
+
+  document.getElementById("category-title").textContent =
+    profileName + " — " + translateCategory(name);
+
+  renderShelf();
+}
+    
+ async function loadPublicLibrary(username){
+  const { data: profile, error: profileError } = await supabaseClient
+    .from("profiles")
+    .select("id, username, display_name, is_public")
+    .eq("username", username)
+    .maybeSingle();
+
+  if(profileError){
+    console.error(profileError);
+    alert("Profile lookup error");
+    return;
+  }
+
+  if(!profile){
+    alert("User not found");
+    return;
+  }
+
+  if(profile.is_public === false){
+    alert("Library is private");
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", profile.id)
+    .order("id", { ascending: false });
+
+  if(error){
+    console.error(error);
+    return;
+  }
+
+  isPublicView = true;
+  currentPublicProfileName = profile.display_name  profile.username  "Library";
+
+  demoData.Books = [];
+  demoData.Movies = [];
+  demoData.Series = [];
+  demoData.Anime = [];
+  demoData.Manga = [];
+  demoData.Blacklist = [];
+
+  const seen = new Set();
+
+  data.forEach(item => {
+    const dedupeKey =
+      item.canonical_key ||
+      item.work_key ||
+      item.title.trim().toLowerCase();
+
+    const fullKey = ${item.category}:${dedupeKey};
+
+    if(seen.has(fullKey)){
       return;
     }
 
-    if(!profile){
-      alert("User not found");
-      return;
+    seen.add(fullKey);
+
+    if (!demoData[item.category]) {
+      demoData[item.category] = [];
     }
 
-    if(profile.is_public === false){
-      alert("Library is private");
-      return;
-    }
-
-    const { data, error } = await supabaseClient
-      .from("user_media")
-      .select("*")
-      .eq("user_id", profile.id)
-      .order("id", { ascending: false });
-
-    if(error){
-      console.error(error);
-      return;
-    }
-
-    isPublicView = true;
-
-    demoData.Books = [];
-    demoData.Movies = [];
-    demoData.Series = [];
-    demoData.Anime = [];
-    demoData.Manga = [];
-    demoData.Blacklist = [];
-
-    const seen = new Set();
-
-    data.forEach(item => {
-      const dedupeKey =
-        item.canonical_key ||
-        item.work_key ||
-        item.title.trim().toLowerCase();
-
-      const fullKey = `${item.category}:${dedupeKey}`;
-
-      if(seen.has(fullKey)){
-        return;
-      }
-
-      seen.add(fullKey);
-
-      if (!demoData[item.category]) {
-        demoData[item.category] = [];
-      }
-
-      demoData[item.category].push({
-        title: item.title,
-        status: item.status,
-        cover: item.cover_url || "",
-        description: item.description || "",
-        creator: item.creator || "",
-        work_key: item.work_key || "",
-        canonical_key: item.canonical_key || ""
-      });
-
-      detailsDatabase[item.title] = {
-        description: item.description || t().labels.noDescription
-      };
+    demoData[item.category].push({
+      title: item.title,
+      status: item.status,
+      cover: item.cover_url || "",
+      description: item.description || "",
+      creator: item.creator || "",
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || ""
     });
 
-    hideAllScreens();
-    document.getElementById("category-screen").classList.remove("hidden");
+    detailsDatabase[item.title] = {
+      description: item.description || t().labels.noDescription
+    };
+  });
 
-    const addBtn = document.getElementById("add-new-btn");
-    if(addBtn){
-      addBtn.classList.add("hidden");
-    }
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
 
-    currentCategory = "Books";
-    document.getElementById("category-title").textContent =
-      (profile.display_name || profile.username || "Library") + " — " + translateCategory("Books");
-
-    renderShelf();
+   const tabs = document.getElementById("public-category-tabs");
+if(tabs){
+  tabs.classList.remove("hidden");
+}
+   
+  const addBtn = document.getElementById("add-new-btn");
+  if(addBtn){
+    addBtn.classList.add("hidden");
   }
+
+  currentCategory = "Books";
+  document.getElementById("category-title").textContent =
+    currentPublicProfileName + " — " + translateCategory("Books");
+
+  renderShelf();
+}
 
   applyTranslations();
 </script>
