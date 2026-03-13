@@ -305,12 +305,18 @@
 
 <body>
 
-  <div class="top-right">
-    <div class="lang-switch">
-      <button class="button" onclick="setLanguage('en')">EN</button>
-      <button class="button" onclick="setLanguage('ru')">RU</button>
-    </div>
+  <div class="top-right" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <div class="lang-switch">
+    <button class="button" onclick="setLanguage('en')">EN</button>
+    <button class="button" onclick="setLanguage('ru')">RU</button>
   </div>
+
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
+    <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
+    <button id="logout-top-btn" class="button hidden" onclick="logout()">Logout</button>
+  </div>
+</div>
 
   <div id="auth-screen">
     <h2>Plamut Login</h2>
@@ -340,13 +346,6 @@
     <div style="margin-top:20px;">
       <button onclick="logout()" class="button">Logout</button>
     </div>
-
-    <div style="margin-top:20px;">
-      <input id="profile-username" class="input" placeholder="Username">
-      <input id="profile-display-name" class="input" placeholder="Display name">
-      <button onclick="saveProfile()" class="button">Save Profile</button>
-    </div>
-  </div>
 
   <div id="category-screen" class="hidden">
     <div class="topbar">
@@ -449,6 +448,20 @@ Share Library
     </div>
   </div>
 
+  <div id="profile-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Profile</h3>
+
+    <input id="profile-username" class="input" placeholder="Username">
+    <input id="profile-display-name" class="input" placeholder="Display name">
+
+    <div class="modal-actions">
+      <button class="button" onclick="closeProfileModal()">Close</button>
+      <button class="button" onclick="saveProfile()">Save Profile</button>
+    </div>
+  </div>
+</div>
+  
   <div id="status-modal" class="modal hidden">
     <div class="modal-box">
       <h3 id="status-modal-title"></h3>
@@ -1383,69 +1396,105 @@ Share Library
       alert("User created. Check your email.");
     }
 
-    async function login(){
-      const email = document.getElementById("login-email").value;
-      const password = document.getElementById("login-password").value;
+   async function login(){
+  const email = document.getElementById("login-email").value;
+  const password = document.getElementById("login-password").value;
 
-      const { error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password
-      });
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: email,
+    password: password
+  });
 
-      if(error){
-        alert(error.message);
-        return;
-      }
+  if(error){
+    alert(error.message);
+    return;
+  }
 
-      document.getElementById("auth-screen").classList.add("hidden");
-      document.getElementById("home-screen").classList.remove("hidden");
-      await loadProfile();
-    }
+  document.getElementById("auth-screen").classList.add("hidden");
+  document.getElementById("home-screen").classList.remove("hidden");
+
+  const loginBtn = document.getElementById("login-top-btn");
+  const logoutBtn = document.getElementById("logout-top-btn");
+  const profileBtn = document.getElementById("profile-btn");
+
+  if(loginBtn) loginBtn.classList.add("hidden");
+  if(logoutBtn) logoutBtn.classList.remove("hidden");
+  if(profileBtn) profileBtn.classList.remove("hidden");
+
+  await loadProfile();
+}
 
     async function logout(){
       await supabaseClient.auth.signOut();
       location.reload();
     }
 
-    async function checkAuth(){
-      const { data } = await supabaseClient.auth.getUser();
+   async function checkAuth(){
+  const { data } = await supabaseClient.auth.getUser();
 
-      if(!data.user){
-        document.getElementById("auth-screen").classList.remove("hidden");
-        document.getElementById("home-screen").classList.add("hidden");
-      } else {
-        document.getElementById("auth-screen").classList.add("hidden");
-        document.getElementById("home-screen").classList.remove("hidden");
-        await loadProfile();
-      }
-    }
+  const loginBtn = document.getElementById("login-top-btn");
+  const logoutBtn = document.getElementById("logout-top-btn");
+  const profileBtn = document.getElementById("profile-btn");
 
-    async function saveProfile(){
-      const username = document.getElementById("profile-username").value.trim();
-      const displayName = document.getElementById("profile-display-name").value.trim();
+  if(!data.user){
+    document.getElementById("auth-screen").classList.remove("hidden");
+    document.getElementById("home-screen").classList.add("hidden");
 
-      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+    if(loginBtn) loginBtn.classList.remove("hidden");
+    if(logoutBtn) logoutBtn.classList.add("hidden");
+    if(profileBtn) profileBtn.classList.add("hidden");
+  } else {
+    document.getElementById("auth-screen").classList.add("hidden");
+    document.getElementById("home-screen").classList.remove("hidden");
 
-      if(authError || !authData.user){
-        alert("You must be logged in");
-        return;
-      }
+    if(loginBtn) loginBtn.classList.add("hidden");
+    if(logoutBtn) logoutBtn.classList.remove("hidden");
+    if(profileBtn) profileBtn.classList.remove("hidden");
 
-      const { error } = await supabaseClient
-        .from("profiles")
-        .upsert({
-          id: authData.user.id,
-          username: username || null,
-          display_name: displayName || null
-        });
+    await loadProfile();
+  }
+}
 
-      if(error){
-        alert(error.message);
-        return;
-      }
+    function openProfileModal(){
+  document.getElementById("profile-modal").classList.remove("hidden");
+}
 
-      alert("Profile saved");
-    }
+function closeProfileModal(){
+  document.getElementById("profile-modal").classList.add("hidden");
+}
+
+function showAuthScreen(){
+  hideAllScreens();
+  document.getElementById("auth-screen").classList.remove("hidden");
+}
+    
+   async function saveProfile(){
+  const username = document.getElementById("profile-username").value.trim();
+  const displayName = document.getElementById("profile-display-name").value.trim();
+
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+  if(authError || !authData.user){
+    alert("You must be logged in");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: authData.user.id,
+      username: username || null,
+      display_name: displayName || null
+    });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  closeProfileModal();
+  alert("Profile saved");
+}
 
     async function loadProfile(){
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
