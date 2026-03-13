@@ -323,6 +323,20 @@
 <button onclick="register()">Register</button>
 
 </div>
+
+  <div id="auth-screen" class="hidden">
+
+<h2>Plamut Login</h2>
+
+<input id="login-email" class="input" placeholder="Email">
+<input id="login-password" class="input" type="password" placeholder="Password">
+
+<div style="margin-top:10px;">
+<button onclick="login()">Login</button>
+<button onclick="register()">Register</button>
+</div>
+
+</div>
   
   <div id="home-screen">
     <h1>Plamut</h1>
@@ -1240,6 +1254,61 @@ if(canonicalInput){
   renderShelf();
 }
 
+    async function register(){
+
+  const email = document.getElementById("login-email").value;
+  const password = document.getElementById("login-password").value;
+
+  const { error } = await supabaseClient.auth.signUp({
+    email: email,
+    password: password
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  alert("User created. Check your email.");
+}
+
+    async function login(){
+
+  const email = document.getElementById("login-email").value;
+  const password = document.getElementById("login-password").value;
+
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: email,
+    password: password
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  document.getElementById("auth-screen").classList.add("hidden");
+  document.getElementById("home-screen").classList.remove("hidden");
+}
+
+    async function logout(){
+  await supabaseClient.auth.signOut();
+  location.reload();
+}
+
+    async function checkAuth(){
+
+  const { data } = await supabaseClient.auth.getUser();
+
+  if(!data.user){
+    document.getElementById("auth-screen").classList.remove("hidden");
+    document.getElementById("home-screen").classList.add("hidden");
+  }
+
+}
+
+checkAuth();
+    
     applyTranslations();
   </script>
 
