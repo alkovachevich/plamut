@@ -1359,16 +1359,15 @@
       return true;
     }
 
-    async function updateStatusInSupabase(title, category, status){
+    async function updateStatusInSupabase(itemId, status){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
 
       const { error } = await supabaseClient
         .from("user_media")
         .update({ status: status })
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase status update error:", error);
@@ -1378,9 +1377,9 @@
       return true;
     }
 
-    async function updateCategoryInSupabase(title, oldCategory, newCategory, newStatus = null){
+    async function updateCategoryInSupabase(itemId, newCategory, newStatus = null){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
 
       const updateData = { category: newCategory };
       if(newStatus !== null){
@@ -1391,8 +1390,7 @@
         .from("user_media")
         .update(updateData)
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", oldCategory);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase category update error:", error);
@@ -1402,9 +1400,9 @@
       return true;
     }
 
-    async function updateBookDescriptionsInSupabase(title, category, description, description_ru, description_en){
+    async function updateBookDescriptionsInSupabase(itemId, description, description_ru, description_en){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
 
       const { error } = await supabaseClient
         .from("user_media")
@@ -1414,8 +1412,7 @@
           description_en: description_en || ""
         })
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase description update error:", error);
@@ -1425,16 +1422,15 @@
       return true;
     }
 
-    async function deleteItemFromSupabase(title, category){
+    async function deleteItemFromSupabase(itemId){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
 
       const { error } = await supabaseClient
         .from("user_media")
         .delete()
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase delete error:", error);
@@ -1483,6 +1479,7 @@
         seen.add(dedupeKey);
 
         demoData[category].push({
+          id: item.id,
           title: item.title,
           status: item.status || "Planned",
           cover: item.cover_url || "",
@@ -1768,20 +1765,8 @@
 
       if(!saved) return;
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: descriptions.description || "",
-        description_ru: descriptions.description_ru || "",
-        description_en: descriptions.description_en || "",
-        creator: authors,
-        work_key: workKey,
-        canonical_key: canonicalKey
-      });
-
       closeAddModal();
-      renderShelf();
+      await loadCategoryFromSupabase(currentCategory);
     }
 
     async function saveManualItem(){
@@ -1830,21 +1815,9 @@
 
       if(!saved) return;
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        description_ru: langParts.description_ru,
-        description_en: langParts.description_en,
-        creator: creator,
-        work_key: "",
-        canonical_key: canonicalKey
-      });
-
       closeManualModal();
       closeAddModal();
-      renderShelf();
+      await loadCategoryFromSupabase(currentCategory);
     }
 
     function changeStatusByTitle(title){
@@ -1875,7 +1848,7 @@
       renderShelf();
       closeStatusModal();
 
-      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+      const updated = await updateStatusInSupabase(item.id, status);
 
       if(!updated){
         item.status = oldStatus;
@@ -1916,7 +1889,7 @@
       closeStatusModal();
       renderShelf();
 
-      const updated = await updateCategoryInSupabase(item.title, oldCategory, "Blacklist", "Dropped");
+      const updated = await updateCategoryInSupabase(item.id, "Blacklist", "Dropped");
 
       if(!updated){
         demoData[oldCategory].splice(index, 0, item);
@@ -1940,9 +1913,14 @@
       if(!key) return;
 
       const user = await getCurrentUser();
-
       if(!user){
         alert(t().labels.mustBeLoggedIn);
+        return;
+      }
+
+      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
+      if(!item?.id){
+        alert(t().labels.itemNotFound);
         return;
       }
 
@@ -1950,8 +1928,7 @@
         .from("user_media")
         .update({ canonical_key: key })
         .eq("user_id", user.id)
-        .eq("title", currentOpenTitle)
-        .eq("category", currentCategory);
+        .eq("id", item.id);
 
       if(error){
         console.error("Canonical key update error:", error);
@@ -1959,9 +1936,7 @@
         return;
       }
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
-      if (item) item.canonical_key = key;
-
+      item.canonical_key = key;
       await loadCategoryFromSupabase(currentCategory);
       alert(t().labels.canonicalSaved);
     }
@@ -2022,8 +1997,7 @@
 
       if(changed && !isPublicView){
         await updateBookDescriptionsInSupabase(
-          item.title,
-          currentCategory,
+          item.id,
           item.description || "",
           item.description_ru || "",
           item.description_en || ""
@@ -2110,7 +2084,7 @@
       demoData[currentCategory].splice(index, 1);
       renderShelf();
 
-      const deleted = await deleteItemFromSupabase(removedItem.title, currentCategory);
+      const deleted = await deleteItemFromSupabase(removedItem.id);
 
       if(!deleted){
         demoData[currentCategory].splice(index, 0, removedItem);
@@ -2144,7 +2118,7 @@
 
       demoData[currentCategory].splice(index, 1);
 
-      const deleted = await deleteItemFromSupabase(item.title, currentCategory);
+      const deleted = await deleteItemFromSupabase(item.id);
 
       if(!deleted){
         demoData[currentCategory].splice(index, 0, item);
@@ -2352,7 +2326,6 @@
       }
 
       isPublicView = true;
-
       currentPublicProfileName =
         profile.display_name || profile.username || "Library";
 
@@ -2384,6 +2357,7 @@
         }
 
         demoData[item.category].push({
+          id: item.id,
           title: item.title,
           status: item.status || "Planned",
           cover: item.cover_url || "",
