@@ -1089,33 +1089,75 @@
     }
 
     async function fetchOpenLibraryDescription(workKey){
-      if(!workKey) return "";
+  if(!workKey) return "";
 
-      try {
-        const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
-        const url = "https://openlibrary.org" + cleanKey + ".json";
+  try {
+    const cleanKey = workKey.startsWith("/works/") ? workKey : /works/${workKey};
+    const workUrl = "https://openlibrary.org" + cleanKey + ".json";
 
-        const response = await fetch(url);
-        if (!response.ok) {
-          return "";
+    // 1. Сначала пробуем получить work
+    const workResponse = await fetch(workUrl);
+    if(!workResponse.ok){
+      throw new Error("HTTP " + workResponse.status);
+    }
+
+    const workData = await workResponse.json();
+
+    function extractDescription(obj){
+      if(!obj) return "";
+      if(typeof obj.description === "string") return obj.description;
+      if(obj.description && typeof obj.description.value === "string") return obj.description.value;
+      return "";
+    }
+
+    // 2. Ищем описание в editions на языке системы
+    const editionsUrl = "https://openlibrary.org" + cleanKey + "/editions.json";
+    const editionsResponse = await fetch(editionsUrl);
+
+    if(editionsResponse.ok){
+      const editionsData = await editionsResponse.json();
+      const entries = editionsData.entries  editionsData.docs  [];
+
+      const targetLangKey =
+        currentLanguage === "ru"
+          ? "/languages/rus"
+          : currentLanguage === "en"
+            ? "/languages/eng"
+            : "";
+
+      if(targetLangKey){
+        for(const edition of entries){
+          const languages = edition.languages || [];
+          const hasTargetLanguage = languages.some(lang => {
+            return lang && (lang.key === targetLangKey || lang === targetLangKey);
+          });
+
+          if(!hasTargetLanguage) continue;
+
+          const editionKey = edition.key || "";
+          if(!editionKey) continue;
+
+          const editionUrl = "https://openlibrary.org" + editionKey + ".json";
+          const editionResponse = await fetch(editionUrl);
+          if(!editionResponse.ok) continue;
+
+          const editionData = await editionResponse.json();
+          const editionDescription = extractDescription(editionData);
+
+          if(editionDescription){
+            return editionDescription;
+          }
         }
-
-        const data = await response.json();
-
-        if(typeof data.description === "string"){
-          return data.description;
-        }
-
-        if(data.description && typeof data.description.value === "string"){
-          return data.description.value;
-        }
-
-        return "";
-      } catch (error) {
-        console.error("Open Library description error:", error);
-        return "";
       }
     }
+
+    // 3. Fallback: описание work
+    return extractDescription(workData);
+  } catch (error) {
+    console.error("Open Library description error:", error);
+    return "";
+  }
+}
 
     function isDuplicateItem(category, title, workKey = ""){
       const items = demoData[category] || [];
