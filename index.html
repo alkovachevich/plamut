@@ -1460,6 +1460,16 @@
       return item.description || "";
     }
 
+    function looksLikeRussian(text){
+  if(!text) return false;
+  return /[А-Яа-яЁё]/.test(text);
+}
+
+function looksLikeEnglish(text){
+  if(!text) return false;
+  return /[A-Za-z]/.test(text);
+}
+
     async function fetchGoogleBooksDescription(title, author = ""){
   try {
     const targetLang = currentLanguage === "ru" ? "ru" : "en";
