@@ -1600,43 +1600,49 @@ function looksLikeEnglish(text){
     let matchedLanguage = false;
 
     if(item && item.work_key){
-      fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+      const openLibraryDescription = await fetchOpenLibraryDescription(item.work_key);
 
-      if(fetchedDescription){
-        if(currentLanguage === "ru" && looksLikeRussian(fetchedDescription)){
+      if(openLibraryDescription){
+        fetchedDescription = openLibraryDescription;
+
+        if(currentLanguage === "ru" && looksLikeRussian(openLibraryDescription)){
           matchedLanguage = true;
         }
 
-        if(currentLanguage === "en" && looksLikeEnglish(fetchedDescription)){
+        if(currentLanguage === "en" && looksLikeEnglish(openLibraryDescription)){
           matchedLanguage = true;
         }
       }
     }
 
-    if(!fetchedDescription){
+    if(!matchedLanguage){
       const googleResult = await fetchGoogleBooksDescription(
         item?.title || title,
         item?.creator || ""
       );
 
-      fetchedDescription = googleResult.text || "";
-      matchedLanguage = googleResult.matchedLanguage || false;
+      if(googleResult.text){
+        fetchedDescription = googleResult.text;
+        matchedLanguage = googleResult.matchedLanguage || false;
+      }
     }
 
     if(fetchedDescription){
       item.description = fetchedDescription;
 
-      if(matchedLanguage){
-        if(currentLanguage === "ru"){
+      if(currentLanguage === "ru"){
+        if(matchedLanguage && looksLikeRussian(fetchedDescription)){
           item.description_ru = fetchedDescription;
         }
+      }
 
-        if(currentLanguage === "en"){
+      if(currentLanguage === "en"){
+        if(matchedLanguage && looksLikeEnglish(fetchedDescription)){
           item.description_en = fetchedDescription;
         }
       }
 
-      descriptionEl.textContent = getBestDescription(item) || fetchedDescription;
+      descriptionEl.textContent = getBestDescription(item)  item.description  t().labels.noDescription;
 
       detailsDatabase[title] = {
         description: item.description || fetchedDescription
@@ -1733,7 +1739,7 @@ function looksLikeEnglish(text){
       return true;
     }
 
-    async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
+   async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
   if(!description) return false;
 
   const updateData = {
@@ -1741,11 +1747,11 @@ function looksLikeEnglish(text){
   };
 
   if(matchedLanguage){
-    if(currentLanguage === "ru"){
+    if(currentLanguage === "ru" && looksLikeRussian(description)){
       updateData.description_ru = description;
     }
 
-    if(currentLanguage === "en"){
+    if(currentLanguage === "en" && looksLikeEnglish(description)){
       updateData.description_en = description;
     }
   }
@@ -1763,7 +1769,7 @@ function looksLikeEnglish(text){
 
   return true;
 }
-
+    
     async function loadCategoryFromSupabase(category){
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
