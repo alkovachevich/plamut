@@ -355,6 +355,12 @@
     <div style="margin-top:20px;">
   <button onclick="logout()" class="button">Logout</button>
 </div>
+
+    <div style="margin-top:20px;">
+  <input id="profile-username" class="input" placeholder="Username">
+  <input id="profile-display-name" class="input" placeholder="Display name">
+  <button onclick="saveProfile()" class="button">Save Profile</button>
+</div>
     
   </div>
 
@@ -1306,6 +1312,7 @@ if(canonicalInput){
   document.getElementById("auth-screen").classList.add("hidden");
   document.getElementById("home-screen").classList.remove("hidden");
 }
+    await loadProfile();
 
     async function logout(){
   await supabaseClient.auth.signOut();
@@ -1320,10 +1327,66 @@ if(canonicalInput){
     document.getElementById("auth-screen").classList.remove("hidden");
     document.getElementById("home-screen").classList.add("hidden");
   }
-
+    
+else {
+  document.getElementById("auth-screen").classList.add("hidden");
+  document.getElementById("home-screen").classList.remove("hidden");
+  await loadProfile();
+}    
 }
 
 checkAuth();
+
+    async function saveProfile(){
+  const username = document.getElementById("profile-username").value.trim();
+  const displayName = document.getElementById("profile-display-name").value.trim();
+
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+  if(authError || !authData.user){
+    alert("You must be logged in");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: authData.user.id,
+      username: username || null,
+      display_name: displayName || null
+    });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  alert("Profile saved");
+}
+
+    async function loadProfile(){
+  const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+  if(authError || !authData.user){
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", authData.user.id)
+    .single();
+
+  if(error || !data){
+    return;
+  }
+
+  const usernameInput = document.getElementById("profile-username");
+  const displayNameInput = document.getElementById("profile-display-name");
+
+  if(usernameInput) usernameInput.value = data.username || "";
+  if(displayNameInput) displayNameInput.value = data.display_name || "";
+}
     
     applyTranslations();
   </script>
