@@ -483,9 +483,8 @@
   <script>
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
-
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
-    
+
     const supabaseClient = supabase.createClient(
       SUPABASE_URL,
       SUPABASE_ANON_KEY
@@ -832,6 +831,22 @@
     function getOpenLibraryCoverUrl(coverId){
       if(!coverId) return "";
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
+    }
+
+    function looksLikeRussian(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 20) return false;
+      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
+      return (cyrillic.length / letters.length) >= 0.6;
+    }
+
+    function looksLikeEnglish(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 20) return false;
+      const latin = text.match(/[A-Za-z]/g) || [];
+      return (latin.length / letters.length) >= 0.6;
     }
 
     async function openCategory(name){
@@ -1260,8 +1275,8 @@
         creator: authors,
         work_key: workKey,
         canonical_key: canonicalKey,
-        description_ru: currentLanguage === "ru" ? description : "",
-        description_en: currentLanguage === "en" ? description : ""
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_en: looksLikeEnglish(description) ? description : ""
       });
 
       closeAddModal();
@@ -1318,8 +1333,8 @@
         creator: creator,
         work_key: "",
         canonical_key: canonicalKey,
-        description_ru: currentLanguage === "ru" ? description : "",
-        description_en: currentLanguage === "en" ? description : ""
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_en: looksLikeEnglish(description) ? description : ""
       });
 
       closeManualModal();
@@ -1374,30 +1389,67 @@
       document.getElementById("status-modal").classList.add("hidden");
     }
 
-   async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
-  if(!description) return false;
+    async function updateStatusInSupabase(title, category, status){
+      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
-  const updateData = {
-    description: description
-  };
+      if(authError || !authData.user){
+        console.error("Auth error while updating status:", authError);
+        return false;
+      }
 
-  if(currentLanguage === "en" && looksLikeEnglish(description)){
-    updateData.description_en = description;
-  }
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update({ status: status })
+        .eq("user_id", authData.user.id)
+        .eq("title", title)
+        .eq("category", category);
 
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update(updateData)
-    .eq("title", title)
-    .eq("category", category);
+      if(error){
+        console.error("Supabase status update error:", error);
+        return false;
+      }
 
-  if(error){
-    console.error("Supabase description update error:", error);
-    return false;
-  }
+      return true;
+    }
 
-  return true;
-}
+    async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
+      if(!description) return false;
+
+      const { data: authData, error: authError } = await supabaseClient.auth.getUser();
+
+      if(authError || !authData.user){
+        console.error("Auth error while updating description:", authError);
+        return false;
+      }
+
+      const updateData = {
+        description: description
+      };
+
+      if(matchedLanguage){
+        if(looksLikeRussian(description)){
+          updateData.description_ru = description;
+        }
+
+        if(looksLikeEnglish(description)){
+          updateData.description_en = description;
+        }
+      }
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update(updateData)
+        .eq("user_id", authData.user.id)
+        .eq("title", title)
+        .eq("category", category);
+
+      if(error){
+        console.error("Supabase description update error:", error);
+        return false;
+      }
+
+      return true;
+    }
 
     async function saveCanonicalKey(){
       const keyInput = document.getElementById("canonical-key-input");
@@ -1432,281 +1484,262 @@
       alert(t().labels.canonicalSaved);
     }
 
-    function getBestDescription(item){
-      if(!item){
-        return "";
-      }
-
-      if(currentLanguage === "ru" && item.description_ru){
-        return item.description_ru;
-      }
-
-      if(currentLanguage === "en" && item.description_en){
-        return item.description_en;
-      }
-
-      return item.description || "";
-    }
-
-    function looksLikeRussian(text){
-  if(!text) return false;
-
-  const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-  if(letters.length < 20) return false;
-
-  const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
-
-  return (cyrillic.length / letters.length) >= 0.6;
-}
-
-function looksLikeEnglish(text){
-  if(!text) return false;
-
-  const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-  if(letters.length < 20) return false;
-
-  const latin = text.match(/[A-Za-z]/g) || [];
-
-  return (latin.length / letters.length) >= 0.6;
-}
-
     async function fetchGoogleBooksDescription(title, author = ""){
-  try {
-    const targetLang = currentLanguage === "ru" ? "ru" : "en";
+      try {
+        const targetLang = currentLanguage === "ru" ? "ru" : "en";
 
-    let query = "";
-    if(title && author){
-      query = intitle:${title} inauthor:${author};
-    } else if(title){
-      query = intitle:${title};
-    } else if(author){
-      query = inauthor:${author};
-    } else {
-      return { text: "", matchedLanguage: false };
-    }
+        let query = "";
+        if(title && author){
+          query = `intitle:${title} inauthor:${author}`;
+        } else if(title){
+          query = `intitle:${title}`;
+        } else if(author){
+          query = `inauthor:${author}`;
+        } else {
+          return { text: "", matchedLanguage: false };
+        }
 
-    async function tryRequest(url){
-      const response = await fetch(url);
+        async function tryRequest(url){
+          const response = await fetch(url);
 
-      if(!response.ok){
-        throw new Error("HTTP " + response.status);
+          if(!response.ok){
+            throw new Error("HTTP " + response.status);
+          }
+
+          const data = await response.json();
+          const items = data.items || [];
+
+          for(const book of items){
+            const info = book.volumeInfo || {};
+            const description = info.description || "";
+
+            if(!description){
+              continue;
+            }
+
+            if(targetLang === "ru" && looksLikeRussian(description)){
+              return { text: description, matchedLanguage: true };
+            }
+
+            if(targetLang === "en" && looksLikeEnglish(description)){
+              return { text: description, matchedLanguage: true };
+            }
+          }
+
+          for(const book of items){
+            const info = book.volumeInfo || {};
+            const description = info.description || "";
+
+            if(description){
+              return { text: description, matchedLanguage: false };
+            }
+          }
+
+          return { text: "", matchedLanguage: false };
+        }
+
+        const strictUrl =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&langRestrict=" + encodeURIComponent(targetLang) +
+          "&maxResults=5" +
+          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
+
+        let result = await tryRequest(strictUrl);
+
+        if(result.text){
+          return result;
+        }
+
+        const fallbackUrl =
+          "https://www.googleapis.com/books/v1/volumes?q=" +
+          encodeURIComponent(query) +
+          "&maxResults=5" +
+          "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
+
+        result = await tryRequest(fallbackUrl);
+
+        return result;
+      } catch (error) {
+        console.error("Google Books description error:", error);
+        return { text: "", matchedLanguage: false };
       }
-
-      const data = await response.json();
-      const items = data.items || [];
-
-      for(const book of items){
-        const info = book.volumeInfo || {};
-        const description = info.description || "";
-
-        if(!description){
-          continue;
-        }
-
-        if(targetLang === "ru" && looksLikeRussian(description)){
-          return { text: description, matchedLanguage: true };
-        }
-
-        if(targetLang === "en" && looksLikeEnglish(description)){
-          return { text: description, matchedLanguage: true };
-        }
-      }
-
-      for(const book of items){
-        const info = book.volumeInfo || {};
-        const description = info.description || "";
-
-        if(description){
-          return { text: description, matchedLanguage: false };
-        }
-      }
-
-      return { text: "", matchedLanguage: false };
     }
-
-    const strictUrl =
-      "https://www.googleapis.com/books/v1/volumes?q=" +
-      encodeURIComponent(query) +
-      "&langRestrict=" + encodeURIComponent(targetLang) +
-      "&maxResults=5" +
-      "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
-
-    let result = await tryRequest(strictUrl);
-
-    if(result.text){
-      return result;
-    }
-
-    const fallbackUrl =
-      "https://www.googleapis.com/books/v1/volumes?q=" +
-      encodeURIComponent(query) +
-      "&maxResults=5" +
-      "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
-
-    result = await tryRequest(fallbackUrl);
-
-    return result;
-  } catch (error) {
-    console.error("Google Books description error:", error);
-    return { text: "", matchedLanguage: false };
-  }
-}
 
     async function translateTextToRussian(text){
-  if(!text) return "";
+      if(!text) return "";
 
-  try {
-    const url =
-      "https://api.mymemory.translated.net/get?q=" +
-      encodeURIComponent(text) +
-      "&langpair=" +
-      encodeURIComponent("en|ru");
+      try {
+        const url =
+          "https://api.mymemory.translated.net/get?q=" +
+          encodeURIComponent(text) +
+          "&langpair=" +
+          encodeURIComponent("en|ru");
 
-    const response = await fetch(url);
+        const response = await fetch(url);
 
-    if(!response.ok){
-      throw new Error("HTTP " + response.status);
-    }
+        if(!response.ok){
+          throw new Error("HTTP " + response.status);
+        }
 
-    const data = await response.json();
-    return data?.responseData?.translatedText || "";
-  } catch (error) {
-    console.error("Translation error:", error);
-    return "";
-  }
-}
-    
-async function openCard(title){
-  currentOpenTitle = title;
-
-  const item = (demoData[currentCategory] || []).find(x => x.title === title);
-
-  hideAllScreens();
-  document.getElementById("details-screen").classList.remove("hidden");
-
-  document.getElementById("details-title").textContent = title;
-  document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
-  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : "Unknown";
-
-  const coverBox = document.getElementById("details-cover-box");
-
-  if(item && item.cover){
-    coverBox.innerHTML = <img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">;
-  } else {
-    coverBox.textContent = t().labels.cover;
-  }
-
-  const descriptionEl = document.getElementById("details-description");
-
-  if(currentLanguage === "ru" && item?.description_ru){
-    descriptionEl.textContent = item.description_ru;
-  } else if(currentLanguage === "en" && item?.description_en){
-    descriptionEl.textContent = item.description_en;
-  } else if(currentLanguage === "ru" && item?.description){
-    descriptionEl.textContent = t().labels.searching;
-
-    const translated = await translateTextToRussian(item.description);
-
-    if(translated){
-      item.description_ru = translated;
-      descriptionEl.textContent = translated;
-
-      if(!isPublicView){
-        await supabaseClient
-          .from("user_media")
-          .update({ description_ru: translated })
-          .eq("title", title)
-          .eq("category", currentCategory);
+        const data = await response.json();
+        return data?.responseData?.translatedText || "";
+      } catch (error) {
+        console.error("Translation error:", error);
+        return "";
       }
-    } else {
-      descriptionEl.textContent = item.description;
-    }
-  } else if(item?.description){
-    descriptionEl.textContent = item.description;
-  } else if(item && item.work_key){
-    descriptionEl.textContent = t().labels.searching;
-
-    let fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
-
-    if(!fetchedDescription){
-      const googleResult = await fetchGoogleBooksDescription(
-        item?.title || title,
-        item?.creator || ""
-      );
-      fetchedDescription = googleResult.text || "";
     }
 
-    if(fetchedDescription){
-      item.description = fetchedDescription;
+    async function openCard(title){
+      currentOpenTitle = title;
 
-      if(currentLanguage === "en" && looksLikeEnglish(fetchedDescription)){
-        item.description_en = fetchedDescription;
+      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+
+      hideAllScreens();
+      document.getElementById("details-screen").classList.remove("hidden");
+
+      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-creator").textContent = item?.creator || "";
+      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
+
+      const coverBox = document.getElementById("details-cover-box");
+
+      if(item && item.cover){
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+      } else {
+        coverBox.textContent = t().labels.cover;
       }
 
-      if(currentLanguage === "ru"){
-        const translated = await translateTextToRussian(fetchedDescription);
+      const descriptionEl = document.getElementById("details-description");
 
-        if(translated){
-          item.description_ru = translated;
+      if(currentLanguage === "ru" && item?.description_ru){
+        descriptionEl.textContent = item.description_ru;
+      } else if(currentLanguage === "en" && item?.description_en){
+        descriptionEl.textContent = item.description_en;
+      } else if(currentLanguage === "ru" && item?.description){
+        descriptionEl.textContent = t().labels.searching;
+
+        if(looksLikeRussian(item.description)){
+          item.description_ru = item.description;
+          descriptionEl.textContent = item.description;
+          if(!isPublicView){
+            await updateDescriptionInSupabase(title, currentCategory, item.description, true);
+          }
+        } else {
+          const translated = await translateTextToRussian(item.description);
+
+          if(translated){
+            item.description_ru = translated;
+            descriptionEl.textContent = translated;
+
+            if(!isPublicView){
+              await supabaseClient
+                .from("user_media")
+                .update({ description_ru: translated })
+                .eq("title", title)
+                .eq("category", currentCategory);
+            }
+          } else {
+            descriptionEl.textContent = item.description;
+          }
+        }
+      } else if(item?.description){
+        descriptionEl.textContent = item.description;
+      } else if(item && item.work_key){
+        descriptionEl.textContent = t().labels.searching;
+
+        let fetchedDescription = await fetchOpenLibraryDescription(item.work_key);
+        let matchedLanguage = false;
+
+        if(fetchedDescription){
+          if(looksLikeRussian(fetchedDescription) || looksLikeEnglish(fetchedDescription)){
+            matchedLanguage = true;
+          }
+        }
+
+        if(!fetchedDescription){
+          const googleResult = await fetchGoogleBooksDescription(
+            item?.title || title,
+            item?.creator || ""
+          );
+          fetchedDescription = googleResult.text || "";
+          matchedLanguage = googleResult.matchedLanguage;
+        }
+
+        if(fetchedDescription){
+          item.description = fetchedDescription;
+
+          if(looksLikeEnglish(fetchedDescription)){
+            item.description_en = fetchedDescription;
+          }
+
+          if(looksLikeRussian(fetchedDescription)){
+            item.description_ru = fetchedDescription;
+          }
+
+          if(currentLanguage === "ru" && !item.description_ru && looksLikeEnglish(fetchedDescription)){
+            const translated = await translateTextToRussian(fetchedDescription);
+            if(translated){
+              item.description_ru = translated;
+            }
+          }
+
+          const bestDescription =
+            currentLanguage === "ru"
+              ? (item.description_ru || item.description)
+              : (item.description_en || item.description);
+
+          descriptionEl.textContent = bestDescription || t().labels.noDescription;
+
+          if(!isPublicView){
+            const updateData = {
+              description: item.description || fetchedDescription
+            };
+
+            if(item.description_en){
+              updateData.description_en = item.description_en;
+            }
+
+            if(item.description_ru){
+              updateData.description_ru = item.description_ru;
+            }
+
+            await supabaseClient
+              .from("user_media")
+              .update(updateData)
+              .eq("title", title)
+              .eq("category", currentCategory);
+          }
+        } else {
+          descriptionEl.textContent = t().labels.noDescription;
+        }
+      } else {
+        descriptionEl.textContent = t().labels.noDescription;
+      }
+
+      const canonicalSection = document.getElementById("canonical-key-section");
+      const canonicalInput = document.getElementById("canonical-key-input");
+
+      if(canonicalInput && canonicalSection){
+        if(isPublicView){
+          canonicalSection.classList.add("hidden");
+        } else {
+          canonicalSection.classList.remove("hidden");
+          canonicalInput.value = item?.canonical_key || "";
         }
       }
 
-      const bestDescription =
-        currentLanguage === "ru"
-          ? (item.description_ru || item.description)
-          : (item.description_en || item.description);
+      const statusBtn = document.getElementById("change-status-details-btn");
 
-      descriptionEl.textContent = bestDescription || t().labels.noDescription;
-
-      if(!isPublicView){
-        const updateData = {
-          description: item.description || fetchedDescription
-        };
-
-        if(item.description_en){
-          updateData.description_en = item.description_en;
+      if(statusBtn){
+        if(isPublicView){
+          statusBtn.classList.add("hidden");
+        } else {
+          statusBtn.classList.remove("hidden");
         }
-
-        if(item.description_ru){
-          updateData.description_ru = item.description_ru;
-        }
-
-        await supabaseClient
-          .from("user_media")
-          .update(updateData)
-          .eq("title", title)
-          .eq("category", currentCategory);
       }
-    } else {
-      descriptionEl.textContent = t().labels.noDescription;
     }
-  } else {
-    descriptionEl.textContent = t().labels.noDescription;
-  }
-
-  const canonicalSection = document.getElementById("canonical-key-section");
-  const canonicalInput = document.getElementById("canonical-key-input");
-
-  if(canonicalInput && canonicalSection){
-    if(isPublicView){
-      canonicalSection.classList.add("hidden");
-    } else {
-      canonicalSection.classList.remove("hidden");
-      canonicalInput.value = item?.canonical_key || "";
-    }
-  }
-
-  const statusBtn = document.getElementById("change-status-details-btn");
-
-  if(statusBtn){
-    if(isPublicView){
-      statusBtn.classList.add("hidden");
-    } else {
-      statusBtn.classList.remove("hidden");
-    }
-  }
-}
 
     async function saveItemToSupabase(
       title,
@@ -1742,11 +1775,11 @@ async function openCard(title){
         canonical_key: finalCanonicalKey
       };
 
-      if(currentLanguage === "ru" && description){
+      if(description && looksLikeRussian(description)){
         insertData.description_ru = description;
       }
 
-      if(currentLanguage === "en" && description){
+      if(description && looksLikeEnglish(description)){
         insertData.description_en = description;
       }
 
@@ -1763,37 +1796,6 @@ async function openCard(title){
       return true;
     }
 
-   async function updateDescriptionInSupabase(title, category, description, matchedLanguage = false){
-  if(!description) return false;
-
-  const updateData = {
-    description: description
-  };
-
-  if(matchedLanguage){
-    if(currentLanguage === "ru" && looksLikeRussian(description)){
-      updateData.description_ru = description;
-    }
-
-    if(currentLanguage === "en" && looksLikeEnglish(description)){
-      updateData.description_en = description;
-    }
-  }
-
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update(updateData)
-    .eq("title", title)
-    .eq("category", category);
-
-  if(error){
-    console.error("Supabase description update error:", error);
-    return false;
-  }
-
-  return true;
-}
-    
     async function loadCategoryFromSupabase(category){
       const { data: authData, error: authError } = await supabaseClient.auth.getUser();
 
@@ -1983,7 +1985,7 @@ async function openCard(title){
         .from("profiles")
         .select("*")
         .eq("id", authData.user.id)
-        .single();
+        .maybeSingle();
 
       if(error || !data){
         return;
