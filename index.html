@@ -1752,15 +1752,27 @@
       return true;
     }
 
-    async function deleteItemFromSupabase(itemId){
+      async function deleteItemFromSupabase(item, category = currentCategory){
       const user = await getCurrentUser();
-      if(!user || !itemId) return false;
+      if(!user || !item?.id) return false;
 
-      const { error } = await supabaseClient
+      const baseQuery = supabaseClient
         .from("user_media")
         .delete()
         .eq("user_id", user.id)
-        .eq("id", itemId);
+        .eq("category", category || item.category || "");
+
+      let query = baseQuery;
+
+      if(item.canonical_key){
+        query = query.eq("canonical_key", item.canonical_key);
+      } else if(item.work_key){
+        query = query.eq("work_key", item.work_key);
+      } else {
+        query = query.eq("title", item.title || "");
+      }
+
+      const { error } = await query;
 
       if(error){
         console.error("Supabase delete error:", error);
@@ -2356,8 +2368,8 @@
       }
       renderShelf();
 
-      const deleted = await deleteItemFromSupabase(removedItem.id);
-
+      const deleted = await deleteItemFromSupabase(removedItem, currentCategory);
+      
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, removedItem);
@@ -2370,6 +2382,8 @@
       if(currentOpenItemId === removedItem.id){
         currentOpenItemId = null;
       }
+      
+      await loadCategoryFromSupabase(currentCategory);
     }
 
     async function deleteCurrentItem(){
@@ -2390,7 +2404,7 @@
         demoData[currentCategory].splice(index, 1);
       }
 
-      const deleted = await deleteItemFromSupabase(item.id);
+      const deleted = await deleteItemFromSupabase(item, currentCategory);
 
       if(!deleted){
         if(index !== -1){
@@ -2402,7 +2416,7 @@
 
       currentOpenItemId = null;
       backToCategory();
-      renderShelf();
+     await loadCategoryFromSupabase(currentCategory);
     }
 
     async function register(){
