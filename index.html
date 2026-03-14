@@ -206,9 +206,11 @@
           <img id="avatar-img" src="" alt="avatar">
         </div>
 
-        <input id="avatar-url" class="input" placeholder="Avatar image URL">
+        <input type="file" id="avatar-file" accept="image/*">
 
-        <button class="button" onclick="updateAvatar()">Update avatar</button>
+<button class="button" onclick="uploadAvatar()">Upload avatar</button>
+
+<button class="button" onclick="removeAvatar()">Remove avatar</button>
 
       </div>
 
