@@ -2257,6 +2257,78 @@ async function changePassword(){
       }
     }
 
+async function uploadAvatar(){
+
+  const fileInput = document.getElementById("avatar-file");
+  const file = fileInput.files[0];
+
+  if(!file){
+    alert("Select image first");
+    return;
+  }
+
+  const user = await getCurrentUser();
+  if(!user) return;
+
+  const fileExt = file.name.split(".").pop();
+  const fileName = `${user.id}.${fileExt}`;
+
+  const { error: uploadError } = await supabaseClient
+    .storage
+    .from("avatars")
+    .upload(fileName, file, {
+      upsert:true
+    });
+
+  if(uploadError){
+    alert(uploadError.message);
+    return;
+  }
+
+  const { data } = supabaseClient
+    .storage
+    .from("avatars")
+    .getPublicUrl(fileName);
+
+  const avatarUrl = data.publicUrl;
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .update({
+      avatar_url: avatarUrl
+    })
+    .eq("id", user.id);
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  setAvatarPreview(avatarUrl);
+
+}
+
+async function removeAvatar(){
+
+  const user = await getCurrentUser();
+  if(!user) return;
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .update({
+      avatar_url: null
+    })
+    .eq("id", user.id);
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  setAvatarPreview("");
+
+}
+
     function showRuntimeError(message){
       const banner = document.getElementById("runtime-error-banner");
       if(!banner) return;
