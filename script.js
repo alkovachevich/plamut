@@ -431,9 +431,20 @@
       document.getElementById("manual-modal").classList.add("hidden");
     }
 
-    function openProfileModal(){
-      document.getElementById("profile-modal").classList.remove("hidden");
-    }
+    async function openProfileModal(){
+  await loadProfile();
+
+  const newPassword = document.getElementById("new-password");
+  const confirmPassword = document.getElementById("confirm-password");
+
+  if(newPassword) newPassword.value = "";
+  if(confirmPassword) confirmPassword.value = "";
+
+  if(newPassword) newPassword.type = "password";
+  if(confirmPassword) confirmPassword.type = "password";
+
+  document.getElementById("profile-modal").classList.remove("hidden");
+}
 
     function closeProfileModal(){
       document.getElementById("profile-modal").classList.add("hidden");
@@ -1946,57 +1957,132 @@
       }
     }
 
+function setAvatarPreview(url){
+  const img = document.getElementById("avatar-img");
+  if(!img) return;
+
+  if(url && String(url).trim()){
+    img.src = url;
+    img.style.display = "block";
+  } else {
+    img.src = "https://via.placeholder.com/120x120?text=Avatar";
+    img.style.display = "block";
+  }
+}
+
+function updateAvatar(){
+  const input = document.getElementById("avatar-url");
+  if(!input) return;
+
+  const url = input.value.trim();
+  setAvatarPreview(url);
+}
+
+function togglePasswordVisibility(){
+  const newPassword = document.getElementById("new-password");
+  const confirmPassword = document.getElementById("confirm-password");
+
+  if(!newPassword || !confirmPassword) return;
+
+  const shouldShow = newPassword.type === "password";
+
+  newPassword.type = shouldShow ? "text" : "password";
+  confirmPassword.type = shouldShow ? "text" : "password";
+}
+
+async function changePassword(){
+  const newPassword = document.getElementById("new-password")?.value || "";
+  const confirmPassword = document.getElementById("confirm-password")?.value || "";
+
+  if(!newPassword.trim()){
+    alert("Enter new password");
+    return;
+  }
+
+  if(newPassword.length < 6){
+    alert("Password must be at least 6 characters");
+    return;
+  }
+
+  if(newPassword !== confirmPassword){
+    alert("Passwords do not match");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.updateUser({
+    password: newPassword
+  });
+
+  if(error){
+    alert(error.message);
+    return;
+  }
+
+  document.getElementById("new-password").value = "";
+  document.getElementById("confirm-password").value = "";
+
+  alert("Password updated");
+}
+
     async function saveProfile(){
-      const username = document.getElementById("profile-username").value.trim();
-      const displayName = document.getElementById("profile-display-name").value.trim();
-      const isPublic = document.getElementById("profile-public").checked;
+  const username = document.getElementById("profile-username").value.trim();
+  const displayName = document.getElementById("profile-display-name").value.trim();
+  const isPublic = document.getElementById("profile-public").checked;
+  const avatarUrl = document.getElementById("avatar-url").value.trim();
 
-      const user = await getCurrentUser();
-      if(!user){
-        alert(t().labels.mustBeLoggedIn);
-        return;
-      }
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return;
+  }
 
-      const { error } = await supabaseClient
-        .from("profiles")
-        .upsert({
-          id: user.id,
-          username: username || null,
-          display_name: displayName || null,
-          is_public: isPublic
-        });
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: user.id,
+      username: username || null,
+      display_name: displayName || null,
+      is_public: isPublic,
+      avatar_url: avatarUrl || null
+    });
 
-      if(error){
-        alert(error.message);
-        return;
-      }
+  if(error){
+    alert(error.message);
+    return;
+  }
 
-      closeProfileModal();
-      alert(t().profile.saved);
-    }
+  setAvatarPreview(avatarUrl);
+  closeProfileModal();
+  alert(t().profile.saved);
+}
 
     async function loadProfile(){
-      const user = await getCurrentUser();
-      if(!user) return;
+  const user = await getCurrentUser();
+  if(!user) return;
 
-      const { data, error } = await supabaseClient
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
 
-      if(error || !data){
-        return;
-      }
+  if(error || !data){
+    setAvatarPreview("");
+    return;
+  }
 
-      const usernameInput = document.getElementById("profile-username");
-      const displayNameInput = document.getElementById("profile-display-name");
-      const publicInput = document.getElementById("profile-public");
+  const usernameInput = document.getElementById("profile-username");
+  const displayNameInput = document.getElementById("profile-display-name");
+  const publicInput = document.getElementById("profile-public");
+  const avatarInput = document.getElementById("avatar-url");
 
-      if(usernameInput) usernameInput.value = data.username || "";
-      if(displayNameInput) displayNameInput.value = data.display_name || "";
-      if(publicInput) publicInput.checked = data.is_public !== false;
-    }
+  if(usernameInput) usernameInput.value = data.username || "";
+  if(displayNameInput) displayNameInput.value = data.display_name || "";
+  if(publicInput) publicInput.checked = data.is_public !== false;
+  if(avatarInput) avatarInput.value = data.avatar_url || "";
+
+  setAvatarPreview(data.avatar_url || "");
+}
 
     function openPublicCategory(name, profileName = "Library"){
       if(!isPublicView){
