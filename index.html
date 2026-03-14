@@ -2686,6 +2686,24 @@
 
     async function init(){
       applyTranslations();
+      
+      supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+        const loginBtn = document.getElementById("login-top-btn");
+        const logoutBtn = document.getElementById("logout-top-btn");
+        const profileBtn = document.getElementById("profile-btn");
+
+        if(session?.user){
+          await showAuthorizedUI();
+        } else {
+          hideAllScreens();
+          document.getElementById("auth-screen").classList.remove("hidden");
+
+          if(loginBtn) loginBtn.classList.remove("hidden");
+          if(logoutBtn) logoutBtn.classList.add("hidden");
+          if(profileBtn) profileBtn.classList.add("hidden");
+        }
+      });
+
       const openedPublic = await checkPublicRoute();
 
       if(!openedPublic){
