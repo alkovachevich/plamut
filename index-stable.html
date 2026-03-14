@@ -68,7 +68,15 @@
       display:flex;
       gap:12px;
       align-items:center;
-      margin-bottom:24px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+
+    .toolbar-row{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-bottom:18px;
       flex-wrap:wrap;
     }
 
@@ -83,6 +91,16 @@
 
     .button:hover{
       background:#333;
+    }
+
+    .select{
+      background:#111;
+      color:white;
+      border:1px solid #444;
+      border-radius:10px;
+      padding:10px 12px;
+      font:inherit;
+      min-width:180px;
     }
 
     .shelf{
@@ -169,7 +187,7 @@
 
     .modal-box{
       width:100%;
-      max-width:560px;
+      max-width:680px;
       background:#1a1a1a;
       border:1px solid #333;
       border-radius:16px;
@@ -224,11 +242,40 @@
 
     .search-item-left{
       min-width:0;
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+    }
+
+    .search-thumb{
+      width:50px;
+      height:72px;
+      flex:0 0 50px;
+      background:#222;
+      border-radius:8px;
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#777;
+      font-size:12px;
+    }
+
+    .search-thumb img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+
+    .search-item-text{
+      min-width:0;
     }
 
     .search-item-title{
       font-size:14px;
       word-break:break-word;
+      margin-bottom:4px;
     }
 
     .search-item-meta{
@@ -296,6 +343,23 @@
       word-break:break-word;
     }
 
+    
+    .runtime-error-banner{
+      position:fixed;
+      left:16px;
+      right:16px;
+      bottom:16px;
+      z-index:2000;
+      background:#5a1010;
+      border:1px solid #a33;
+      color:#ffd9d9;
+      border-radius:12px;
+      padding:12px 14px;
+      font-size:13px;
+      line-height:1.4;
+      box-shadow:0 8px 24px rgba(0,0,0,.4);
+    }
+
     @media (max-width: 800px){
       .details-layout{
         grid-template-columns:1fr;
@@ -304,11 +368,23 @@
       .details-cover-box{
         height:260px;
       }
+
+      .search-item{
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      .search-item-left{
+        width:100%;
+      }
     }
   </style>
 </head>
 
 <body>
+
+   <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
 
   <div class="top-right">
     <div class="lang-switch">
@@ -369,6 +445,17 @@
       <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
     </div>
 
+    <div class="toolbar-row" id="filter-toolbar">
+      <label for="status-filter" id="status-filter-label"></label>
+      <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+        <option value="All">All</option>
+        <option value="Planned">Planned</option>
+        <option value="In progress">In progress</option>
+        <option value="Done">Done</option>
+        <option value="Dropped">Dropped</option>
+      </select>
+    </div>
+
     <div class="shelf" id="shelf"></div>
   </div>
 
@@ -419,7 +506,7 @@
         id="search-input"
         class="input"
         type="text"
-        oninput="renderSearchResults()"
+        oninput="renderCategorySearchResults()"
       >
 
       <div id="search-results"></div>
@@ -476,6 +563,7 @@
         <button class="button" onclick="setStatus('In progress')" id="status-in-progress"></button>
         <button class="button" onclick="setStatus('Done')" id="status-done"></button>
         <button class="button" onclick="setStatus('Dropped')" id="status-dropped"></button>
+        <button class="button" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
         <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
       </div>
     </div>
@@ -485,6 +573,7 @@
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
+    const TMDB_API_KEY = "fc8eab333882a74fe8c8a633e4676d98";
 
     const supabaseClient = supabase.createClient(
       SUPABASE_URL,
@@ -535,11 +624,12 @@
           cancel: "Cancel",
           manualAdd: "Add manually",
           save: "Save",
-          delete: "Delete"
+          delete: "Delete",
+          moveToBlacklist: "Move to blacklist"
         },
         modals: {
           searchTitle: "Search and add",
-          searchSubtitle: "Books use Open Library API. Other categories can be added manually.",
+          searchSubtitle: "Search works by category API. Query is tried in Russian and English.",
           searchPlaceholder: "Enter title or author",
           statusTitle: "Select status",
           manualTitle: "Add manually",
@@ -553,7 +643,7 @@
           itemNotFound: "Item not found on shelf.",
           statusLabel: "Status",
           searching: "Searching...",
-          noBooksFound: "No books found",
+          noBooksFound: "No results found",
           apiError: "API error",
           dbSaveError: "Error saving item to database",
           dbUpdateError: "Supabase update error",
@@ -576,9 +666,15 @@
           libraryPrivate: "Library is private",
           unknownStatus: "Unknown",
           confirmDelete: "Delete this item?",
-          deleteError: "Could not delete item"
+          deleteError: "Could not delete item",
+          confirmMoveToBlacklist: "Move this item to blacklist?",
+          moveError: "Could not move item",
+          filterByStatus: "Filter by status",
+               allStatuses: "All statuses",
+          runtimeError: "Application error. Please refresh the page. Details:"
         },
         statuses: {
+          All: "All statuses",
           Planned: "Planned",
           "In progress": "In progress",
           Done: "Done",
@@ -637,11 +733,12 @@
           cancel: "Отмена",
           manualAdd: "Добавить вручную",
           save: "Сохранить",
-          delete: "Удалить"
+          delete: "Удалить",
+          moveToBlacklist: "Перенести в чёрный список"
         },
         modals: {
           searchTitle: "Поиск и добавление",
-          searchSubtitle: "Для книг используется Open Library API. Остальные категории можно добавлять вручную.",
+          searchSubtitle: "Поиск идёт по API выбранной категории. Запрос пробуется на русском и английском.",
           searchPlaceholder: "Введите название или автора",
           statusTitle: "Выберите статус",
           manualTitle: "Добавить вручную",
@@ -655,7 +752,7 @@
           itemNotFound: "Произведение не найдено на полке.",
           statusLabel: "Статус",
           searching: "Поиск...",
-          noBooksFound: "Книги не найдены",
+          noBooksFound: "Ничего не найдено",
           apiError: "Ошибка API",
           dbSaveError: "Ошибка сохранения в базу данных",
           dbUpdateError: "Ошибка обновления Supabase",
@@ -678,9 +775,15 @@
           libraryPrivate: "Библиотека закрыта",
           unknownStatus: "Неизвестно",
           confirmDelete: "Удалить это произведение?",
-          deleteError: "Не удалось удалить произведение"
+          deleteError: "Не удалось удалить произведение",
+          confirmMoveToBlacklist: "Перенести это произведение в чёрный список?",
+          moveError: "Не удалось перенести произведение",
+          filterByStatus: "Фильтр по статусу",
+              allStatuses: "Все статусы",
+          runtimeError: "Ошибка приложения. Обновите страницу. Детали:"
         },
         statuses: {
+          All: "Все статусы",
           Planned: "Запланировано",
           "In progress": "В процессе",
           Done: "Завершено",
@@ -700,12 +803,13 @@
 
     let currentLanguage = localStorage.getItem("plamut_language") || "ru";
     let currentCategory = null;
-    let currentStatusIndex = null;
-    let currentOpenTitle = null;
-    let currentBookResults = [];
+    let currentOpenItemId = null;
+    let currentStatusItemId = null;
+    let currentSearchResults = [];
     let isPublicView = false;
     let currentPublicProfileName = "Library";
     let searchTimer = null;
+    let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
 
     const demoData = {
       Books: [],
@@ -715,8 +819,6 @@
       Manga: [],
       Blacklist: []
     };
-
-    const detailsDatabase = {};
 
     function t() {
       return translations[currentLanguage];
@@ -731,8 +833,8 @@
         .replace(/'/g, "&#039;");
     }
 
-    function safeJsString(value) {
-      return JSON.stringify(String(value || ""));
+    function normalizeSpaces(text){
+      return String(text || "").replace(/\s+/g, " ").trim();
     }
 
     function setLanguage(lang) {
@@ -741,6 +843,12 @@
       document.documentElement.lang = lang;
       applyTranslations();
       rerenderCurrentScreen();
+    }
+
+    function setStatusFilter(value){
+      currentFilterStatus = value || "All";
+      localStorage.setItem("plamut_status_filter", currentFilterStatus);
+      renderShelf();
     }
 
     function applyTranslations() {
@@ -789,6 +897,7 @@
       document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
       document.getElementById("status-done").textContent = t().statuses.Done;
       document.getElementById("status-dropped").textContent = t().statuses.Dropped;
+      document.getElementById("status-blacklist").textContent = t().buttons.moveToBlacklist;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
 
       document.getElementById("canonical-key-section").querySelector("h3").textContent = t().labels.canonicalKey;
@@ -811,6 +920,19 @@
       document.getElementById("login-password").placeholder = t().auth.password;
       document.querySelector('#auth-screen button[onclick="login()"]').textContent = t().auth.login;
       document.querySelector('#auth-screen button[onclick="register()"]').textContent = t().auth.register;
+
+      document.getElementById("status-filter-label").textContent = t().labels.filterByStatus;
+      const filterSelect = document.getElementById("status-filter");
+      if(filterSelect){
+        filterSelect.innerHTML = `
+          <option value="All">${escapeHtml(t().labels.allStatuses)}</option>
+          <option value="Planned">${escapeHtml(t().statuses.Planned)}</option>
+          <option value="In progress">${escapeHtml(t().statuses["In progress"])}</option>
+          <option value="Done">${escapeHtml(t().statuses.Done)}</option>
+          <option value="Dropped">${escapeHtml(t().statuses.Dropped)}</option>
+        `;
+        filterSelect.value = currentFilterStatus;
+      }
     }
 
     function rerenderCurrentScreen() {
@@ -824,8 +946,9 @@
         renderShelf();
       }
 
-      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle) {
-        openCard(currentOpenTitle);
+      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenItemId) {
+        const item = getItemById(currentCategory, currentOpenItemId);
+        if(item) openCardById(currentOpenItemId);
       }
     }
 
@@ -835,11 +958,6 @@
 
     function translateCategory(category) {
       return t().categoryNames[category] || category;
-    }
-
-    function getOpenLibraryCoverUrl(coverId){
-      if(!coverId) return "";
-      return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
     function hideAllScreens(){
@@ -864,7 +982,7 @@
       document.getElementById("add-modal").classList.remove("hidden");
       document.getElementById("search-input").value = "";
       document.getElementById("search-results").innerHTML = "";
-      currentBookResults = [];
+      currentSearchResults = [];
       document.getElementById("search-input").focus();
     }
 
@@ -902,8 +1020,84 @@
       document.getElementById("status-modal").classList.add("hidden");
     }
 
-    function normalizeSpaces(text){
-      return String(text || "").replace(/\s+/g, " ").trim();
+    function getFilteredItems(){
+      const items = demoData[currentCategory] || [];
+      if(currentCategory === "Blacklist") return items;
+      if(currentFilterStatus === "All") return items;
+      return items.filter(item => item.status === currentFilterStatus);
+    }
+
+    function getItemById(category, id){
+      return (demoData[category] || []).find(item => item.id === id) || null;
+    }
+
+    function hasCyrillic(text){
+      return /[А-Яа-яЁё]/.test(text || "");
+    }
+
+    function hasLatin(text){
+      return /[A-Za-z]/.test(text || "");
+    }
+
+    async function getCurrentUser(){
+      const { data, error } = await supabaseClient.auth.getUser();
+      if(error || !data.user) return null;
+      return data.user;
+    }
+
+    async function fetchJson(url, options = undefined){
+      const response = await fetch(url, options);
+      if(!response.ok){
+        throw new Error("HTTP " + response.status);
+      }
+      return await response.json();
+    }
+
+    async function translateText(text, fromLang, toLang){
+      if(!text) return "";
+      try {
+        const url =
+          "https://api.mymemory.translated.net/get?q=" +
+          encodeURIComponent(text) +
+          "&langpair=" +
+          encodeURIComponent(fromLang + "|" + toLang);
+
+        const data = await fetchJson(url);
+        return (data?.responseData?.translatedText || "").trim();
+      } catch (error) {
+        console.error("Translation error:", error);
+        return "";
+      }
+    }
+
+    async function translateTextToRussian(text){
+      if(hasCyrillic(text)) return text;
+      return await translateText(text, "en", "ru");
+    }
+
+    async function translateTextToEnglish(text){
+      if(hasLatin(text)) return text;
+      return await translateText(text, "ru", "en");
+    }
+
+    async function buildSearchQueries(query){
+      const clean = normalizeSpaces(query);
+      const list = [];
+      if(clean) list.push(clean);
+
+      try {
+        if(hasCyrillic(clean)){
+          const en = await translateTextToEnglish(clean);
+          if(en && !list.includes(en)) list.push(en);
+        } else if(hasLatin(clean)){
+          const ru = await translateTextToRussian(clean);
+          if(ru && !list.includes(ru)) list.push(ru);
+        }
+      } catch (e) {
+        console.error("Search translation error:", e);
+      }
+
+      return list;
     }
 
     function looksLikeRussian(text){
@@ -936,45 +1130,26 @@
       return item.description || "";
     }
 
-    async function getCurrentUser(){
-      const { data, error } = await supabaseClient.auth.getUser();
-      if(error || !data.user) return null;
-      return data.user;
-    }
-
-    async function fetchJson(url){
-      const response = await fetch(url);
-      if(!response.ok){
-        throw new Error("HTTP " + response.status);
+    function buildCanonicalKey(category, source, rawId, title){
+      if(rawId){
+        return `${category}:${source}:${rawId}`;
       }
-      return await response.json();
+      return `${category}:${String(title || "").trim().toLowerCase()}`;
     }
 
-    async function translateText(text, fromLang, toLang){
-      if(!text) return "";
-      try {
-        const url =
-          "https://api.mymemory.translated.net/get?q=" +
-          encodeURIComponent(text) +
-          "&langpair=" +
-          encodeURIComponent(fromLang + "|" + toLang);
-
-        const data = await fetchJson(url);
-        return data?.responseData?.translatedText || "";
-      } catch (error) {
-        console.error("Translation error:", error);
-        return "";
-      }
+    function getOpenLibraryCoverUrl(coverId){
+      if(!coverId) return "";
+      return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
-    async function translateTextToRussian(text){
-      if(looksLikeRussian(text)) return text;
-      return await translateText(text, "en", "ru");
-    }
-
-    async function translateTextToEnglish(text){
-      if(looksLikeEnglish(text)) return text;
-      return await translateText(text, "ru", "en");
+    function dedupeSearchResults(items){
+      const seen = new Set();
+      return items.filter(item => {
+        const key = item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase());
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }
 
     async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
@@ -1194,6 +1369,233 @@
       };
     }
 
+    async function translateDescriptionFields(description){
+      let description_ru = "";
+      let description_en = "";
+      if(looksLikeRussian(description)){
+        description_ru = description;
+        description_en = await translateTextToEnglish(description);
+      } else if(looksLikeEnglish(description)){
+        description_en = description;
+        description_ru = await translateTextToRussian(description);
+      }
+      return {
+        description: description || "",
+        description_ru: description_ru || "",
+        description_en: description_en || ""
+      };
+    }
+
+    async function searchBooksApi(query, limit = 10){
+      try {
+        const url = "https://openlibrary.org/search.json?q=" + encodeURIComponent(query) + "&limit=" + limit;
+        const data = await fetchJson(url);
+        const docs = Array.isArray(data.docs) ? data.docs : [];
+
+        return docs.map(book => {
+          const workKey = book.key || "";
+          const title = book.title || "Untitled";
+          const creator = (book.author_name || []).join(", ");
+          return {
+            title,
+            category: "Books",
+            creator,
+            cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
+            description: "",
+            description_ru: "",
+            description_en: "",
+            work_key: workKey,
+            canonical_key: buildCanonicalKey("Books", "openlibrary", workKey || title.toLowerCase(), title)
+          };
+        });
+      } catch (e) {
+        console.error("Books search error:", e);
+        return [];
+      }
+    }
+
+    async function searchTMDbApi(query, mediaType = "movie", limit = 10){
+      try {
+        const languagesToTry = currentLanguage === "ru" ? ["ru-RU", "en-US"] : ["en-US", "ru-RU"];
+        let results = [];
+
+        for(const language of languagesToTry){
+          const url = "https://api.themoviedb.org/3/search/" + mediaType +
+            "?api_key=" + encodeURIComponent(TMDB_API_KEY) +
+            "&query=" + encodeURIComponent(query) +
+            "&language=" + encodeURIComponent(language) +
+            "&page=1";
+
+          const data = await fetchJson(url);
+          const items = Array.isArray(data.results) ? data.results : [];
+          results = results.concat(items);
+          if(results.length >= limit) break;
+        }
+
+        const deduped = [];
+        const seen = new Set();
+
+        for(const item of results){
+          const key = String(item.id || "");
+          if(!key || seen.has(key)) continue;
+          seen.add(key);
+          deduped.push(item);
+          if(deduped.length >= limit) break;
+        }
+
+        return deduped.map(item => {
+          const title = mediaType === "tv"
+            ? (item.name || item.original_name || "Untitled")
+            : (item.title || item.original_title || "Untitled");
+
+          const overview = item.overview || "";
+          const category = mediaType === "tv" ? "Series" : "Movies";
+          const externalId = String(item.id || "");
+
+          return {
+            title,
+            category,
+            creator: "",
+            cover: item.poster_path ? ("https://image.tmdb.org/t/p/w500" + item.poster_path) : "",
+            description: overview,
+            description_ru: looksLikeRussian(overview) ? overview : "",
+            description_en: looksLikeEnglish(overview) ? overview : "",
+            work_key: `tmdb:${mediaType}:${externalId}`,
+            canonical_key: buildCanonicalKey(category, "tmdb", `${mediaType}:${externalId}`, title)
+          };
+        });
+      } catch (e) {
+        console.error("TMDb search error:", e);
+        return [];
+      }
+    }
+
+    async function searchJikanApi(query, kind = "anime", limit = 10){
+      try {
+        const url = "https://api.jikan.moe/v4/" + kind + "?q=" + encodeURIComponent(query) + "&limit=" + limit;
+        const data = await fetchJson(url);
+        const results = Array.isArray(data.data) ? data.data : [];
+
+        return results.map(item => {
+          const title = item.title || item.title_english || "Untitled";
+          const creator =
+            kind === "anime"
+              ? ((item.studios || []).map(x => x.name).join(", "))
+              : ((item.authors || []).map(x => x.name).join(", "));
+          const synopsis = item.synopsis || "";
+          const category = kind === "anime" ? "Anime" : "Manga";
+          const externalId = String(item.mal_id || "");
+          return {
+            title,
+            category,
+            creator,
+            cover: item.images?.jpg?.image_url || "",
+            description: synopsis,
+            description_ru: looksLikeRussian(synopsis) ? synopsis : "",
+            description_en: looksLikeEnglish(synopsis) ? synopsis : "",
+            work_key: `jikan:${kind}:${externalId}`,
+            canonical_key: buildCanonicalKey(category, "jikan", `${kind}:${externalId}`, title)
+          };
+        });
+      } catch (e) {
+        console.error("Jikan search error:", e);
+        return [];
+      }
+    }
+
+    async function searchAniListApi(query, kind = "ANIME", limit = 10){
+      try {
+        const body = {
+          query: `
+            query ($search: String, $type: MediaType) {
+              Page(page: 1, perPage: ${limit}) {
+                media(search: $search, type: $type) {
+                  id
+                  title {
+                    romaji
+                    english
+                    native
+                  }
+                  description(asHtml: false)
+                  coverImage {
+                    large
+                  }
+                  studios(isMain: true) {
+                    nodes {
+                      name
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            search: query,
+            type: kind
+          }
+        };
+
+        const data = await fetchJson("https://graphql.anilist.co", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        const results = data?.data?.Page?.media || [];
+        return results.map(item => {
+          const title = item.title?.english || item.title?.romaji || item.title?.native || "Untitled";
+          const creator = (item.studios?.nodes || []).map(x => x.name).join(", ");
+                     const description = String(item.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+          const category = kind === "ANIME" ? "Anime" : "Manga";
+          return {
+            title,
+            category,
+            creator,
+            cover: item.coverImage?.large || "",
+            description,
+            description_ru: looksLikeRussian(description) ? description : "",
+            description_en: looksLikeEnglish(description) ? description : "",
+            work_key: `anilist:${kind.toLowerCase()}:${item.id}`,
+            canonical_key: buildCanonicalKey(category, "anilist", `${kind.toLowerCase()}:${item.id}`, title)
+          };
+        });
+      } catch (e) {
+        console.error("AniList search error:", e);
+        return [];
+      }
+    }
+
+    async function searchAnimeApi(query, limit = 10){
+      const jikan = await searchJikanApi(query, "anime", limit);
+      if(jikan.length > 0) return jikan;
+      return await searchAniListApi(query, "ANIME", limit);
+    }
+
+    async function searchMangaApi(query, limit = 10){
+      const jikan = await searchJikanApi(query, "manga", limit);
+      if(jikan.length > 0) return jikan;
+      return await searchAniListApi(query, "MANGA", limit);
+    }
+
+    async function searchByCategory(category, query, limit = 10){
+      const searchQueries = await buildSearchQueries(query);
+      let combined = [];
+
+      for(const q of searchQueries){
+        let results = [];
+        if(category === "Books") results = await searchBooksApi(q, limit);
+        if(category === "Movies") results = await searchTMDbApi(q, "movie", limit);
+        if(category === "Series") results = await searchTMDbApi(q, "tv", limit);
+        if(category === "Anime") results = await searchAnimeApi(q, limit);
+        if(category === "Manga") results = await searchMangaApi(q, limit);
+
+        combined = dedupeSearchResults([...combined, ...results]);
+        if(combined.length >= limit) break;
+      }
+
+      return combined.slice(0, limit);
+    }
+
     function isDuplicateItem(category, title, workKey = ""){
       const items = demoData[category] || [];
 
@@ -1201,24 +1603,25 @@
         if(workKey && item.work_key && item.work_key === workKey){
           return true;
         }
-
         return (item.title || "").trim().toLowerCase() === title.trim().toLowerCase();
       });
     }
 
-    async function existsInSupabase(category, title, workKey = ""){
+    async function existsInSupabase(category, title, workKey = "", canonicalKey = ""){
       const user = await getCurrentUser();
       if(!user) return false;
 
       let query = supabaseClient
         .from("user_media")
-        .select("id, title, work_key")
+        .select("id, title, work_key, canonical_key")
         .eq("user_id", user.id)
         .eq("category", category)
-        .limit(10);
+        .limit(20);
 
       if(workKey){
         query = query.eq("work_key", workKey);
+      } else if(canonicalKey){
+        query = query.eq("canonical_key", canonicalKey);
       } else {
         query = query.ilike("title", title);
       }
@@ -1263,7 +1666,7 @@
         user_id: user.id,
         title: title,
         category: category,
-        status: status,
+        status: status || "Planned",
         cover_url: cover,
         description: description || "",
         creator: creator || "",
@@ -1286,16 +1689,15 @@
       return true;
     }
 
-    async function updateStatusInSupabase(title, category, status){
+    async function updateStatusInSupabase(itemId, status){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
 
       const { error } = await supabaseClient
         .from("user_media")
         .update({ status: status })
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase status update error:", error);
@@ -1305,9 +1707,32 @@
       return true;
     }
 
-    async function updateBookDescriptionsInSupabase(title, category, description, description_ru, description_en){
+    async function updateCategoryInSupabase(itemId, newCategory, newStatus = null){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !itemId) return false;
+
+      const updateData = { category: newCategory };
+      if(newStatus !== null){
+        updateData.status = newStatus;
+      }
+
+      const { error } = await supabaseClient
+        .from("user_media")
+        .update(updateData)
+        .eq("user_id", user.id)
+        .eq("id", itemId);
+
+      if(error){
+        console.error("Supabase category update error:", error);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function updateDescriptionsInSupabase(itemId, description, description_ru, description_en){
+      const user = await getCurrentUser();
+      if(!user || !itemId) return false;
 
       const { error } = await supabaseClient
         .from("user_media")
@@ -1317,8 +1742,7 @@
           description_en: description_en || ""
         })
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("id", itemId);
 
       if(error){
         console.error("Supabase description update error:", error);
@@ -1328,16 +1752,50 @@
       return true;
     }
 
-    async function deleteItemFromSupabase(title, category){
+  async function deleteItemFromSupabase(item, category = currentCategory){
       const user = await getCurrentUser();
-      if(!user) return false;
+      if(!user || !item?.id) return false;
+
+      const targetCategory = category || item.category || "";
+
+      const { data: rows, error: loadError } = await supabaseClient
+        .from("user_media")
+        .select("id, title, work_key, canonical_key")
+        .eq("user_id", user.id)
+        .eq("category", targetCategory);
+
+      if(loadError){
+        console.error("Supabase delete preload error:", loadError);
+        return false;
+      }
+
+      const itemDedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        normalizeSpaces(item.title || "").toLowerCase();
+
+      const idsToDelete = (rows || [])
+        .filter((row) => {
+          const rowDedupeKey =
+            row.canonical_key ||
+            row.work_key ||
+            normalizeSpaces(row.title || "").toLowerCase();
+
+          return row.id === item.id || rowDedupeKey === itemDedupeKey;
+        })
+        .map((row) => row.id)
+        .filter(Boolean);
+
+      if(idsToDelete.length === 0){
+        return true;
+      }
 
       const { error } = await supabaseClient
         .from("user_media")
         .delete()
         .eq("user_id", user.id)
-        .eq("title", title)
-        .eq("category", category);
+        .eq("category", targetCategory)
+        .in("id", idsToDelete);
 
       if(error){
         console.error("Supabase delete error:", error);
@@ -1386,8 +1844,9 @@
         seen.add(dedupeKey);
 
         demoData[category].push({
+          id: item.id,
           title: item.title,
-          status: item.status,
+          status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
@@ -1396,10 +1855,6 @@
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || ""
         });
-
-        detailsDatabase[item.title] = {
-          description: item.description || t().labels.noDescription
-        };
       });
 
       renderShelf();
@@ -1411,14 +1866,23 @@
 
       shelf.innerHTML = "";
 
-      const items = demoData[currentCategory] || [];
+      const filterToolbar = document.getElementById("filter-toolbar");
+      if(filterToolbar){
+        if(currentCategory === "Blacklist" || isPublicView){
+          filterToolbar.classList.add("hidden");
+        } else {
+          filterToolbar.classList.remove("hidden");
+        }
+      }
+
+      const items = getFilteredItems();
 
       if(items.length === 0){
         shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
         return;
       }
 
-      items.forEach((item, index) => {
+      items.forEach((item) => {
         const coverHtml = item.cover
           ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
           : escapeHtml(t().labels.cover);
@@ -1429,12 +1893,12 @@
 
         const actionsHtml = isPublicView
           ? `<div class="media-actions">
-               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
+               <button class="add-btn" onclick="openCardById(${item.id})">${escapeHtml(t().buttons.open)}</button>
              </div>`
           : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatus(${index})">${escapeHtml(t().buttons.changeStatus)}</button>
-               <button class="add-btn" onclick='openCard(${safeJsString(item.title)})'>${escapeHtml(t().buttons.open)}</button>
-               <button class="add-btn" onclick="deleteItemByIndex(${index})">${escapeHtml(t().buttons.delete)}</button>
+               <button class="add-btn" onclick="changeStatusById(${item.id})">${escapeHtml(t().buttons.changeStatus)}</button>
+               <button class="add-btn" onclick="openCardById(${item.id})">${escapeHtml(t().buttons.open)}</button>
+               <button class="add-btn" onclick="deleteItemById(${item.id})">${escapeHtml(t().buttons.delete)}</button>
              </div>`;
 
         const card = document.createElement("div");
@@ -1463,8 +1927,13 @@
 
       const addBtn = document.getElementById("add-new-btn");
       if(addBtn){
-        addBtn.classList.remove("hidden");
-        addBtn.style.display = "";
+        if(name === "Blacklist"){
+          addBtn.classList.add("hidden");
+          addBtn.style.display = "none";
+        } else {
+          addBtn.classList.remove("hidden");
+          addBtn.style.display = "";
+        }
       }
 
       const tabs = document.getElementById("public-category-tabs");
@@ -1476,7 +1945,7 @@
       await loadCategoryFromSupabase(name);
     }
 
-    async function renderSearchResults() {
+    async function renderCategorySearchResults() {
       clearTimeout(searchTimer);
 
       searchTimer = setTimeout(async () => {
@@ -1493,184 +1962,117 @@
           return;
         }
 
-        if (currentCategory === "Books") {
-          container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
+        container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
 
-          try {
-            let items = [];
-            const tried = new Set();
+        try {
+          const results = dedupeSearchResults(await searchByCategory(currentCategory, query, 10));
+          currentSearchResults = results;
 
-            async function fetchBooks(url) {
-              if (tried.has(url)) return [];
-              tried.add(url);
-
-              const data = await fetchJson(url);
-              return data.docs || [];
-            }
-
-            const generalUrl =
-              "https://openlibrary.org/search.json?q=" +
-              encodeURIComponent(query) +
-              "&limit=10";
-
-            items = await fetchBooks(generalUrl);
-
-            if (items.length === 0) {
-              const titleUrl =
-                "https://openlibrary.org/search.json?title=" +
-                encodeURIComponent(query) +
-                "&limit=10";
-              items = await fetchBooks(titleUrl);
-            }
-
-            if (items.length === 0) {
-              const authorUrl =
-                "https://openlibrary.org/search.json?author=" +
-                encodeURIComponent(query) +
-                "&limit=10";
-              items = await fetchBooks(authorUrl);
-            }
-
-            if (items.length === 0) {
-              const words = query.split(" ").filter(Boolean);
-
-              if (words.length >= 2) {
-                const firstHalf = words.slice(0, Math.ceil(words.length / 2)).join(" ");
-                const secondHalf = words.slice(Math.ceil(words.length / 2)).join(" ");
-
-                const comboUrl1 =
-                  "https://openlibrary.org/search.json?title=" +
-                  encodeURIComponent(firstHalf) +
-                  "&author=" +
-                  encodeURIComponent(secondHalf) +
-                  "&limit=10";
-
-                items = await fetchBooks(comboUrl1);
-
-                if (items.length === 0) {
-                  const comboUrl2 =
-                    "https://openlibrary.org/search.json?title=" +
-                    encodeURIComponent(secondHalf) +
-                    "&author=" +
-                    encodeURIComponent(firstHalf) +
-                    "&limit=10";
-
-                  items = await fetchBooks(comboUrl2);
-                }
-              }
-            }
-
-            if (items.length === 0) {
-              currentBookResults = [];
-              container.innerHTML = `
-                <div class="small">${escapeHtml(t().labels.noBooksFound)}</div>
-                <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-                  <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
-                </div>
-              `;
-              return;
-            }
-
-            currentBookResults = items;
-            container.innerHTML = "";
-
-            items.forEach((book, index) => {
-              const title = book.title || "Untitled";
-              const authors = (book.author_name || []).join(", ");
-              const year = book.first_publish_year ? " • " + book.first_publish_year : "";
-
-              const row = document.createElement("div");
-              row.className = "search-item";
-              row.innerHTML = `
-                <div class="search-item-left">
-                  <div class="search-item-title">${escapeHtml(title)}</div>
-                  <div class="search-item-meta">${escapeHtml(authors || "Book")}${escapeHtml(year)}</div>
-                </div>
-                <button class="button" onclick="addOpenLibraryBookResult(${index})">${escapeHtml(t().buttons.add)}</button>
-              `;
-              container.appendChild(row);
-            });
-
-            return;
-          } catch (error) {
-            console.error("Open Library API error:", error);
-            currentBookResults = [];
+          if(results.length === 0){
             container.innerHTML = `
-              <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
+              <div class="small">${escapeHtml(t().labels.noResults)}</div>
               <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
                 <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
               </div>
             `;
             return;
           }
-        }
 
-        container.innerHTML = `
-          <div class="small">${escapeHtml(t().labels.noResults)}</div>
-          <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
-            <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
-          </div>
-        `;
-      }, 300);
+          container.innerHTML = "";
+
+          results.forEach((item, index) => {
+            const row = document.createElement("div");
+            row.className = "search-item";
+            row.innerHTML = `
+              <div class="search-item-left">
+                <div class="search-thumb">
+                  ${item.cover ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">` : escapeHtml(t().labels.cover)}
+                </div>
+                <div class="search-item-text">
+                  <div class="search-item-title">${escapeHtml(item.title)}</div>
+                  <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
+                </div>
+              </div>
+              <button class="button" onclick="addCategorySearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
+            `;
+            container.appendChild(row);
+          });
+        } catch (error) {
+          console.error("Category search error:", error);
+          container.innerHTML = `
+            <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
+            <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
+              <button class="button" onclick="openManualModal()">${escapeHtml(t().buttons.manualAdd)}</button>
+            </div>
+          `;
+        }
+      }, 350);
     }
 
-    async function addOpenLibraryBookResult(index){
-      const book = currentBookResults[index];
-      if(!book) return;
+    async function addCategorySearchResult(index){
+      const item = currentSearchResults[index];
+      if(!item) return;
+      await addSearchResultToLibrary(item);
+      closeAddModal();
+      await loadCategoryFromSupabase(currentCategory);
+    }
 
-      const title = book.title || "Untitled";
-      const cover = getOpenLibraryCoverUrl(book.cover_i);
-      const authors = (book.author_name || []).join(", ");
-      const workKey = book.key || "";
-      const canonicalKey = workKey || title.trim().toLowerCase();
+    async function addSearchResultToLibrary(item){
+      if(!item) return;
 
-      if(isDuplicateItem(currentCategory, title, workKey)){
+      const targetCategory = item.category;
+
+      if(isDuplicateItem(targetCategory, item.title, item.work_key || "")){
         alert(t().labels.alreadyExists);
         return;
       }
 
-      const existsInDb = await existsInSupabase(currentCategory, title, workKey);
+      const existsInDb = await existsInSupabase(
+        targetCategory,
+        item.title,
+        item.work_key || "",
+        item.canonical_key || ""
+      );
+
       if(existsInDb){
         alert(t().labels.alreadyExists);
-        await loadCategoryFromSupabase(currentCategory);
         return;
       }
 
-      const descriptions = await buildBookDescriptions(title, authors, workKey);
+      let finalDescription = item.description || "";
+      let finalDescriptionRu = item.description_ru || "";
+      let finalDescriptionEn = item.description_en || "";
 
-      detailsDatabase[title] = {
-        description: descriptions.description || t().labels.noDescription
-      };
+      if(targetCategory === "Books"){
+        const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "");
+        finalDescription = built.description || "";
+        finalDescriptionRu = built.description_ru || "";
+        finalDescriptionEn = built.description_en || "";
+      } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
+        const translated = await translateDescriptionFields(finalDescription);
+        finalDescription = translated.description || finalDescription;
+        finalDescriptionRu = finalDescriptionRu || translated.description_ru || "";
+        finalDescriptionEn = finalDescriptionEn || translated.description_en || "";
+      }
 
       const saved = await saveItemToSupabase(
-        title,
-        currentCategory,
+        item.title,
+        targetCategory,
         "Planned",
-        cover,
-        descriptions.description,
-        authors,
-        workKey,
-        canonicalKey,
-        descriptions.description_ru,
-        descriptions.description_en
+        item.cover || "",
+        finalDescription || "",
+        item.creator || "",
+        item.work_key || "",
+        item.canonical_key || "",
+        finalDescriptionRu || "",
+        finalDescriptionEn || ""
       );
 
       if(!saved) return;
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: descriptions.description || "",
-        description_ru: descriptions.description_ru || "",
-        description_en: descriptions.description_en || "",
-        creator: authors,
-        work_key: workKey,
-        canonical_key: canonicalKey
-      });
-
-      closeAddModal();
-      renderShelf();
+      if(currentCategory === targetCategory){
+        await loadCategoryFromSupabase(targetCategory);
+      }
     }
 
     async function saveManualItem(){
@@ -1684,25 +2086,21 @@
         return;
       }
 
-      const canonicalKey = title.trim().toLowerCase();
+      const canonicalKey = buildCanonicalKey(currentCategory, "manual", "", title);
 
       if(isDuplicateItem(currentCategory, title)){
         alert(t().labels.alreadyExists);
         return;
       }
 
-      const existsInDb = await existsInSupabase(currentCategory, title);
+      const existsInDb = await existsInSupabase(currentCategory, title, "", canonicalKey);
       if(existsInDb){
         alert(t().labels.alreadyExists);
         await loadCategoryFromSupabase(currentCategory);
         return;
       }
 
-      const langParts = splitDescriptionFields(description);
-
-      detailsDatabase[title] = {
-        description: description || t().labels.noDescription
-      };
+      const translated = await translateDescriptionFields(description);
 
       const saved = await saveItemToSupabase(
         title,
@@ -1713,50 +2111,37 @@
         creator,
         "",
         canonicalKey,
-        langParts.description_ru,
-        langParts.description_en
+        translated.description_ru,
+        translated.description_en
       );
 
       if(!saved) return;
 
-      demoData[currentCategory].unshift({
-        title: title,
-        status: "Planned",
-        cover: cover,
-        description: description,
-        description_ru: langParts.description_ru,
-        description_en: langParts.description_en,
-        creator: creator,
-        work_key: "",
-        canonical_key: canonicalKey
-      });
-
       closeManualModal();
       closeAddModal();
-      renderShelf();
+      await loadCategoryFromSupabase(currentCategory);
     }
 
-    function changeStatus(index){
-      if (!demoData[currentCategory] || !demoData[currentCategory][index]) return;
-      currentStatusIndex = index;
-      currentOpenTitle = demoData[currentCategory][index].title;
+    function changeStatusById(id){
+      const item = getItemById(currentCategory, id);
+      if(!item) return;
+      currentStatusItemId = id;
+      currentOpenItemId = id;
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     function changeStatusFromDetails(){
-      const index = (demoData[currentCategory] || []).findIndex(item => item.title === currentOpenTitle);
-
-      if(index === -1){
+      const item = getItemById(currentCategory, currentOpenItemId);
+      if(!item){
         alert(t().labels.itemNotFound);
         return;
       }
-
-      currentStatusIndex = index;
+      currentStatusItemId = item.id;
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     async function setStatus(status){
-      const item = demoData[currentCategory]?.[currentStatusIndex];
+      const item = getItemById(currentCategory, currentStatusItemId);
       if(!item) return;
 
       const oldStatus = item.status;
@@ -1764,7 +2149,7 @@
       renderShelf();
       closeStatusModal();
 
-      const updated = await updateStatusInSupabase(item.title, currentCategory, status);
+      const updated = await updateStatusInSupabase(item.id, status);
 
       if(!updated){
         item.status = oldStatus;
@@ -1773,8 +2158,55 @@
         return;
       }
 
-      if(!document.getElementById("details-screen").classList.contains("hidden") && currentOpenTitle){
-        openCard(currentOpenTitle);
+      if(currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
+        openCardById(currentOpenItemId);
+      }
+    }
+
+    async function moveCurrentItemToBlacklist(){
+      if(isPublicView) return;
+      if(currentCategory === "Blacklist"){
+        closeStatusModal();
+        return;
+      }
+
+      const item = getItemById(currentCategory, currentStatusItemId);
+      if(!item) return;
+
+      const confirmed = confirm(t().labels.confirmMoveToBlacklist);
+      if(!confirmed) return;
+
+      const oldCategory = currentCategory;
+      const oldIndex = (demoData[oldCategory] || []).findIndex(x => x.id === item.id);
+      const movedItem = { ...item, status: "Dropped" };
+
+      if(oldIndex !== -1){
+        demoData[oldCategory].splice(oldIndex, 1);
+      }
+
+      const alreadyThere = demoData.Blacklist.some(x => x.id === item.id || (x.canonical_key && x.canonical_key === item.canonical_key));
+      if(!alreadyThere){
+        demoData.Blacklist.unshift(movedItem);
+      }
+
+      closeStatusModal();
+      renderShelf();
+
+      const updated = await updateCategoryInSupabase(item.id, "Blacklist", "Dropped");
+
+      if(!updated){
+        if(oldIndex !== -1){
+          demoData[oldCategory].splice(oldIndex, 0, item);
+        }
+        demoData.Blacklist = demoData.Blacklist.filter(x => x.id !== item.id);
+        renderShelf();
+        alert(t().labels.moveError);
+        return;
+      }
+
+      if(currentOpenItemId === item.id){
+        currentCategory = "Blacklist";
+        openCardById(item.id);
       }
     }
 
@@ -1786,9 +2218,14 @@
       if(!key) return;
 
       const user = await getCurrentUser();
-
       if(!user){
         alert(t().labels.mustBeLoggedIn);
+        return;
+      }
+
+      const item = getItemById(currentCategory, currentOpenItemId);
+      if(!item?.id){
+        alert(t().labels.itemNotFound);
         return;
       }
 
@@ -1796,8 +2233,7 @@
         .from("user_media")
         .update({ canonical_key: key })
         .eq("user_id", user.id)
-        .eq("title", currentOpenTitle)
-        .eq("category", currentCategory);
+        .eq("id", item.id);
 
       if(error){
         console.error("Canonical key update error:", error);
@@ -1805,9 +2241,7 @@
         return;
       }
 
-      const item = (demoData[currentCategory] || []).find(x => x.title === currentOpenTitle);
-      if (item) item.canonical_key = key;
-
+      item.canonical_key = key;
       await loadCategoryFromSupabase(currentCategory);
       alert(t().labels.canonicalSaved);
     }
@@ -1867,9 +2301,8 @@
       }
 
       if(changed && !isPublicView){
-        await updateBookDescriptionsInSupabase(
-          item.title,
-          currentCategory,
+        await updateDescriptionsInSupabase(
+          item.id,
           item.description || "",
           item.description_ru || "",
           item.description_en || ""
@@ -1879,22 +2312,21 @@
       return item;
     }
 
-    async function openCard(title){
-      currentOpenTitle = title;
-
-      const item = (demoData[currentCategory] || []).find(x => x.title === title);
+    async function openCardById(id){
+      currentOpenItemId = id;
+      const item = getItemById(currentCategory, id);
 
       hideAllScreens();
       document.getElementById("details-screen").classList.remove("hidden");
 
-      document.getElementById("details-title").textContent = title;
+      document.getElementById("details-title").textContent = item?.title || "";
       document.getElementById("details-creator").textContent = item?.creator || "";
       document.getElementById("details-category").textContent = translateCategory(currentCategory);
       document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
 
       const coverBox = document.getElementById("details-cover-box");
       if(item && item.cover){
-        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(title)}">`;
+        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`;
       } else {
         coverBox.textContent = t().labels.cover;
       }
@@ -1942,71 +2374,72 @@
       }
     }
 
-    async function deleteItemByIndex(index){
+    async function deleteItemById(id){
       if(isPublicView) return;
 
-      const item = demoData[currentCategory]?.[index];
+      const item = getItemById(currentCategory, id);
       if(!item) return;
 
       const confirmed = confirm(t().labels.confirmDelete);
       if(!confirmed) return;
 
+      const index = (demoData[currentCategory] || []).findIndex(x => x.id === id);
       const removedItem = item;
-      demoData[currentCategory].splice(index, 1);
+
+      if(index !== -1){
+        demoData[currentCategory].splice(index, 1);
+      }
       renderShelf();
 
-      const deleted = await deleteItemFromSupabase(removedItem.title, currentCategory);
-
+      const deleted = await deleteItemFromSupabase(removedItem, currentCategory);
+      
       if(!deleted){
-        demoData[currentCategory].splice(index, 0, removedItem);
+        if(index !== -1){
+          demoData[currentCategory].splice(index, 0, removedItem);
+        }
         renderShelf();
         alert(t().labels.deleteError);
         return;
       }
 
-      if(detailsDatabase[removedItem.title]){
-        delete detailsDatabase[removedItem.title];
+      if(currentOpenItemId === removedItem.id){
+        currentOpenItemId = null;
       }
-
-      if(currentOpenTitle === removedItem.title){
-        currentOpenTitle = null;
-      }
+      
+      await loadCategoryFromSupabase(currentCategory);
     }
 
     async function deleteCurrentItem(){
       if(isPublicView) return;
-      if(!currentOpenTitle) return;
+      if(!currentOpenItemId) return;
 
-      const index = (demoData[currentCategory] || []).findIndex(
-        item => item.title === currentOpenTitle
-      );
-
-      if(index === -1){
+      const item = getItemById(currentCategory, currentOpenItemId);
+      if(!item){
         alert(t().labels.itemNotFound);
         return;
       }
 
-      const item = demoData[currentCategory][index];
       const confirmed = confirm(t().labels.confirmDelete);
       if(!confirmed) return;
 
-      demoData[currentCategory].splice(index, 1);
+      const index = (demoData[currentCategory] || []).findIndex(x => x.id === item.id);
+      if(index !== -1){
+        demoData[currentCategory].splice(index, 1);
+      }
 
-      const deleted = await deleteItemFromSupabase(item.title, currentCategory);
+      const deleted = await deleteItemFromSupabase(item, currentCategory);
 
       if(!deleted){
-        demoData[currentCategory].splice(index, 0, item);
+        if(index !== -1){
+          demoData[currentCategory].splice(index, 0, item);
+        }
         alert(t().labels.deleteError);
         return;
       }
 
-      if(detailsDatabase[item.title]){
-        delete detailsDatabase[item.title];
-      }
-
-      currentOpenTitle = null;
+      currentOpenItemId = null;
       backToCategory();
-      renderShelf();
+     await loadCategoryFromSupabase(currentCategory);
     }
 
     async function register(){
@@ -2230,8 +2663,9 @@
         }
 
         demoData[item.category].push({
+          id: item.id,
           title: item.title,
-          status: item.status,
+          status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
@@ -2240,10 +2674,6 @@
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || ""
         });
-
-        detailsDatabase[item.title] = {
-          description: item.description || t().labels.noDescription
-        };
       });
 
       hideAllScreens();
@@ -2313,8 +2743,45 @@
       }
     }
 
+    function showRuntimeError(message){
+      const banner = document.getElementById("runtime-error-banner");
+      if(!banner) return;
+
+      const details = String(message || "Unknown error");
+      banner.textContent = `${t().labels.runtimeError} ${details}`;
+      banner.classList.remove("hidden");
+    }
+
     async function init(){
-      applyTranslations();
+      applyTranslations();  
+    
+      window.addEventListener("error", (event) => {
+        showRuntimeError(event?.message || "Unknown script error");
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event?.reason;
+        const message = reason?.message || reason || "Unhandled promise rejection";
+        showRuntimeError(message);
+      });
+
+      supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+        const loginBtn = document.getElementById("login-top-btn");
+        const logoutBtn = document.getElementById("logout-top-btn");
+        const profileBtn = document.getElementById("profile-btn");
+
+        if(session?.user){
+          await showAuthorizedUI();
+        } else {
+          hideAllScreens();
+          document.getElementById("auth-screen").classList.remove("hidden");
+
+          if(loginBtn) loginBtn.classList.remove("hidden");
+          if(logoutBtn) logoutBtn.classList.add("hidden");
+          if(profileBtn) profileBtn.classList.add("hidden");
+        }
+      });
+
       const openedPublic = await checkPublicRoute();
 
       if(!openedPublic){
