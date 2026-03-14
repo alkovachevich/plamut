@@ -18,48 +18,74 @@
    <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
 
 
-  <div class="top-right">
+ <header class="app-header">
+  <div class="brand-block">
+    <div class="brand-mark">P</div>
+    <div>
+      <div class="brand-title">Plamut</div>
+      <div class="brand-subtitle">Media Tracker</div>
+    </div>
+  </div>
+
+  <div class="header-actions">
     <div class="lang-switch">
       <button class="button" onclick="setLanguage('en')">EN</button>
       <button class="button" onclick="setLanguage('ru')">RU</button>
     </div>
 
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div class="header-user-actions">
       <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
       <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
       <button id="logout-top-btn" class="button hidden" onclick="logout()">Logout</button>
     </div>
   </div>
+</header>
 
-  <div id="auth-screen">
-    <h2>Plamut Login</h2>
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-badge">Plamut</div>
+    <h2 class="auth-title">Plamut Login</h2>
+    <p class="auth-text">Save books, movies, series, anime and manga in one personal library.</p>
 
     <input id="login-email" class="input" placeholder="Email">
     <input id="login-password" class="input" type="password" placeholder="Password">
 
-    <div style="margin-top:10px;">
+    <div class="auth-actions">
       <button class="button" onclick="login()">Login</button>
       <button class="button" onclick="register()">Register</button>
     </div>
   </div>
+</div>
 
-  <div id="home-screen" class="hidden">
-    <h1>Plamut</h1>
-    <div class="subtitle" id="home-subtitle"></div>
+<div id="home-screen" class="hidden">
+  <section class="hero-block">
+    <div class="hero-content">
+      <div class="hero-badge">Your personal universe</div>
+      <h1 class="hero-title">Plamut</h1>
+      <div class="subtitle" id="home-subtitle"></div>
 
-    <div class="grid">
-      <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
-      <div class="card" onclick="openCategory('Movies')" id="cat-movies"></div>
-      <div class="card" onclick="openCategory('Series')" id="cat-series"></div>
-      <div class="card" onclick="openCategory('Anime')" id="cat-anime"></div>
-      <div class="card" onclick="openCategory('Manga')" id="cat-manga"></div>
-      <div class="card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+      <div class="hero-actions">
+        <button id="share-library-btn" class="button" onclick="shareLibrary()">Share Library</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="home-section">
+    <div class="section-heading">
+      <h2 class="section-title">Categories</h2>
+      <div class="section-note">Choose what you want to track</div>
     </div>
 
-    <div style="margin-top:16px;">
-      <button id="share-library-btn" class="button" onclick="shareLibrary()">Share Library</button>
+    <div class="grid category-grid">
+      <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
+      <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
+      <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
+      <div class="card category-card" onclick="openCategory('Anime')" id="cat-anime"></div>
+      <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
+      <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
     </div>
-  </div>
+  </section>
+</div>
 
   <div id="category-screen" class="hidden">
     <div class="topbar">
