@@ -194,23 +194,69 @@
   </div>
 
   <div id="profile-modal" class="modal hidden">
-    <div class="modal-box">
-      <h3 id="profile-title">Профиль</h3>
+  <div class="modal-box profile-box">
 
-      <input id="profile-username" class="input" placeholder="Username">
-      <input id="profile-display-name" class="input" placeholder="Display name">
+    <h3 id="profile-title">Profile</h3>
 
-      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-        <input type="checkbox" id="profile-public">
-        <span id="profile-public-label">Public library</span>
-      </label>
+    <div class="profile-layout">
 
-      <div class="modal-actions">
-        <button class="button" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
-        <button class="button" onclick="saveProfile()" id="profile-save-btn">Save Profile</button>
+      <div class="profile-avatar-section">
+
+        <div class="avatar-preview">
+          <img id="avatar-img" src="" alt="avatar">
+        </div>
+
+        <input id="avatar-url" class="input" placeholder="Avatar image URL">
+
+        <button class="button" onclick="updateAvatar()">Update avatar</button>
+
       </div>
+
+
+      <div class="profile-info-section">
+
+        <label>Username</label>
+        <input id="profile-username" class="input">
+
+        <label>Display name</label>
+        <input id="profile-display-name" class="input">
+
+        <label class="profile-checkbox">
+          <input type="checkbox" id="profile-public">
+          <span id="profile-public-label">Public library</span>
+        </label>
+
+        <hr class="profile-divider">
+
+        <h4>Security</h4>
+
+        <label>New password</label>
+        <input id="new-password" class="input" type="password">
+
+        <label>Confirm password</label>
+        <input id="confirm-password" class="input" type="password">
+
+        <label class="profile-checkbox">
+          <input type="checkbox" onclick="togglePasswordVisibility()">
+          Show password
+        </label>
+
+      </div>
+
     </div>
+
+    <div class="modal-actions">
+
+      <button class="button" onclick="closeProfileModal()">Close</button>
+
+      <button class="button" onclick="changePassword()">Change password</button>
+
+      <button class="button" onclick="saveProfile()">Save profile</button>
+
+    </div>
+
   </div>
+</div>
 
   <div id="status-modal" class="modal hidden">
     <div class="modal-box">
