@@ -1523,7 +1523,7 @@
         return results.map(item => {
           const title = item.title?.english || item.title?.romaji || item.title?.native || "Untitled";
           const creator = (item.studios?.nodes || []).map(x => x.name).join(", ");
-          const description = String(item.description || "").replace(/<br\\s*\\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+            const description = String(item.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
           const category = kind === "ANIME" ? "Anime" : "Manga";
           return {
             title,
@@ -2685,8 +2685,8 @@
     }
 
     async function init(){
-      applyTranslations();
-      
+      applyTranslations();  
+    
       supabaseClient.auth.onAuthStateChange(async (_event, session) => {
         const loginBtn = document.getElementById("login-top-btn");
         const logoutBtn = document.getElementById("logout-top-btn");
