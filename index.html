@@ -1752,27 +1752,50 @@
       return true;
     }
 
-      async function deleteItemFromSupabase(item, category = currentCategory){
+  async function deleteItemFromSupabase(item, category = currentCategory){
       const user = await getCurrentUser();
       if(!user || !item?.id) return false;
 
-      const baseQuery = supabaseClient
+      const targetCategory = category || item.category || "";
+
+      const { data: rows, error: loadError } = await supabaseClient
+        .from("user_media")
+        .select("id, title, work_key, canonical_key")
+        .eq("user_id", user.id)
+        .eq("category", targetCategory);
+
+      if(loadError){
+        console.error("Supabase delete preload error:", loadError);
+        return false;
+      }
+
+      const itemDedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        normalizeSpaces(item.title || "").toLowerCase();
+
+      const idsToDelete = (rows || [])
+        .filter((row) => {
+          const rowDedupeKey =
+            row.canonical_key ||
+            row.work_key ||
+            normalizeSpaces(row.title || "").toLowerCase();
+
+          return row.id === item.id || rowDedupeKey === itemDedupeKey;
+        })
+        .map((row) => row.id)
+        .filter(Boolean);
+
+      if(idsToDelete.length === 0){
+        return true;
+      }
+
+      const { error } = await supabaseClient
         .from("user_media")
         .delete()
         .eq("user_id", user.id)
-        .eq("category", category || item.category || "");
-
-      let query = baseQuery;
-
-      if(item.canonical_key){
-        query = query.eq("canonical_key", item.canonical_key);
-      } else if(item.work_key){
-        query = query.eq("work_key", item.work_key);
-      } else {
-        query = query.eq("title", item.title || "");
-      }
-
-      const { error } = await query;
+        .eq("category", targetCategory)
+        .in("id", idsToDelete);
 
       if(error){
         console.error("Supabase delete error:", error);
