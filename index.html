@@ -343,6 +343,23 @@
       word-break:break-word;
     }
 
+    
+    .runtime-error-banner{
+      position:fixed;
+      left:16px;
+      right:16px;
+      bottom:16px;
+      z-index:2000;
+      background:#5a1010;
+      border:1px solid #a33;
+      color:#ffd9d9;
+      border-radius:12px;
+      padding:12px 14px;
+      font-size:13px;
+      line-height:1.4;
+      box-shadow:0 8px 24px rgba(0,0,0,.4);
+    }
+
     @media (max-width: 800px){
       .details-layout{
         grid-template-columns:1fr;
@@ -365,6 +382,9 @@
 </head>
 
 <body>
+
+   <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
 
   <div class="top-right">
     <div class="lang-switch">
@@ -650,7 +670,8 @@
           confirmMoveToBlacklist: "Move this item to blacklist?",
           moveError: "Could not move item",
           filterByStatus: "Filter by status",
-          allStatuses: "All statuses"
+               allStatuses: "All statuses",
+          runtimeError: "Application error. Please refresh the page. Details:"
         },
         statuses: {
           All: "All statuses",
@@ -758,7 +779,8 @@
           confirmMoveToBlacklist: "Перенести это произведение в чёрный список?",
           moveError: "Не удалось перенести произведение",
           filterByStatus: "Фильтр по статусу",
-          allStatuses: "Все статусы"
+              allStatuses: "Все статусы",
+          runtimeError: "Ошибка приложения. Обновите страницу. Детали:"
         },
         statuses: {
           All: "Все статусы",
@@ -1523,7 +1545,7 @@
         return results.map(item => {
           const title = item.title?.english || item.title?.romaji || item.title?.native || "Untitled";
           const creator = (item.studios?.nodes || []).map(x => x.name).join(", ");
-            const description = String(item.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+                     const description = String(item.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
           const category = kind === "ANIME" ? "Anime" : "Manga";
           return {
             title,
@@ -2684,9 +2706,28 @@
       }
     }
 
+    function showRuntimeError(message){
+      const banner = document.getElementById("runtime-error-banner");
+      if(!banner) return;
+
+      const details = String(message || "Unknown error");
+      banner.textContent = `${t().labels.runtimeError} ${details}`;
+      banner.classList.remove("hidden");
+    }
+
     async function init(){
       applyTranslations();  
     
+      window.addEventListener("error", (event) => {
+        showRuntimeError(event?.message || "Unknown script error");
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event?.reason;
+        const message = reason?.message || reason || "Unhandled promise rejection";
+        showRuntimeError(message);
+      });
+
       supabaseClient.auth.onAuthStateChange(async (_event, session) => {
         const loginBtn = document.getElementById("login-top-btn");
         const logoutBtn = document.getElementById("logout-top-btn");
