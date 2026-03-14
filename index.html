@@ -22,7 +22,7 @@
 
     .subtitle{
       color:#888;
-      margin-bottom:20px;
+      margin-bottom:30px;
     }
 
     .hidden{
@@ -68,7 +68,7 @@
       display:flex;
       gap:12px;
       align-items:center;
-      margin-bottom:18px;
+      margin-bottom:16px;
       flex-wrap:wrap;
     }
 
@@ -343,33 +343,6 @@
       word-break:break-word;
     }
 
-    .global-search-box{
-      max-width:1100px;
-      margin-bottom:26px;
-    }
-
-    .global-filters{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-bottom:14px;
-    }
-
-    .global-results{
-      display:grid;
-      gap:10px;
-    }
-
-    .global-result-badge{
-      display:inline-block;
-      padding:4px 8px;
-      border:1px solid #444;
-      border-radius:999px;
-      font-size:12px;
-      color:#bbb;
-      margin-bottom:6px;
-    }
-
     @media (max-width: 800px){
       .details-layout{
         grid-template-columns:1fr;
@@ -421,21 +394,6 @@
   <div id="home-screen" class="hidden">
     <h1>Plamut</h1>
     <div class="subtitle" id="home-subtitle"></div>
-
-    <div class="global-search-box">
-      <input id="global-search-input" class="input" type="text" placeholder="Search everything" oninput="renderGlobalSearch()">
-
-      <div class="global-filters">
-        <button class="button" onclick="setGlobalFilter('All')" id="global-filter-all">All</button>
-        <button class="button" onclick="setGlobalFilter('Books')" id="global-filter-books">Books</button>
-        <button class="button" onclick="setGlobalFilter('Movies')" id="global-filter-movies">Movies</button>
-        <button class="button" onclick="setGlobalFilter('Series')" id="global-filter-series">Series</button>
-        <button class="button" onclick="setGlobalFilter('Anime')" id="global-filter-anime">Anime</button>
-        <button class="button" onclick="setGlobalFilter('Manga')" id="global-filter-manga">Manga</button>
-      </div>
-
-      <div id="global-search-results" class="global-results"></div>
-    </div>
 
     <div class="grid">
       <div class="card" onclick="openCategory('Books')" id="cat-books"></div>
@@ -651,7 +609,7 @@
         },
         modals: {
           searchTitle: "Search and add",
-          searchSubtitle: "Books use Open Library API. Other categories search online too.",
+          searchSubtitle: "Search works by category API. Query is tried in Russian and English.",
           searchPlaceholder: "Enter title or author",
           statusTitle: "Select status",
           manualTitle: "Add manually",
@@ -692,9 +650,7 @@
           confirmMoveToBlacklist: "Move this item to blacklist?",
           moveError: "Could not move item",
           filterByStatus: "Filter by status",
-          allStatuses: "All statuses",
-          globalSearchPlaceholder: "Search everything",
-          globalSearchNothing: "Start typing to search all categories"
+          allStatuses: "All statuses"
         },
         statuses: {
           All: "All statuses",
@@ -761,7 +717,7 @@
         },
         modals: {
           searchTitle: "Поиск и добавление",
-          searchSubtitle: "Книги, фильмы, сериалы, аниме и манга ищутся через API.",
+          searchSubtitle: "Поиск идёт по API выбранной категории. Запрос пробуется на русском и английском.",
           searchPlaceholder: "Введите название или автора",
           statusTitle: "Выберите статус",
           manualTitle: "Добавить вручную",
@@ -802,9 +758,7 @@
           confirmMoveToBlacklist: "Перенести это произведение в чёрный список?",
           moveError: "Не удалось перенести произведение",
           filterByStatus: "Фильтр по статусу",
-          allStatuses: "Все статусы",
-          globalSearchPlaceholder: "Искать всё",
-          globalSearchNothing: "Начните вводить, чтобы искать по всем категориям"
+          allStatuses: "Все статусы"
         },
         statuses: {
           All: "Все статусы",
@@ -830,12 +784,9 @@
     let currentOpenItemId = null;
     let currentStatusItemId = null;
     let currentSearchResults = [];
-    let currentGlobalResults = [];
-    let currentGlobalFilter = "All";
     let isPublicView = false;
     let currentPublicProfileName = "Library";
     let searchTimer = null;
-    let globalSearchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
 
     const demoData = {
@@ -860,8 +811,8 @@
         .replace(/'/g, "&#039;");
     }
 
-    function safeJsString(value) {
-      return JSON.stringify(String(value || ""));
+    function normalizeSpaces(text){
+      return String(text || "").replace(/\s+/g, " ").trim();
     }
 
     function setLanguage(lang) {
@@ -876,11 +827,6 @@
       currentFilterStatus = value || "All";
       localStorage.setItem("plamut_status_filter", currentFilterStatus);
       renderShelf();
-    }
-
-    function setGlobalFilter(value){
-      currentGlobalFilter = value || "All";
-      renderGlobalSearchList(currentGlobalResults);
     }
 
     function applyTranslations() {
@@ -965,16 +911,6 @@
         `;
         filterSelect.value = currentFilterStatus;
       }
-
-      document.getElementById("global-search-input").placeholder = t().labels.globalSearchPlaceholder;
-      document.getElementById("global-filter-all").textContent = t().labels.allStatuses;
-      document.getElementById("global-filter-books").textContent = t().categoryNames.Books;
-      document.getElementById("global-filter-movies").textContent = t().categoryNames.Movies;
-      document.getElementById("global-filter-series").textContent = t().categoryNames.Series;
-      document.getElementById("global-filter-anime").textContent = t().categoryNames.Anime;
-      document.getElementById("global-filter-manga").textContent = t().categoryNames.Manga;
-
-      renderGlobalSearchList(currentGlobalResults);
     }
 
     function rerenderCurrentScreen() {
@@ -1073,6 +1009,14 @@
       return (demoData[category] || []).find(item => item.id === id) || null;
     }
 
+    function hasCyrillic(text){
+      return /[А-Яа-яЁё]/.test(text || "");
+    }
+
+    function hasLatin(text){
+      return /[A-Za-z]/.test(text || "");
+    }
+
     async function getCurrentUser(){
       const { data, error } = await supabaseClient.auth.getUser();
       if(error || !data.user) return null;
@@ -1097,7 +1041,7 @@
           encodeURIComponent(fromLang + "|" + toLang);
 
         const data = await fetchJson(url);
-        return data?.responseData?.translatedText || "";
+        return (data?.responseData?.translatedText || "").trim();
       } catch (error) {
         console.error("Translation error:", error);
         return "";
@@ -1105,13 +1049,63 @@
     }
 
     async function translateTextToRussian(text){
-      if(looksLikeRussian(text)) return text;
+      if(hasCyrillic(text)) return text;
       return await translateText(text, "en", "ru");
     }
 
     async function translateTextToEnglish(text){
-      if(looksLikeEnglish(text)) return text;
+      if(hasLatin(text)) return text;
       return await translateText(text, "ru", "en");
+    }
+
+    async function buildSearchQueries(query){
+      const clean = normalizeSpaces(query);
+      const list = [];
+      if(clean) list.push(clean);
+
+      try {
+        if(hasCyrillic(clean)){
+          const en = await translateTextToEnglish(clean);
+          if(en && !list.includes(en)) list.push(en);
+        } else if(hasLatin(clean)){
+          const ru = await translateTextToRussian(clean);
+          if(ru && !list.includes(ru)) list.push(ru);
+        }
+      } catch (e) {
+        console.error("Search translation error:", e);
+      }
+
+      return list;
+    }
+
+    function looksLikeRussian(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
+      return (cyrillic.length / letters.length) >= 0.6;
+    }
+
+    function looksLikeEnglish(text){
+      if(!text) return false;
+      const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
+      if(letters.length < 10) return false;
+      const latin = text.match(/[A-Za-z]/g) || [];
+      return (latin.length / letters.length) >= 0.6;
+    }
+
+    function splitDescriptionFields(description){
+      return {
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_en: looksLikeEnglish(description) ? description : ""
+      };
+    }
+
+    function pickBestDescription(item, lang){
+      if(!item) return "";
+      if(lang === "ru" && item.description_ru) return item.description_ru;
+      if(lang === "en" && item.description_en) return item.description_en;
+      return item.description || "";
     }
 
     function buildCanonicalKey(category, source, rawId, title){
@@ -1119,6 +1113,21 @@
         return `${category}:${source}:${rawId}`;
       }
       return `${category}:${String(title || "").trim().toLowerCase()}`;
+    }
+
+    function getOpenLibraryCoverUrl(coverId){
+      if(!coverId) return "";
+      return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
+    }
+
+    function dedupeSearchResults(items){
+      const seen = new Set();
+      return items.filter(item => {
+        const key = item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase());
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }
 
     async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
@@ -1355,7 +1364,7 @@
       };
     }
 
-    async function searchBooksApi(query, limit = 8){
+    async function searchBooksApi(query, limit = 10){
       try {
         const url = "https://openlibrary.org/search.json?q=" + encodeURIComponent(query) + "&limit=" + limit;
         const data = await fetchJson(url);
@@ -1383,27 +1392,51 @@
       }
     }
 
-    async function searchMoviesApi(query, mediaType = "movie", limit = 8){
+    async function searchTMDbApi(query, mediaType = "movie", limit = 10){
       try {
-        const url = "https://api.themoviedb.org/3/search/" + mediaType +
-          "?api_key=" + encodeURIComponent(TMDB_API_KEY) +
-          "&query=" + encodeURIComponent(query) +
-          "&language=en-US&page=1";
-        const data = await fetchJson(url);
-        const results = Array.isArray(data.results) ? data.results : [];
+        const languagesToTry = currentLanguage === "ru" ? ["ru-RU", "en-US"] : ["en-US", "ru-RU"];
+        let results = [];
 
-        return results.slice(0, limit).map(item => {
-          const title = mediaType === "tv" ? (item.name || "Untitled") : (item.title || "Untitled");
+        for(const language of languagesToTry){
+          const url = "https://api.themoviedb.org/3/search/" + mediaType +
+            "?api_key=" + encodeURIComponent(TMDB_API_KEY) +
+            "&query=" + encodeURIComponent(query) +
+            "&language=" + encodeURIComponent(language) +
+            "&page=1";
+
+          const data = await fetchJson(url);
+          const items = Array.isArray(data.results) ? data.results : [];
+          results = results.concat(items);
+          if(results.length >= limit) break;
+        }
+
+        const deduped = [];
+        const seen = new Set();
+
+        for(const item of results){
+          const key = String(item.id || "");
+          if(!key || seen.has(key)) continue;
+          seen.add(key);
+          deduped.push(item);
+          if(deduped.length >= limit) break;
+        }
+
+        return deduped.map(item => {
+          const title = mediaType === "tv"
+            ? (item.name || item.original_name || "Untitled")
+            : (item.title || item.original_title || "Untitled");
+
           const overview = item.overview || "";
           const category = mediaType === "tv" ? "Series" : "Movies";
           const externalId = String(item.id || "");
+
           return {
             title,
             category,
             creator: "",
             cover: item.poster_path ? ("https://image.tmdb.org/t/p/w500" + item.poster_path) : "",
             description: overview,
-            description_ru: "",
+            description_ru: looksLikeRussian(overview) ? overview : "",
             description_en: looksLikeEnglish(overview) ? overview : "",
             work_key: `tmdb:${mediaType}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "tmdb", `${mediaType}:${externalId}`, title)
@@ -1415,7 +1448,7 @@
       }
     }
 
-    async function searchJikanApi(query, kind = "anime", limit = 8){
+    async function searchJikanApi(query, kind = "anime", limit = 10){
       try {
         const url = "https://api.jikan.moe/v4/" + kind + "?q=" + encodeURIComponent(query) + "&limit=" + limit;
         const data = await fetchJson(url);
@@ -1436,7 +1469,7 @@
             creator,
             cover: item.images?.jpg?.image_url || "",
             description: synopsis,
-            description_ru: "",
+            description_ru: looksLikeRussian(synopsis) ? synopsis : "",
             description_en: looksLikeEnglish(synopsis) ? synopsis : "",
             work_key: `jikan:${kind}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "jikan", `${kind}:${externalId}`, title)
@@ -1448,7 +1481,7 @@
       }
     }
 
-    async function searchAniListApi(query, kind = "ANIME", limit = 8){
+    async function searchAniListApi(query, kind = "ANIME", limit = 10){
       try {
         const body = {
           query: `
@@ -1490,7 +1523,7 @@
         return results.map(item => {
           const title = item.title?.english || item.title?.romaji || item.title?.native || "Untitled";
           const creator = (item.studios?.nodes || []).map(x => x.name).join(", ");
-          const description = String(item.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+          const description = String(item.description || "").replace(/<br\\s*\\/?>/gi, "\n").replace(/<[^>]+>/g, "");
           const category = kind === "ANIME" ? "Anime" : "Manga";
           return {
             title,
@@ -1498,7 +1531,7 @@
             creator,
             cover: item.coverImage?.large || "",
             description,
-            description_ru: "",
+            description_ru: looksLikeRussian(description) ? description : "",
             description_en: looksLikeEnglish(description) ? description : "",
             work_key: `anilist:${kind.toLowerCase()}:${item.id}`,
             canonical_key: buildCanonicalKey(category, "anilist", `${kind.toLowerCase()}:${item.id}`, title)
@@ -1510,120 +1543,35 @@
       }
     }
 
-    async function searchAnimeCombined(query, limit = 8){
-      const primary = await searchJikanApi(query, "anime", limit);
-      if(primary.length > 0) return primary;
+    async function searchAnimeApi(query, limit = 10){
+      const jikan = await searchJikanApi(query, "anime", limit);
+      if(jikan.length > 0) return jikan;
       return await searchAniListApi(query, "ANIME", limit);
     }
 
-    async function searchMangaCombined(query, limit = 8){
-      const primary = await searchJikanApi(query, "manga", limit);
-      if(primary.length > 0) return primary;
+    async function searchMangaApi(query, limit = 10){
+      const jikan = await searchJikanApi(query, "manga", limit);
+      if(jikan.length > 0) return jikan;
       return await searchAniListApi(query, "MANGA", limit);
     }
 
-    async function searchByCategory(category, query, limit = 8){
-      if(category === "Books") return await searchBooksApi(query, limit);
-      if(category === "Movies") return await searchMoviesApi(query, "movie", limit);
-      if(category === "Series") return await searchMoviesApi(query, "tv", limit);
-      if(category === "Anime") return await searchAnimeCombined(query, limit);
-      if(category === "Manga") return await searchMangaCombined(query, limit);
-      return [];
-    }
+    async function searchByCategory(category, query, limit = 10){
+      const searchQueries = await buildSearchQueries(query);
+      let combined = [];
 
-    async function searchAllCategories(query){
-      const [books, movies, series, anime, manga] = await Promise.all([
-        searchBooksApi(query, 5),
-        searchMoviesApi(query, "movie", 5),
-        searchMoviesApi(query, "tv", 5),
-        searchAnimeCombined(query, 5),
-        searchMangaCombined(query, 5)
-      ]);
+      for(const q of searchQueries){
+        let results = [];
+        if(category === "Books") results = await searchBooksApi(q, limit);
+        if(category === "Movies") results = await searchTMDbApi(q, "movie", limit);
+        if(category === "Series") results = await searchTMDbApi(q, "tv", limit);
+        if(category === "Anime") results = await searchAnimeApi(q, limit);
+        if(category === "Manga") results = await searchMangaApi(q, limit);
 
-      return [...books, ...movies, ...series, ...anime, ...manga];
-    }
-
-    function dedupeSearchResults(items){
-      const seen = new Set();
-      return items.filter(item => {
-        const key = item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase());
-        if(seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    }
-
-    async function renderGlobalSearch(){
-      clearTimeout(globalSearchTimer);
-
-      globalSearchTimer = setTimeout(async () => {
-        const input = document.getElementById("global-search-input");
-        const query = normalizeSpaces(input.value);
-        const container = document.getElementById("global-search-results");
-
-        if(!query){
-          currentGlobalResults = [];
-          container.innerHTML = `<div class="small">${escapeHtml(t().labels.globalSearchNothing)}</div>`;
-          return;
-        }
-
-        container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
-
-        try {
-          const results = dedupeSearchResults(await searchAllCategories(query));
-          currentGlobalResults = results;
-          renderGlobalSearchList(results);
-        } catch (e) {
-          console.error("Global search error:", e);
-          container.innerHTML = `<div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(e.message)}</div>`;
-        }
-      }, 350);
-    }
-
-    function renderGlobalSearchList(results){
-      const container = document.getElementById("global-search-results");
-      if(!container) return;
-
-      container.innerHTML = "";
-
-      const filtered = (results || []).filter(item => {
-        if(currentGlobalFilter === "All") return true;
-        return item.category === currentGlobalFilter;
-      });
-
-      if(filtered.length === 0){
-        container.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-        return;
+        combined = dedupeSearchResults([...combined, ...results]);
+        if(combined.length >= limit) break;
       }
 
-      filtered.forEach((item, index) => {
-        const row = document.createElement("div");
-        row.className = "search-item";
-        row.innerHTML = `
-          <div class="search-item-left">
-            <div class="search-thumb">
-              ${item.cover ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">` : escapeHtml(t().labels.cover)}
-            </div>
-            <div class="search-item-text">
-              <div class="global-result-badge">${escapeHtml(translateCategory(item.category))}</div>
-              <div class="search-item-title">${escapeHtml(item.title)}</div>
-              <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
-            </div>
-          </div>
-          <button class="button" onclick="addGlobalSearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
-        `;
-        container.appendChild(row);
-      });
-    }
-
-    async function addGlobalSearchResult(index){
-      const filtered = (currentGlobalResults || []).filter(item => {
-        if(currentGlobalFilter === "All") return true;
-        return item.category === currentGlobalFilter;
-      });
-      const item = filtered[index];
-      if(!item) return;
-      await addSearchResultToLibrary(item);
+      return combined.slice(0, limit);
     }
 
     function isDuplicateItem(category, title, workKey = ""){
@@ -1760,7 +1708,7 @@
       return true;
     }
 
-    async function updateBookDescriptionsInSupabase(itemId, description, description_ru, description_en){
+    async function updateDescriptionsInSupabase(itemId, description, description_ru, description_en){
       const user = await getCurrentUser();
       if(!user || !itemId) return false;
 
@@ -2296,7 +2244,7 @@
       }
 
       if(changed && !isPublicView){
-        await updateBookDescriptionsInSupabase(
+        await updateDescriptionsInSupabase(
           item.id,
           item.description || "",
           item.description_ru || "",
@@ -2738,12 +2686,6 @@
 
     async function init(){
       applyTranslations();
-
-      const globalContainer = document.getElementById("global-search-results");
-      if(globalContainer){
-        globalContainer.innerHTML = `<div class="small">${escapeHtml(t().labels.globalSearchNothing)}</div>`;
-      }
-
       const openedPublic = await checkPublicRoute();
 
       if(!openedPublic){
