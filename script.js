@@ -1,3 +1,335 @@
+# Full code export
+
+Ниже — полный код без сокращений из `index.html`, `script.js` и `style.css`.
+
+
+## index.html
+```html
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <link rel="stylesheet" href="style.css">
+  
+</head>
+
+<body>
+
+  <div class="page-shell">
+    
+   <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
+
+ <header class="app-header">
+  <div class="brand-block">
+    <div class="brand-mark">P</div>
+    <div>
+      <div class="brand-title">Plamut</div>
+      <div class="brand-subtitle">Media Tracker</div>
+    </div>
+  </div>
+
+  <div class="header-actions">
+    <div class="lang-switch">
+      <button class="button" onclick="setLanguage('en')">EN</button>
+      <button class="button" onclick="setLanguage('ru')">RU</button>
+    </div>
+
+    <div class="header-user-actions">
+      <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
+      <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
+    </div>
+  </div>
+</header>
+
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-badge">Plamut</div>
+    <h2 class="auth-title">Plamut Login</h2>
+    <p class="auth-text">Save books, movies, series, anime and manga in one personal library.</p>
+
+    <input id="login-email" class="input" placeholder="Email">
+    <input id="login-password" class="input" type="password" placeholder="Password">
+
+    <div class="auth-actions">
+      <button class="button" onclick="login()">Login</button>
+      <button class="button" onclick="register()">Register</button>
+    </div>
+  </div>
+</div>
+
+<div id="home-screen" class="hidden">
+  <section class="hero-block">
+    <div class="hero-content">
+      <div class="hero-badge">Your personal universe</div>
+      <h1 class="hero-title">Plamut</h1>
+      <div class="subtitle" id="home-subtitle"></div>
+
+      <div class="hero-actions">
+        <button id="share-library-btn" class="button" onclick="shareLibrary()">Share Library</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="home-section">
+    <div class="section-heading">
+     <h2 class="section-title">Library</h2>
+<div class="section-note">Choose a category</div>
+    </div>
+
+    <div class="grid category-grid">
+      <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
+      <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
+      <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
+      <div class="card category-card" onclick="openCategory('Anime')" id="cat-anime"></div>
+      <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
+      <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+    </div>
+  </section>
+</div>
+
+  <div id="category-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="goHome()" id="back-home-btn"></button>
+      <h2 id="category-title" style="margin:0;"></h2>
+      <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
+      <button class="button" onclick="addCustomFolder()" id="add-folder-btn"></button>
+    </div>
+
+    <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="button" onclick="openPublicCategory('Books', currentPublicProfileName)" id="public-tab-books">Books</button>
+      <button class="button" onclick="openPublicCategory('Movies', currentPublicProfileName)" id="public-tab-movies">Movies</button>
+      <button class="button" onclick="openPublicCategory('Series', currentPublicProfileName)" id="public-tab-series">Series</button>
+      <button class="button" onclick="openPublicCategory('Anime', currentPublicProfileName)" id="public-tab-anime">Anime</button>
+      <button class="button" onclick="openPublicCategory('Manga', currentPublicProfileName)" id="public-tab-manga">Manga</button>
+      <button class="button" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
+    </div>
+
+    <div class="toolbar-row" id="filter-toolbar">
+      <label for="status-filter" id="status-filter-label"></label>
+      <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+        <option value="All">All</option>
+        <option value="Planned">Planned</option>
+        <option value="In progress">In progress</option>
+        <option value="Done">Done</option>
+        <option value="Dropped">Dropped</option>
+      </select>
+
+    </div>
+
+    <div class="shelf" id="shelf"></div>
+  </div>
+
+  <div id="details-screen" class="hidden">
+    <div class="topbar">
+      <button class="button" onclick="backToCategory()" id="back-shelf-btn"></button>
+    </div>
+
+    <div class="details-layout">
+      <div class="details-cover">
+        <div class="details-cover-box" id="details-cover-box"></div>
+      </div>
+
+      <div class="details-panel">
+        <h2 id="details-title"></h2>
+        <div class="muted" id="details-creator" style="margin-bottom:10px;"></div>
+
+        <div>
+          <span class="badge" id="details-category"></span>
+          <span class="badge" id="details-status"></span>
+        </div>
+
+        <div class="section">
+          <h3 id="description-label"></h3>
+          <div class="muted" id="details-description"></div>
+        </div>
+
+        <div class="section" id="details-folder-section">
+          <h3 id="details-folder-title">Folder</h3>
+          <div class="folder-assignment-row">
+            <select id="details-folder-select" class="select"></select>
+            <button class="button" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+          </div>
+        </div>
+
+        <div class="section hidden" id="canonical-key-section">
+          <h3>Canonical Key</h3>
+          <input id="canonical-key-input" class="input" type="text">
+          <button class="button" onclick="saveCanonicalKey()">Save</button>
+        </div>
+
+        <div class="section" style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="button" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+          <button class="button" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="add-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="search-modal-title"></h3>
+      <div class="small" id="search-modal-subtitle"></div>
+
+      <input
+        id="search-input"
+        class="input"
+        type="text"
+        oninput="renderCategorySearchResults()"
+      >
+
+      <div id="search-results"></div>
+
+      <div class="modal-actions">
+        <button class="button" onclick="openManualModal()" id="manual-add-btn"></button>
+        <button class="button" onclick="closeAddModal()" id="close-search-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="manual-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="manual-title"></h3>
+      <div class="small" id="manual-subtitle"></div>
+
+      <input id="manual-name" class="input" type="text">
+      <input id="manual-creator" class="input" type="text">
+      <input id="manual-cover" class="input" type="text">
+      <textarea id="manual-description" class="textarea"></textarea>
+
+      <div class="modal-actions">
+        <button class="button" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+        <button class="button" onclick="saveManualItem()" id="manual-save-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="profile-modal" class="modal hidden">
+  <div class="modal-box profile-box">
+
+    <h3 id="profile-title">Profile</h3>
+    <p class="small profile-subtitle" id="profile-subtitle">Manage your account settings, privacy, avatar and password.</p>
+
+    <div class="profile-layout">
+
+      <div class="profile-avatar-section">
+        <div class="profile-section-heading">
+          <h4 id="profile-avatar-title">Avatar</h4>
+          <p class="small" id="profile-avatar-hint">Upload a profile image so your account is easier to recognize.</p>
+        </div>
+
+        <div class="avatar-preview">
+          <img id="avatar-img" src="" alt="avatar">
+        </div>
+
+        <input type="file" id="avatar-file" accept="image/*">
+
+        <button id="profile-upload-avatar-btn" class="button" onclick="uploadAvatar()">Upload avatar</button>
+
+        <button id="profile-remove-avatar-btn" class="button" onclick="removeAvatar()">Remove avatar</button>
+
+      </div>
+
+
+      <div class="profile-info-section">
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-account-title">Account</h4>
+          </div>
+
+          <label id="profile-username-label" for="profile-username">Username</label>
+          <input id="profile-username" class="input">
+
+          <label id="profile-display-name-label" for="profile-display-name">Display name</label>
+          <input id="profile-display-name" class="input">
+        </section>
+
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-privacy-title">Privacy</h4>
+            <p class="small" id="profile-privacy-hint">Control whether other users can open your public library page.</p>
+          </div>
+
+          <label class="profile-checkbox">
+            <input type="checkbox" id="profile-public">
+            <span id="profile-public-label">Public library</span>
+          </label>
+        </section>
+
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-security-title">Security</h4>
+            <p class="small" id="profile-security-hint">Change your password and save it securely for future sign-ins.</p>
+          </div>
+
+          <label id="profile-new-password-label" for="new-password">New password</label>
+          <input id="new-password" class="input" type="password">
+
+          <label id="profile-confirm-password-label" for="confirm-password">Confirm password</label>
+          <input id="confirm-password" class="input" type="password">
+
+          <label class="profile-checkbox">
+            <input type="checkbox" id="profile-show-password" onclick="togglePasswordVisibility()">
+            <span id="profile-show-password-label">Show password</span>
+          </label>
+
+          <button id="profile-change-password-btn" class="button profile-password-btn" onclick="changePassword()">Change password</button>
+        </section>
+      </div>
+
+    </div>
+
+    <div class="modal-actions">
+
+      <button class="button" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
+
+      <button class="button" onclick="logout()" id="profile-logout-btn">Logout</button>
+
+      <button class="button" onclick="saveProfile()" id="profile-save-btn">Save profile</button>
+
+    </div>
+
+  </div>
+</div>
+
+  <div id="status-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="status-modal-title"></h3>
+
+      <div class="modal-actions" id="status-buttons" style="flex-direction:column;align-items:stretch"></div>
+
+      <div class="status-custom-box">
+        <label id="status-custom-label" for="custom-status-input">Custom status</label>
+        <div class="profile-inline-form">
+          <input id="custom-status-input" class="input" type="text">
+          <button id="status-add-custom-btn" class="button" onclick="addCustomStatus()">Add status</button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch">
+        <button class="button" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
+        <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+  <script src="script.js"></script>
+  
+</body>
+</html>
+
+```
+
+
+## script.js
+```js
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
@@ -80,6 +412,7 @@
         buttons: {
           backHome: "← Back",
           addNew: "+ Add new",
+          addFolder: "+ Add folder",
           backShelf: "← Back to shelf",
           close: "Close",
           changeStatus: "Change status",
@@ -231,6 +564,7 @@
         buttons: {
           backHome: "← Назад",
           addNew: "+ Добавить",
+          addFolder: "+ Папка",
           backShelf: "← Назад к полке",
           close: "Закрыть",
           changeStatus: "Изменить статус",
@@ -322,7 +656,6 @@
     let currentPublicProfileName = "Library";
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
-    let currentFilterFolder = localStorage.getItem("plamut_folder_filter") || "All";
 
     const demoData = {
       Books: [],
@@ -425,12 +758,6 @@
       renderShelf();
     }
 
-    function setFolderFilter(value){
-      currentFilterFolder = value || "All";
-      localStorage.setItem("plamut_folder_filter", currentFilterFolder);
-      renderShelf();
-    }
-
     async function renderStatusOptions(){
       const container = document.getElementById("status-buttons");
       if(!container) return;
@@ -444,21 +771,8 @@
     }
 
     async function renderFolderFilterOptions(){
-      const folderFilter = document.getElementById("folder-filter");
       const detailsFolderSelect = document.getElementById("details-folder-select");
       const folders = await getAvailableFolders();
-      const options = [
-        `<option value="All">${escapeHtml(t().labels.allFolders)}</option>`,
-        `<option value="">${escapeHtml(t().labels.noFolder)}</option>`,
-        ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
-      ].join("");
-
-      if(folderFilter){
-        folderFilter.innerHTML = options;
-        folderFilter.value = folders.includes(currentFilterFolder) || currentFilterFolder === "All" || currentFilterFolder === ""
-          ? currentFilterFolder
-          : "All";
-      }
 
       if(detailsFolderSelect){
         detailsFolderSelect.innerHTML = [
@@ -469,22 +783,7 @@
     }
 
     async function renderCustomCollections(){
-      const statusList = document.getElementById("custom-status-list");
-      const folderList = document.getElementById("custom-folder-list");
-      const statuses = await getCustomStatuses();
-      const folders = await getCustomFolders();
-
-      if(statusList){
-        statusList.innerHTML = statuses.map((status) => `
-          <button class="chip-button" onclick="removeCustomStatus(${JSON.stringify(status)})">${escapeHtml(status)} ×</button>
-        `).join("");
-      }
-
-      if(folderList){
-        folderList.innerHTML = folders.map((folder) => `
-          <button class="chip-button" onclick="removeCustomFolder(${JSON.stringify(folder)})">${escapeHtml(folder)} ×</button>
-        `).join("");
-      }
+      return;
     }
 
     function refreshAccountCollectionsUI(){
@@ -514,6 +813,7 @@
 
       document.getElementById("back-home-btn").textContent = t().buttons.backHome;
       document.getElementById("add-new-btn").textContent = t().buttons.addNew;
+      document.getElementById("add-folder-btn").textContent = t().buttons.addFolder;
       document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
       document.getElementById("description-label").textContent = t().labels.description;
       document.getElementById("change-status-details-btn").textContent = t().buttons.changeStatus;
@@ -535,6 +835,9 @@
       document.getElementById("manual-save-btn").textContent = t().buttons.save;
 
       document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
+      document.getElementById("status-custom-label").textContent = t().profile.customStatusLabel;
+      document.getElementById("custom-status-input").placeholder = t().profile.customStatusLabel;
+      document.getElementById("status-add-custom-btn").textContent = t().profile.addStatus;
       document.getElementById("status-blacklist").textContent = t().buttons.moveToBlacklist;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
 
@@ -565,14 +868,6 @@
       document.getElementById("profile-change-password-btn").textContent = t().profile.changePassword;
       document.getElementById("profile-upload-avatar-btn").textContent = t().profile.uploadAvatar;
       document.getElementById("profile-remove-avatar-btn").textContent = t().profile.removeAvatar;
-      document.getElementById("profile-organization-title").textContent = t().profile.organizationTitle;
-      document.getElementById("profile-organization-hint").textContent = t().profile.organizationHint;
-      document.getElementById("profile-custom-status-label").textContent = t().profile.customStatusLabel;
-      document.getElementById("custom-status-input").placeholder = t().profile.customStatusLabel;
-      document.getElementById("profile-add-status-btn").textContent = t().profile.addStatus;
-      document.getElementById("profile-custom-folder-label").textContent = t().profile.customFolderLabel;
-      document.getElementById("custom-folder-input").placeholder = t().profile.customFolderLabel;
-      document.getElementById("profile-add-folder-btn").textContent = t().profile.addFolder;
       document.getElementById("profile-logout-btn").textContent = t().profile.logout;
       document.getElementById("profile-close-btn").textContent = t().profile.close;
       document.getElementById("profile-save-btn").textContent = t().profile.save;
@@ -588,7 +883,6 @@
       document.querySelector('#auth-screen button[onclick="register()"]').textContent = t().auth.register;
 
       document.getElementById("status-filter-label").textContent = t().labels.filterByStatus;
-      document.getElementById("folder-filter-label").textContent = t().labels.filterByFolder;
       const filterSelect = document.getElementById("status-filter");
       if(filterSelect){
         getAvailableStatuses().then((statuses) => {
@@ -756,10 +1050,8 @@
     }
 
     async function addCustomFolder(){
-      const input = document.getElementById("custom-folder-input");
-      const value = normalizeSpaces(input?.value);
+      const value = normalizeSpaces(prompt(t().profile.customFolderLabel, ""));
       if(!value){
-        alert(t().profile.customValueRequired);
         return;
       }
 
@@ -771,8 +1063,7 @@
 
       folders.push(value);
       await setCustomFolders(folders);
-      if(input) input.value = "";
-      applyTranslations();
+      renderFolderFilterOptions();
       alert(t().profile.customFolderAdded);
     }
 
@@ -796,12 +1087,7 @@
         });
       }
 
-      if(currentFilterFolder === folder){
-        currentFilterFolder = "All";
-        localStorage.setItem("plamut_folder_filter", currentFilterFolder);
-      }
-
-      applyTranslations();
+      renderFolderFilterOptions();
       renderShelf();
       alert(`${folder}: ${t().profile.customRemoved}`);
     }
@@ -819,8 +1105,7 @@
       const items = demoData[currentCategory] || [];
       return items.filter((item) => {
         const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
-        const folderMatches = currentFilterFolder === "All" || getItemFolder(item) === currentFilterFolder;
-        return statusMatches && folderMatches;
+        return statusMatches;
       });
     }
 
@@ -1777,16 +2062,13 @@
         return;
       }
 
-      items.forEach((item) => {
+      const createCard = (item) => {
         const coverHtml = item.cover
           ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
           : escapeHtml(t().labels.cover);
 
         const creatorLine = item.creator
           ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
-          : "";
-        const folderLine = getItemFolder(item)
-          ? `<div class="media-meta">${escapeHtml(t().labels.folder)}: ${escapeHtml(getItemFolder(item))}</div>`
           : "";
 
         const actionsHtml = isPublicView
@@ -1806,13 +2088,49 @@
           <div class="media-info">
             <h3 class="media-title">${escapeHtml(item.title)}</h3>
             ${creatorLine}
-            ${folderLine}
             <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
             ${actionsHtml}
           </div>
         `;
 
-        shelf.appendChild(card);
+        return card;
+      };
+
+      const folders = [];
+      const ungroupedItems = [];
+      const grouped = new Map();
+
+      items.forEach((item) => {
+        const folder = getItemFolder(item);
+        if(!folder){
+          ungroupedItems.push(item);
+          return;
+        }
+
+        if(!grouped.has(folder)){
+          grouped.set(folder, []);
+          folders.push(folder);
+        }
+        grouped.get(folder).push(item);
+      });
+
+      if(ungroupedItems.length){
+        const defaultGrid = document.createElement("div");
+        defaultGrid.className = "shelf";
+        ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
+        shelf.appendChild(defaultGrid);
+      }
+
+      folders.forEach((folder) => {
+        const section = document.createElement("div");
+        section.className = "folder-block";
+        section.innerHTML = `<h3 class="folder-block-title">${escapeHtml(folder)}</h3>`;
+
+        const folderGrid = document.createElement("div");
+        folderGrid.className = "shelf";
+        grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
+        section.appendChild(folderGrid);
+        shelf.appendChild(section);
       });
     }
 
@@ -1825,6 +2143,7 @@
       document.getElementById("category-title").textContent = translateCategory(name);
 
       const addBtn = document.getElementById("add-new-btn");
+      const addFolderBtn = document.getElementById("add-folder-btn");
       if(addBtn){
         if(name === "Blacklist"){
           addBtn.classList.add("hidden");
@@ -1832,6 +2151,15 @@
         } else {
           addBtn.classList.remove("hidden");
           addBtn.style.display = "";
+        }
+      }
+      if(addFolderBtn){
+        if(name === "Blacklist"){
+          addFolderBtn.classList.add("hidden");
+          addFolderBtn.style.display = "none";
+        } else {
+          addFolderBtn.classList.remove("hidden");
+          addFolderBtn.style.display = "";
         }
       }
 
@@ -2272,12 +2600,8 @@
       const folderSelect = document.getElementById("details-folder-select");
 
       if(canonicalInput && canonicalSection){
-        if(isPublicView){
-          canonicalSection.classList.add("hidden");
-        } else {
-          canonicalSection.classList.remove("hidden");
-          canonicalInput.value = item?.canonical_key || "";
-        }
+        canonicalSection.classList.add("hidden");
+        canonicalInput.value = item?.canonical_key || "";
       }
 
       if(folderSection && folderSelect){
@@ -2596,9 +2920,14 @@ async function changePassword(){
       document.getElementById("category-screen").classList.remove("hidden");
 
       const addBtn = document.getElementById("add-new-btn");
+      const addFolderBtn = document.getElementById("add-folder-btn");
       if(addBtn){
         addBtn.classList.add("hidden");
         addBtn.style.display = "none";
+      }
+      if(addFolderBtn){
+        addFolderBtn.classList.add("hidden");
+        addFolderBtn.style.display = "none";
       }
 
       const tabs = document.getElementById("public-category-tabs");
@@ -2696,9 +3025,14 @@ async function changePassword(){
       document.getElementById("category-screen").classList.remove("hidden");
 
       const addBtn = document.getElementById("add-new-btn");
+      const addFolderBtn = document.getElementById("add-folder-btn");
       if(addBtn){
         addBtn.classList.add("hidden");
         addBtn.style.display = "none";
+      }
+      if(addFolderBtn){
+        addFolderBtn.classList.add("hidden");
+        addFolderBtn.style.display = "none";
       }
 
       const tabs = document.getElementById("public-category-tabs");
@@ -2914,4 +3248,4 @@ async function removeAvatar(){
       }
     }
 
-    init()
+    init();
