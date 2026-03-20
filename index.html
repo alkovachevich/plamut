@@ -91,6 +91,7 @@
       <button class="button" onclick="goHome()" id="back-home-btn"></button>
       <h2 id="category-title" style="margin:0;"></h2>
       <button class="button" onclick="openAddModal()" id="add-new-btn"></button>
+      <button class="button" onclick="addCustomFolder()" id="add-folder-btn"></button>
     </div>
 
     <div id="public-category-tabs" class="hidden" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
@@ -112,10 +113,6 @@
         <option value="Dropped">Dropped</option>
       </select>
 
-      <label for="folder-filter" id="folder-filter-label"></label>
-      <select id="folder-filter" class="select" onchange="setFolderFilter(this.value)">
-        <option value="All">All folders</option>
-      </select>
     </div>
 
     <div class="shelf" id="shelf"></div>
@@ -153,7 +150,7 @@
           </div>
         </div>
 
-        <div class="section" id="canonical-key-section">
+        <div class="section hidden" id="canonical-key-section">
           <h3>Canonical Key</h3>
           <input id="canonical-key-input" class="input" type="text">
           <button class="button" onclick="saveCanonicalKey()">Save</button>
@@ -276,27 +273,6 @@
 
           <button id="profile-change-password-btn" class="button profile-password-btn" onclick="changePassword()">Change password</button>
         </section>
-
-        <section class="profile-section-card">
-          <div class="profile-section-heading">
-            <h4 id="profile-organization-title">Custom organization</h4>
-            <p class="small" id="profile-organization-hint">Create personal statuses and folders for your account.</p>
-          </div>
-
-          <label id="profile-custom-status-label" for="custom-status-input">Custom statuses</label>
-          <div class="profile-inline-form">
-            <input id="custom-status-input" class="input" type="text">
-            <button id="profile-add-status-btn" class="button" onclick="addCustomStatus()">Add status</button>
-          </div>
-          <div id="custom-status-list" class="chip-list"></div>
-
-          <label id="profile-custom-folder-label" for="custom-folder-input">Custom folders</label>
-          <div class="profile-inline-form">
-            <input id="custom-folder-input" class="input" type="text">
-            <button id="profile-add-folder-btn" class="button" onclick="addCustomFolder()">Add folder</button>
-          </div>
-          <div id="custom-folder-list" class="chip-list"></div>
-        </section>
       </div>
 
     </div>
@@ -319,6 +295,14 @@
       <h3 id="status-modal-title"></h3>
 
       <div class="modal-actions" id="status-buttons" style="flex-direction:column;align-items:stretch"></div>
+
+      <div class="status-custom-box">
+        <label id="status-custom-label" for="custom-status-input">Custom status</label>
+        <div class="profile-inline-form">
+          <input id="custom-status-input" class="input" type="text">
+          <button id="status-add-custom-btn" class="button" onclick="addCustomStatus()">Add status</button>
+        </div>
+      </div>
 
       <div class="modal-actions" style="flex-direction:column;align-items:stretch">
         <button class="button" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
