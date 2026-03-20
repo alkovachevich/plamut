@@ -1,4 +1,4 @@
- const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
     const TMDB_API_KEY = "fc8eab333882a74fe8c8a633e4676d98";
@@ -45,6 +45,12 @@
           changePassword: "Change password",
           uploadAvatar: "Upload avatar",
           removeAvatar: "Remove avatar",
+          organizationTitle: "Custom organization",
+          organizationHint: "Create personal statuses and folders for your account.",
+          customStatusLabel: "Custom statuses",
+          customFolderLabel: "Custom folders",
+          addStatus: "Add status",
+          addFolder: "Add folder",
           logout: "Logout",
           close: "Close",
           save: "Save Profile",
@@ -55,7 +61,13 @@
           passwordMismatch: "Passwords do not match",
           avatarSelectFirst: "Select an image first",
           avatarUpdated: "Avatar updated",
-          avatarRemoved: "Avatar removed"
+          avatarRemoved: "Avatar removed",
+          customStatusAdded: "Custom status added",
+          customFolderAdded: "Custom folder added",
+          customStatusExists: "This status already exists",
+          customFolderExists: "This folder already exists",
+          customValueRequired: "Enter a name first",
+          customRemoved: "Removed"
         },
         categories: {
           Books: "📚 Books",
@@ -122,7 +134,13 @@
           confirmMoveToBlacklist: "Move this item to blacklist?",
           moveError: "Could not move item",
           filterByStatus: "Filter by status",
-               allStatuses: "All statuses",
+          filterByFolder: "Filter by folder",
+          allStatuses: "All statuses",
+          allFolders: "All folders",
+          folder: "Folder",
+          noFolder: "No folder",
+          saveFolder: "Save folder",
+          folderSaved: "Folder saved",
           runtimeError: "Application error. Please refresh the page. Details:"
         },
         statuses: {
@@ -178,6 +196,12 @@
           changePassword: "Изменить пароль",
           uploadAvatar: "Загрузить аватар",
           removeAvatar: "Удалить аватар",
+          organizationTitle: "Пользовательская организация",
+          organizationHint: "Создавайте свои статусы и папки для аккаунта.",
+          customStatusLabel: "Пользовательские статусы",
+          customFolderLabel: "Пользовательские папки",
+          addStatus: "Добавить статус",
+          addFolder: "Добавить папку",
           logout: "Выйти",
           close: "Закрыть",
           save: "Сохранить профиль",
@@ -188,7 +212,13 @@
           passwordMismatch: "Пароли не совпадают",
           avatarSelectFirst: "Сначала выберите изображение",
           avatarUpdated: "Аватар обновлён",
-          avatarRemoved: "Аватар удалён"
+          avatarRemoved: "Аватар удалён",
+          customStatusAdded: "Пользовательский статус добавлен",
+          customFolderAdded: "Пользовательская папка добавлена",
+          customStatusExists: "Такой статус уже существует",
+          customFolderExists: "Такая папка уже существует",
+          customValueRequired: "Сначала введите название",
+          customRemoved: "Удалено"
         },
         categories: {
           Books: "📚 Книги",
@@ -255,7 +285,13 @@
           confirmMoveToBlacklist: "Перенести это произведение в чёрный список?",
           moveError: "Не удалось перенести произведение",
           filterByStatus: "Фильтр по статусу",
-              allStatuses: "Все статусы",
+          filterByFolder: "Фильтр по папке",
+          allStatuses: "Все статусы",
+          allFolders: "Все папки",
+          folder: "Папка",
+          noFolder: "Без папки",
+          saveFolder: "Сохранить папку",
+          folderSaved: "Папка сохранена",
           runtimeError: "Ошибка приложения. Обновите страницу. Детали:"
         },
         statuses: {
@@ -286,6 +322,7 @@
     let currentPublicProfileName = "Library";
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
+    let currentFilterFolder = localStorage.getItem("plamut_folder_filter") || "All";
 
     const demoData = {
       Books: [],
@@ -313,6 +350,67 @@
       return String(text || "").replace(/\s+/g, " ").trim();
     }
 
+    function getItemStorageKey(itemOrParts = {}){
+      const category = itemOrParts.category || currentCategory || "";
+      const canonicalKey = itemOrParts.canonical_key || itemOrParts.canonicalKey || "";
+      const workKey = itemOrParts.work_key || itemOrParts.workKey || "";
+      const title = normalizeSpaces(itemOrParts.title || "").toLowerCase();
+      return [category, canonicalKey || workKey || title].join(":");
+    }
+
+    async function getCurrentUserId(){
+      const user = await getCurrentUser();
+      return user?.id || "guest";
+    }
+
+    async function getAccountStorageValue(suffix, fallback){
+      const userId = await getCurrentUserId();
+      try {
+        const raw = localStorage.getItem(`plamut_${suffix}_${userId}`);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (_error) {
+        return fallback;
+      }
+    }
+
+    async function setAccountStorageValue(suffix, value){
+      const userId = await getCurrentUserId();
+      localStorage.setItem(`plamut_${suffix}_${userId}`, JSON.stringify(value));
+    }
+
+    async function getCustomStatuses(){
+      return await getAccountStorageValue("custom_statuses", []);
+    }
+
+    async function setCustomStatuses(statuses){
+      await setAccountStorageValue("custom_statuses", statuses);
+    }
+
+    async function getCustomFolders(){
+      return await getAccountStorageValue("custom_folders", []);
+    }
+
+    async function setCustomFolders(folders){
+      await setAccountStorageValue("custom_folders", folders);
+    }
+
+    async function getFolderAssignments(){
+      return await getAccountStorageValue("folder_assignments", {});
+    }
+
+    async function setFolderAssignments(assignments){
+      await setAccountStorageValue("folder_assignments", assignments);
+    }
+
+    async function getAvailableStatuses(){
+      const customStatuses = await getCustomStatuses();
+      return ["Planned", "In progress", "Done", "Dropped", ...customStatuses];
+    }
+
+    async function getAvailableFolders(){
+      return await getCustomFolders();
+    }
+
     function setLanguage(lang) {
       currentLanguage = lang;
       localStorage.setItem("plamut_language", lang);
@@ -325,6 +423,74 @@
       currentFilterStatus = value || "All";
       localStorage.setItem("plamut_status_filter", currentFilterStatus);
       renderShelf();
+    }
+
+    function setFolderFilter(value){
+      currentFilterFolder = value || "All";
+      localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+      renderShelf();
+    }
+
+    async function renderStatusOptions(){
+      const container = document.getElementById("status-buttons");
+      if(!container) return;
+
+      const statuses = await getAvailableStatuses();
+      container.innerHTML = statuses
+        .map((status) => `
+          <button class="button" onclick="setStatus(${JSON.stringify(status)})">${escapeHtml(translateStatus(status))}</button>
+        `)
+        .join("");
+    }
+
+    async function renderFolderFilterOptions(){
+      const folderFilter = document.getElementById("folder-filter");
+      const detailsFolderSelect = document.getElementById("details-folder-select");
+      const folders = await getAvailableFolders();
+      const options = [
+        `<option value="All">${escapeHtml(t().labels.allFolders)}</option>`,
+        `<option value="">${escapeHtml(t().labels.noFolder)}</option>`,
+        ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
+      ].join("");
+
+      if(folderFilter){
+        folderFilter.innerHTML = options;
+        folderFilter.value = folders.includes(currentFilterFolder) || currentFilterFolder === "All" || currentFilterFolder === ""
+          ? currentFilterFolder
+          : "All";
+      }
+
+      if(detailsFolderSelect){
+        detailsFolderSelect.innerHTML = [
+          `<option value="">${escapeHtml(t().labels.noFolder)}</option>`,
+          ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
+        ].join("");
+      }
+    }
+
+    async function renderCustomCollections(){
+      const statusList = document.getElementById("custom-status-list");
+      const folderList = document.getElementById("custom-folder-list");
+      const statuses = await getCustomStatuses();
+      const folders = await getCustomFolders();
+
+      if(statusList){
+        statusList.innerHTML = statuses.map((status) => `
+          <button class="chip-button" onclick="removeCustomStatus(${JSON.stringify(status)})">${escapeHtml(status)} ×</button>
+        `).join("");
+      }
+
+      if(folderList){
+        folderList.innerHTML = folders.map((folder) => `
+          <button class="chip-button" onclick="removeCustomFolder(${JSON.stringify(folder)})">${escapeHtml(folder)} ×</button>
+        `).join("");
+      }
+    }
+
+    function refreshAccountCollectionsUI(){
+      renderStatusOptions();
+      renderFolderFilterOptions();
+      renderCustomCollections();
     }
 
     function applyTranslations() {
@@ -369,15 +535,13 @@
       document.getElementById("manual-save-btn").textContent = t().buttons.save;
 
       document.getElementById("status-modal-title").textContent = t().modals.statusTitle;
-      document.getElementById("status-planned").textContent = t().statuses.Planned;
-      document.getElementById("status-in-progress").textContent = t().statuses["In progress"];
-      document.getElementById("status-done").textContent = t().statuses.Done;
-      document.getElementById("status-dropped").textContent = t().statuses.Dropped;
       document.getElementById("status-blacklist").textContent = t().buttons.moveToBlacklist;
       document.getElementById("status-cancel").textContent = t().buttons.cancel;
 
       document.getElementById("canonical-key-section").querySelector("h3").textContent = t().labels.canonicalKey;
       document.querySelector("#canonical-key-section .button").textContent = t().buttons.save;
+      document.getElementById("details-folder-title").textContent = t().labels.folder;
+      document.getElementById("save-folder-btn").textContent = t().labels.saveFolder;
 
       document.getElementById("profile-title").textContent = t().profile.title;
       document.getElementById("profile-subtitle").textContent = t().profile.subtitle;
@@ -401,6 +565,14 @@
       document.getElementById("profile-change-password-btn").textContent = t().profile.changePassword;
       document.getElementById("profile-upload-avatar-btn").textContent = t().profile.uploadAvatar;
       document.getElementById("profile-remove-avatar-btn").textContent = t().profile.removeAvatar;
+      document.getElementById("profile-organization-title").textContent = t().profile.organizationTitle;
+      document.getElementById("profile-organization-hint").textContent = t().profile.organizationHint;
+      document.getElementById("profile-custom-status-label").textContent = t().profile.customStatusLabel;
+      document.getElementById("custom-status-input").placeholder = t().profile.customStatusLabel;
+      document.getElementById("profile-add-status-btn").textContent = t().profile.addStatus;
+      document.getElementById("profile-custom-folder-label").textContent = t().profile.customFolderLabel;
+      document.getElementById("custom-folder-input").placeholder = t().profile.customFolderLabel;
+      document.getElementById("profile-add-folder-btn").textContent = t().profile.addFolder;
       document.getElementById("profile-logout-btn").textContent = t().profile.logout;
       document.getElementById("profile-close-btn").textContent = t().profile.close;
       document.getElementById("profile-save-btn").textContent = t().profile.save;
@@ -416,17 +588,21 @@
       document.querySelector('#auth-screen button[onclick="register()"]').textContent = t().auth.register;
 
       document.getElementById("status-filter-label").textContent = t().labels.filterByStatus;
+      document.getElementById("folder-filter-label").textContent = t().labels.filterByFolder;
       const filterSelect = document.getElementById("status-filter");
       if(filterSelect){
-        filterSelect.innerHTML = `
-          <option value="All">${escapeHtml(t().labels.allStatuses)}</option>
-          <option value="Planned">${escapeHtml(t().statuses.Planned)}</option>
-          <option value="In progress">${escapeHtml(t().statuses["In progress"])}</option>
-          <option value="Done">${escapeHtml(t().statuses.Done)}</option>
-          <option value="Dropped">${escapeHtml(t().statuses.Dropped)}</option>
-        `;
-        filterSelect.value = currentFilterStatus;
+        getAvailableStatuses().then((statuses) => {
+          filterSelect.innerHTML = `
+            <option value="All">${escapeHtml(t().labels.allStatuses)}</option>
+            ${statuses.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(translateStatus(status))}</option>`).join("")}
+          `;
+          filterSelect.value = statuses.includes(currentFilterStatus) || currentFilterStatus === "All"
+            ? currentFilterStatus
+            : "All";
+        });
       }
+
+      refreshAccountCollectionsUI();
     }
 
     function rerenderCurrentScreen() {
@@ -452,6 +628,10 @@
 
     function translateCategory(category) {
       return t().categoryNames[category] || category;
+    }
+
+    function getItemFolder(item){
+      return item?.folder || "";
     }
 
     function hideAllScreens(){
@@ -523,11 +703,107 @@
 
       if(modal) modal.classList.remove("hidden");
 
+      refreshAccountCollectionsUI();
       safeLoadProfile("openProfileModal");
     }
 
     function closeProfileModal(){
       document.getElementById("profile-modal").classList.add("hidden");
+    }
+
+    async function addCustomStatus(){
+      const input = document.getElementById("custom-status-input");
+      const value = normalizeSpaces(input?.value);
+      if(!value){
+        alert(t().profile.customValueRequired);
+        return;
+      }
+
+      const statuses = await getCustomStatuses();
+      if(statuses.includes(value) || ["Planned", "In progress", "Done", "Dropped"].includes(value)){
+        alert(t().profile.customStatusExists);
+        return;
+      }
+
+      statuses.push(value);
+      await setCustomStatuses(statuses);
+      if(input) input.value = "";
+      applyTranslations();
+      alert(t().profile.customStatusAdded);
+    }
+
+    async function removeCustomStatus(status){
+      const statuses = await getCustomStatuses();
+      const nextStatuses = statuses.filter((item) => item !== status);
+      await setCustomStatuses(nextStatuses);
+
+      if(currentFilterStatus === status){
+        currentFilterStatus = "All";
+        localStorage.setItem("plamut_status_filter", currentFilterStatus);
+      }
+
+      for (const category of Object.keys(demoData)){
+        demoData[category].forEach((item) => {
+          if(item.status === status){
+            item.status = "Planned";
+          }
+        });
+      }
+
+      applyTranslations();
+      renderShelf();
+      alert(`${status}: ${t().profile.customRemoved}`);
+    }
+
+    async function addCustomFolder(){
+      const input = document.getElementById("custom-folder-input");
+      const value = normalizeSpaces(input?.value);
+      if(!value){
+        alert(t().profile.customValueRequired);
+        return;
+      }
+
+      const folders = await getCustomFolders();
+      if(folders.includes(value)){
+        alert(t().profile.customFolderExists);
+        return;
+      }
+
+      folders.push(value);
+      await setCustomFolders(folders);
+      if(input) input.value = "";
+      applyTranslations();
+      alert(t().profile.customFolderAdded);
+    }
+
+    async function removeCustomFolder(folder){
+      const folders = await getCustomFolders();
+      await setCustomFolders(folders.filter((item) => item !== folder));
+
+      const assignments = await getFolderAssignments();
+      Object.keys(assignments).forEach((key) => {
+        if(assignments[key] === folder){
+          assignments[key] = "";
+        }
+      });
+      await setFolderAssignments(assignments);
+
+      for (const category of Object.keys(demoData)){
+        demoData[category].forEach((item) => {
+          if(item.folder === folder){
+            item.folder = "";
+          }
+        });
+      }
+
+      if(currentFilterFolder === folder){
+        currentFilterFolder = "All";
+        localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+      }
+
+      applyTranslations();
+      renderShelf();
+      alert(`${folder}: ${t().profile.customRemoved}`);
     }
 
     function showAuthScreen(){
@@ -541,9 +817,11 @@
 
     function getFilteredItems(){
       const items = demoData[currentCategory] || [];
-      if(currentCategory === "Blacklist") return items;
-      if(currentFilterStatus === "All") return items;
-      return items.filter(item => item.status === currentFilterStatus);
+      return items.filter((item) => {
+        const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
+        const folderMatches = currentFilterFolder === "All" || getItemFolder(item) === currentFilterFolder;
+        return statusMatches && folderMatches;
+      });
     }
 
     function getItemById(category, id){
@@ -1217,6 +1495,7 @@
       creator = "",
       work_key = "",
       canonical_key = "",
+      folder = "",
       description_ru = "",
       description_en = ""
     }){
@@ -1231,7 +1510,8 @@
         description_en: description_en || "",
         creator: creator || "",
         work_key: work_key || "",
-        canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase()
+        canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase(),
+        folder: folder || ""
       };
     }
 
@@ -1263,6 +1543,13 @@
       }
     }
 
+    async function applyFolderAssignmentsToItems(category){
+      const assignments = await getFolderAssignments();
+      (demoData[category] || []).forEach((item) => {
+        item.folder = assignments[getItemStorageKey({ ...item, category })] || item.folder || "";
+      });
+    }
+
     async function renderAndSyncCategory(category){
       if(currentCategory !== category){
         return;
@@ -1275,6 +1562,24 @@
       } catch (error) {
         console.error("Category sync error:", error);
       }
+    }
+
+    async function saveItemFolder(){
+      const item = getItemById(currentCategory, currentOpenItemId);
+      const select = document.getElementById("details-folder-select");
+      if(!item || !select){
+        return;
+      }
+
+      const assignments = await getFolderAssignments();
+      const folder = select.value || "";
+      assignments[getItemStorageKey({ ...item, category: currentCategory })] = folder;
+      await setFolderAssignments(assignments);
+
+      item.folder = folder;
+      renderShelf();
+      await openCardById(item.id);
+      alert(t().labels.folderSaved);
     }
 
     async function updateStatusInSupabase(itemId, status){
@@ -1440,10 +1745,12 @@
           description_en: item.description_en || "",
           creator: item.creator || "",
           work_key: item.work_key || "",
-          canonical_key: item.canonical_key || ""
+          canonical_key: item.canonical_key || "",
+          folder: ""
         });
       });
 
+      await applyFolderAssignmentsToItems(category);
       renderShelf();
       return true;
     }
@@ -1478,6 +1785,9 @@
         const creatorLine = item.creator
           ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
           : "";
+        const folderLine = getItemFolder(item)
+          ? `<div class="media-meta">${escapeHtml(t().labels.folder)}: ${escapeHtml(getItemFolder(item))}</div>`
+          : "";
 
         const actionsHtml = isPublicView
           ? `<div class="media-actions">
@@ -1496,6 +1806,7 @@
           <div class="media-info">
             <h3 class="media-title">${escapeHtml(item.title)}</h3>
             ${creatorLine}
+            ${folderLine}
             <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
             ${actionsHtml}
           </div>
@@ -1738,6 +2049,7 @@
       if(!item) return;
       currentStatusItemId = id;
       currentOpenItemId = id;
+      renderStatusOptions();
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
@@ -1748,6 +2060,7 @@
         return;
       }
       currentStatusItemId = item.id;
+      renderStatusOptions();
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
@@ -1955,6 +2268,8 @@
 
       const canonicalSection = document.getElementById("canonical-key-section");
       const canonicalInput = document.getElementById("canonical-key-input");
+      const folderSection = document.getElementById("details-folder-section");
+      const folderSelect = document.getElementById("details-folder-select");
 
       if(canonicalInput && canonicalSection){
         if(isPublicView){
@@ -1962,6 +2277,16 @@
         } else {
           canonicalSection.classList.remove("hidden");
           canonicalInput.value = item?.canonical_key || "";
+        }
+      }
+
+      if(folderSection && folderSelect){
+        if(isPublicView){
+          folderSection.classList.add("hidden");
+        } else {
+          folderSection.classList.remove("hidden");
+          await renderFolderFilterOptions();
+          folderSelect.value = item?.folder || "";
         }
       }
 
@@ -2111,6 +2436,7 @@
       document.getElementById("home-screen").classList.remove("hidden");
 
       setAuthorizedButtons(true);
+      refreshAccountCollectionsUI();
       safeLoadProfile("showAuthorizedUI");
     }
 
@@ -2121,6 +2447,7 @@
         document.getElementById("auth-screen").classList.remove("hidden");
         document.getElementById("home-screen").classList.add("hidden");
         setAuthorizedButtons(false);
+        refreshAccountCollectionsUI();
       } else {
         await showAuthorizedUI();
       }
@@ -2360,7 +2687,8 @@ async function changePassword(){
           description_en: item.description_en || "",
           creator: item.creator || "",
           work_key: item.work_key || "",
-          canonical_key: item.canonical_key || ""
+          canonical_key: item.canonical_key || "",
+          folder: ""
         });
       });
 
@@ -2444,14 +2772,48 @@ async function uploadAvatar(){
   const user = await getCurrentUser();
   if(!user) return;
 
-  const fileExt = file.name.split(".").pop();
-  const fileName = `${user.id}.${fileExt}`;
+  const thumbnailBlob = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const size = 160;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if(!ctx){
+          reject(new Error("Canvas is not supported"));
+          return;
+        }
+
+        const sourceSize = Math.min(img.width, img.height);
+        const sx = Math.max(0, (img.width - sourceSize) / 2);
+        const sy = Math.max(0, (img.height - sourceSize) / 2);
+        ctx.drawImage(img, sx, sy, sourceSize, sourceSize, 0, 0, size, size);
+        canvas.toBlob((blob) => {
+          if(!blob){
+            reject(new Error("Could not create avatar thumbnail"));
+            return;
+          }
+          resolve(blob);
+        }, "image/jpeg", 0.9);
+      };
+      img.onerror = () => reject(new Error("Could not read selected image"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Could not read selected image"));
+    reader.readAsDataURL(file);
+  });
+
+  const fileName = `${user.id}.jpg`;
 
   const { error: uploadError } = await supabaseClient
     .storage
     .from("avatars")
-    .upload(fileName, file, {
-      upsert:true
+    .upload(fileName, thumbnailBlob, {
+      upsert:true,
+      contentType:"image/jpeg"
     });
 
   if(uploadError){
@@ -2552,4 +2914,4 @@ async function removeAvatar(){
       }
     }
 
-    init();
+    init()
