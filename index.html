@@ -111,6 +111,11 @@
         <option value="Done">Done</option>
         <option value="Dropped">Dropped</option>
       </select>
+
+      <label for="folder-filter" id="folder-filter-label"></label>
+      <select id="folder-filter" class="select" onchange="setFolderFilter(this.value)">
+        <option value="All">All folders</option>
+      </select>
     </div>
 
     <div class="shelf" id="shelf"></div>
@@ -138,6 +143,14 @@
         <div class="section">
           <h3 id="description-label"></h3>
           <div class="muted" id="details-description"></div>
+        </div>
+
+        <div class="section" id="details-folder-section">
+          <h3 id="details-folder-title">Folder</h3>
+          <div class="folder-assignment-row">
+            <select id="details-folder-select" class="select"></select>
+            <button class="button" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+          </div>
         </div>
 
         <div class="section" id="canonical-key-section">
@@ -263,6 +276,27 @@
 
           <button id="profile-change-password-btn" class="button profile-password-btn" onclick="changePassword()">Change password</button>
         </section>
+
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-organization-title">Custom organization</h4>
+            <p class="small" id="profile-organization-hint">Create personal statuses and folders for your account.</p>
+          </div>
+
+          <label id="profile-custom-status-label" for="custom-status-input">Custom statuses</label>
+          <div class="profile-inline-form">
+            <input id="custom-status-input" class="input" type="text">
+            <button id="profile-add-status-btn" class="button" onclick="addCustomStatus()">Add status</button>
+          </div>
+          <div id="custom-status-list" class="chip-list"></div>
+
+          <label id="profile-custom-folder-label" for="custom-folder-input">Custom folders</label>
+          <div class="profile-inline-form">
+            <input id="custom-folder-input" class="input" type="text">
+            <button id="profile-add-folder-btn" class="button" onclick="addCustomFolder()">Add folder</button>
+          </div>
+          <div id="custom-folder-list" class="chip-list"></div>
+        </section>
       </div>
 
     </div>
@@ -284,11 +318,9 @@
     <div class="modal-box">
       <h3 id="status-modal-title"></h3>
 
+      <div class="modal-actions" id="status-buttons" style="flex-direction:column;align-items:stretch"></div>
+
       <div class="modal-actions" style="flex-direction:column;align-items:stretch">
-        <button class="button" onclick="setStatus('Planned')" id="status-planned"></button>
-        <button class="button" onclick="setStatus('In progress')" id="status-in-progress"></button>
-        <button class="button" onclick="setStatus('Done')" id="status-done"></button>
-        <button class="button" onclick="setStatus('Dropped')" id="status-dropped"></button>
         <button class="button" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
         <button class="button" onclick="closeStatusModal()" id="status-cancel"></button>
       </div>
