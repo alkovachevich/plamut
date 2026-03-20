@@ -498,8 +498,7 @@
     }
 
     async function openProfileModal(){
-      await loadProfile();
-
+        const modal = document.getElementById("profile-modal");
       const newPassword = document.getElementById("new-password");
       const confirmPassword = document.getElementById("confirm-password");
       const showPassword = document.getElementById("profile-show-password");
@@ -511,7 +510,13 @@
       if(newPassword) newPassword.type = "password";
       if(confirmPassword) confirmPassword.type = "password";
 
-      document.getElementById("profile-modal").classList.remove("hidden");
+      if(modal) modal.classList.remove("hidden");
+
+      try {
+        await loadProfile();
+      } catch (error) {
+        console.error("Profile modal open error:", error);
+      }
     }
 
     function closeProfileModal(){
@@ -1999,7 +2004,11 @@
       if(loginBtn) loginBtn.classList.add("hidden");
       if(profileBtn) profileBtn.classList.remove("hidden");
 
-      await loadProfile();
+     try {
+        await loadProfile();
+      } catch (error) {
+        console.error("Authorized UI profile sync error:", error);
+      }
     }
 
     async function checkAuth(){
