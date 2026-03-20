@@ -26,12 +26,36 @@
         },
         profile: {
           title: "Profile",
+                 subtitle: "Manage your account settings, privacy, avatar and password.",
+          avatarTitle: "Avatar",
+          avatarHint: "Upload a profile image so your account is easier to recognize.",
+          accountTitle: "Account",
+          usernameLabel: "Username",
           username: "Username",
+          displayNameLabel: "Display name",
           displayName: "Display name",
+          privacyTitle: "Privacy",
+          privacyHint: "Control whether other users can open your public library page.",
           publicLibrary: "Public library",
+          securityTitle: "Security",
+          securityHint: "Change your password and save it securely for future sign-ins.",
+          newPassword: "New password",
+          confirmPassword: "Confirm password",
+          showPassword: "Show password",
+          changePassword: "Change password",
+          uploadAvatar: "Upload avatar",
+          removeAvatar: "Remove avatar",
+          logout: "Logout",
           close: "Close",
           save: "Save Profile",
-          saved: "Profile saved"
+          saved: "Profile saved",
+          passwordSaved: "Password updated",
+          passwordRequired: "Enter a new password",
+          passwordTooShort: "Password must be at least 6 characters",
+          passwordMismatch: "Passwords do not match",
+          avatarSelectFirst: "Select an image first",
+          avatarUpdated: "Avatar updated",
+          avatarRemoved: "Avatar removed"
         },
         categories: {
           Books: "📚 Books",
@@ -135,12 +159,36 @@
         },
         profile: {
           title: "Профиль",
+            subtitle: "Управляйте настройками аккаунта, приватностью, аватаром и паролем.",
+          avatarTitle: "Аватар",
+          avatarHint: "Загрузите изображение профиля, чтобы аккаунт было проще узнать.",
+          accountTitle: "Аккаунт",
+          usernameLabel: "Username",
           username: "Username",
+          displayNameLabel: "Отображаемое имя",
           displayName: "Отображаемое имя",
+          privacyTitle: "Приватность",
+          privacyHint: "Управляйте тем, могут ли другие пользователи открывать вашу публичную библиотеку.",
           publicLibrary: "Публичная библиотека",
+          securityTitle: "Безопасность",
+          securityHint: "Измените пароль и сохраните его для следующих входов.",
+          newPassword: "Новый пароль",
+          confirmPassword: "Подтвердите пароль",
+          showPassword: "Показать пароль",
+          changePassword: "Изменить пароль",
+          uploadAvatar: "Загрузить аватар",
+          removeAvatar: "Удалить аватар",
+          logout: "Выйти",
           close: "Закрыть",
           save: "Сохранить профиль",
-          saved: "Профиль сохранён"
+          saved: "Профиль сохранён",
+          passwordSaved: "Пароль обновлён",
+          passwordRequired: "Введите новый пароль",
+          passwordTooShort: "Пароль должен содержать минимум 6 символов",
+          passwordMismatch: "Пароли не совпадают",
+          avatarSelectFirst: "Сначала выберите изображение",
+          avatarUpdated: "Аватар обновлён",
+          avatarRemoved: "Аватар удалён"
         },
         categories: {
           Books: "📚 Книги",
@@ -332,14 +380,32 @@
       document.querySelector("#canonical-key-section .button").textContent = t().buttons.save;
 
       document.getElementById("profile-title").textContent = t().profile.title;
+          document.getElementById("profile-subtitle").textContent = t().profile.subtitle;
+      document.getElementById("profile-avatar-title").textContent = t().profile.avatarTitle;
+      document.getElementById("profile-avatar-hint").textContent = t().profile.avatarHint;
+      document.getElementById("profile-account-title").textContent = t().profile.accountTitle;
+      document.getElementById("profile-username-label").textContent = t().profile.usernameLabel;
       document.getElementById("profile-username").placeholder = t().profile.username;
+      document.getElementById("profile-display-name-label").textContent = t().profile.displayNameLabel;
       document.getElementById("profile-display-name").placeholder = t().profile.displayName;
+      document.getElementById("profile-privacy-title").textContent = t().profile.privacyTitle;
+      document.getElementById("profile-privacy-hint").textContent = t().profile.privacyHint;
       document.getElementById("profile-public-label").textContent = t().profile.publicLibrary;
+      document.getElementById("profile-security-title").textContent = t().profile.securityTitle;
+      document.getElementById("profile-security-hint").textContent = t().profile.securityHint;
+      document.getElementById("profile-new-password-label").textContent = t().profile.newPassword;
+      document.getElementById("new-password").placeholder = t().profile.newPassword;
+      document.getElementById("profile-confirm-password-label").textContent = t().profile.confirmPassword;
+      document.getElementById("confirm-password").placeholder = t().profile.confirmPassword;
+      document.getElementById("profile-show-password-label").textContent = t().profile.showPassword;
+      document.getElementById("profile-change-password-btn").textContent = t().profile.changePassword;
+      document.getElementById("profile-upload-avatar-btn").textContent = t().profile.uploadAvatar;
+      document.getElementById("profile-remove-avatar-btn").textContent = t().profile.removeAvatar;
+      document.getElementById("profile-logout-btn").textContent = t().profile.logout;
       document.getElementById("profile-close-btn").textContent = t().profile.close;
       document.getElementById("profile-save-btn").textContent = t().profile.save;
 
       document.getElementById("login-top-btn").textContent = t().topbar.login;
-      document.getElementById("logout-top-btn").textContent = t().topbar.logout;
       document.getElementById("profile-btn").textContent = t().topbar.profile;
       document.getElementById("share-library-btn").textContent = t().topbar.shareLibrary;
 
@@ -432,19 +498,21 @@
     }
 
     async function openProfileModal(){
-  await loadProfile();
+      await loadProfile();
 
-  const newPassword = document.getElementById("new-password");
-  const confirmPassword = document.getElementById("confirm-password");
+      const newPassword = document.getElementById("new-password");
+      const confirmPassword = document.getElementById("confirm-password");
+      const showPassword = document.getElementById("profile-show-password");
 
-  if(newPassword) newPassword.value = "";
-  if(confirmPassword) confirmPassword.value = "";
+      if(newPassword) newPassword.value = "";
+      if(confirmPassword) confirmPassword.value = "";
+      if(showPassword) showPassword.checked = false;
 
-  if(newPassword) newPassword.type = "password";
-  if(confirmPassword) confirmPassword.type = "password";
+      if(newPassword) newPassword.type = "password";
+      if(confirmPassword) confirmPassword.type = "password";
 
-  document.getElementById("profile-modal").classList.remove("hidden");
-}
+      document.getElementById("profile-modal").classList.remove("hidden");
+    }
 
     function closeProfileModal(){
       document.getElementById("profile-modal").classList.add("hidden");
@@ -1911,31 +1979,33 @@
         alert(error.message);
         return;
       }
+        
+   await showAuthorizedUI();
+    }
 
+    async function logout(){
+      closeProfileModal();
+      await supabaseClient.auth.signOut();
+      location.reload();
+    }
+
+    async function showAuthorizedUI(){
       document.getElementById("auth-screen").classList.add("hidden");
       document.getElementById("home-screen").classList.remove("hidden");
 
       const loginBtn = document.getElementById("login-top-btn");
-      const logoutBtn = document.getElementById("logout-top-btn");
       const profileBtn = document.getElementById("profile-btn");
 
       if(loginBtn) loginBtn.classList.add("hidden");
-      if(logoutBtn) logoutBtn.classList.remove("hidden");
       if(profileBtn) profileBtn.classList.remove("hidden");
 
       await loadProfile();
-    }
-
-    async function logout(){
-      await supabaseClient.auth.signOut();
-      location.reload();
     }
 
     async function checkAuth(){
       const user = await getCurrentUser();
 
       const loginBtn = document.getElementById("login-top-btn");
-      const logoutBtn = document.getElementById("logout-top-btn");
       const profileBtn = document.getElementById("profile-btn");
 
       if(!user){
@@ -1943,17 +2013,9 @@
         document.getElementById("home-screen").classList.add("hidden");
 
         if(loginBtn) loginBtn.classList.remove("hidden");
-        if(logoutBtn) logoutBtn.classList.add("hidden");
         if(profileBtn) profileBtn.classList.add("hidden");
       } else {
-        document.getElementById("auth-screen").classList.add("hidden");
-        document.getElementById("home-screen").classList.remove("hidden");
-
-        if(loginBtn) loginBtn.classList.add("hidden");
-        if(logoutBtn) logoutBtn.classList.remove("hidden");
-        if(profileBtn) profileBtn.classList.remove("hidden");
-
-        await loadProfile();
+              await showAuthorizedUI();
       }
     }
 
@@ -1970,42 +2032,35 @@ function setAvatarPreview(url){
   }
 }
 
-function updateAvatar(){
-  const input = document.getElementById("avatar-url");
-  if(!input) return;
-
-  const url = input.value.trim();
-  setAvatarPreview(url);
-}
-
 function togglePasswordVisibility(){
   const newPassword = document.getElementById("new-password");
   const confirmPassword = document.getElementById("confirm-password");
+  const showPassword = document.getElementById("profile-show-password");
 
-  if(!newPassword || !confirmPassword) return;
+  if(!newPassword || !confirmPassword || !showPassword) return;
 
-  const shouldShow = newPassword.type === "password";
+  const nextType = showPassword.checked ? "text" : "password";
 
-  newPassword.type = shouldShow ? "text" : "password";
-  confirmPassword.type = shouldShow ? "text" : "password";
-}
+  newPassword.type = nextType;
+  confirmPassword.type = nextType;
+    }
 
 async function changePassword(){
   const newPassword = document.getElementById("new-password")?.value || "";
   const confirmPassword = document.getElementById("confirm-password")?.value || "";
 
   if(!newPassword.trim()){
-    alert("Enter new password");
+      alert(t().profile.passwordRequired);
     return;
   }
 
   if(newPassword.length < 6){
-    alert("Password must be at least 6 characters");
+    alert(t().profile.passwordTooShort);
     return;
   }
 
   if(newPassword !== confirmPassword){
-    alert("Passwords do not match");
+    alert(t().profile.passwordMismatch);
     return;
   }
 
@@ -2020,15 +2075,15 @@ async function changePassword(){
 
   document.getElementById("new-password").value = "";
   document.getElementById("confirm-password").value = "";
-
-  alert("Password updated");
+  document.getElementById("profile-show-password").checked = false;
+  togglePasswordVisibility();
+  alert(t().profile.passwordSaved);
 }
 
     async function saveProfile(){
   const username = document.getElementById("profile-username").value.trim();
   const displayName = document.getElementById("profile-display-name").value.trim();
   const isPublic = document.getElementById("profile-public").checked;
-  const avatarUrl = document.getElementById("avatar-url").value.trim();
 
   const user = await getCurrentUser();
   if(!user){
@@ -2042,8 +2097,7 @@ async function changePassword(){
       id: user.id,
       username: username || null,
       display_name: displayName || null,
-      is_public: isPublic,
-      avatar_url: avatarUrl || null
+     is_public: isPublic
     });
 
   if(error){
@@ -2051,7 +2105,7 @@ async function changePassword(){
     return;
   }
 
-  setAvatarPreview(avatarUrl);
+   await loadProfile();
   closeProfileModal();
   alert(t().profile.saved);
 }
@@ -2059,6 +2113,10 @@ async function changePassword(){
     async function loadProfile(){
   const user = await getCurrentUser();
   if(!user) return;
+        
+const usernameInput = document.getElementById("profile-username");
+  const displayNameInput = document.getElementById("profile-display-name");
+  const publicInput = document.getElementById("profile-public");
 
   const { data, error } = await supabaseClient
     .from("profiles")
@@ -2067,19 +2125,16 @@ async function changePassword(){
     .maybeSingle();
 
   if(error || !data){
+       if(usernameInput) usernameInput.value = "";
+    if(displayNameInput) displayNameInput.value = "";
+    if(publicInput) publicInput.checked = true;
     setAvatarPreview("");
     return;
   }
 
-  const usernameInput = document.getElementById("profile-username");
-  const displayNameInput = document.getElementById("profile-display-name");
-  const publicInput = document.getElementById("profile-public");
-  const avatarInput = document.getElementById("avatar-url");
-
   if(usernameInput) usernameInput.value = data.username || "";
   if(displayNameInput) displayNameInput.value = data.display_name || "";
   if(publicInput) publicInput.checked = data.is_public !== false;
-  if(avatarInput) avatarInput.value = data.avatar_url || "";
 
   setAvatarPreview(data.avatar_url || "");
 }
@@ -2260,10 +2315,10 @@ async function changePassword(){
 async function uploadAvatar(){
 
   const fileInput = document.getElementById("avatar-file");
-  const file = fileInput.files[0];
+  const file = fileInput?.files?.[0];
 
   if(!file){
-    alert("Select image first");
+    alert(t().profile.avatarSelectFirst);
     return;
   }
 
@@ -2294,10 +2349,10 @@ async function uploadAvatar(){
 
   const { error } = await supabaseClient
     .from("profiles")
-    .update({
+    .upsert({
+      id: user.id,
       avatar_url: avatarUrl
-    })
-    .eq("id", user.id);
+    });
 
   if(error){
     alert(error.message);
@@ -2305,7 +2360,9 @@ async function uploadAvatar(){
   }
 
   setAvatarPreview(avatarUrl);
-
+if(fileInput) fileInput.value = "";
+  alert(t().profile.avatarUpdated);
+    
 }
 
 async function removeAvatar(){
@@ -2315,10 +2372,10 @@ async function removeAvatar(){
 
   const { error } = await supabaseClient
     .from("profiles")
-    .update({
+     .upsert({
+      id: user.id,
       avatar_url: null
-    })
-    .eq("id", user.id);
+    });
 
   if(error){
     alert(error.message);
@@ -2326,7 +2383,10 @@ async function removeAvatar(){
   }
 
   setAvatarPreview("");
-
+const fileInput = document.getElementById("avatar-file");
+  if(fileInput) fileInput.value = "";
+  alert(t().profile.avatarRemoved);
+    
 }
 
     function showRuntimeError(message){
@@ -2353,7 +2413,6 @@ async function removeAvatar(){
 
       supabaseClient.auth.onAuthStateChange(async (_event, session) => {
         const loginBtn = document.getElementById("login-top-btn");
-        const logoutBtn = document.getElementById("logout-top-btn");
         const profileBtn = document.getElementById("profile-btn");
 
         if(session?.user){
@@ -2363,7 +2422,6 @@ async function removeAvatar(){
           document.getElementById("auth-screen").classList.remove("hidden");
 
           if(loginBtn) loginBtn.classList.remove("hidden");
-          if(logoutBtn) logoutBtn.classList.add("hidden");
           if(profileBtn) profileBtn.classList.add("hidden");
         }
       });
