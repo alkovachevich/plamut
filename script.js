@@ -1,4 +1,4 @@
-    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+ const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
     const TMDB_API_KEY = "fc8eab333882a74fe8c8a633e4676d98";
@@ -26,7 +26,7 @@
         },
         profile: {
           title: "Profile",
-                 subtitle: "Manage your account settings, privacy, avatar and password.",
+          subtitle: "Manage your account settings, privacy, avatar and password.",
           avatarTitle: "Avatar",
           avatarHint: "Upload a profile image so your account is easier to recognize.",
           accountTitle: "Account",
@@ -159,7 +159,7 @@
         },
         profile: {
           title: "Профиль",
-            subtitle: "Управляйте настройками аккаунта, приватностью, аватаром и паролем.",
+          subtitle: "Управляйте настройками аккаунта, приватностью, аватаром и паролем.",
           avatarTitle: "Аватар",
           avatarHint: "Загрузите изображение профиля, чтобы аккаунт было проще узнать.",
           accountTitle: "Аккаунт",
@@ -380,7 +380,7 @@
       document.querySelector("#canonical-key-section .button").textContent = t().buttons.save;
 
       document.getElementById("profile-title").textContent = t().profile.title;
-          document.getElementById("profile-subtitle").textContent = t().profile.subtitle;
+      document.getElementById("profile-subtitle").textContent = t().profile.subtitle;
       document.getElementById("profile-avatar-title").textContent = t().profile.avatarTitle;
       document.getElementById("profile-avatar-hint").textContent = t().profile.avatarHint;
       document.getElementById("profile-account-title").textContent = t().profile.accountTitle;
@@ -497,8 +497,7 @@
       document.getElementById("manual-modal").classList.add("hidden");
     }
 
-    async function openProfileModal(){
-        const modal = document.getElementById("profile-modal");
+    function resetProfileSecurityFields(){
       const newPassword = document.getElementById("new-password");
       const confirmPassword = document.getElementById("confirm-password");
       const showPassword = document.getElementById("profile-show-password");
@@ -509,14 +508,22 @@
 
       if(newPassword) newPassword.type = "password";
       if(confirmPassword) confirmPassword.type = "password";
+    }
+
+    function safeLoadProfile(context = "profile"){
+      return loadProfile().catch((error) => {
+        console.error(`Profile load error (${context}):`, error);
+      });
+    }
+
+    function openProfileModal(){
+      const modal = document.getElementById("profile-modal");
+
+      resetProfileSecurityFields();
 
       if(modal) modal.classList.remove("hidden");
 
-      try {
-        await loadProfile();
-      } catch (error) {
-        console.error("Profile modal open error:", error);
-      }
+      safeLoadProfile("openProfileModal");
     }
 
     function closeProfileModal(){
@@ -1201,6 +1208,75 @@
       return true;
     }
 
+    function buildLocalShelfItem({
+      title,
+      category,
+      status = "Planned",
+      cover = "",
+      description = "",
+      creator = "",
+      work_key = "",
+      canonical_key = "",
+      description_ru = "",
+      description_en = ""
+    }){
+      return {
+        id: -Date.now() - Math.floor(Math.random() * 1000),
+        title: title || "",
+        category: category || "",
+        status: status || "Planned",
+        cover: cover || "",
+        description: description || "",
+        description_ru: description_ru || "",
+        description_en: description_en || "",
+        creator: creator || "",
+        work_key: work_key || "",
+        canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase()
+      };
+    }
+
+    function insertLocalShelfItem(category, item){
+      if(!category || !item){
+        return;
+      }
+
+      if(!demoData[category]){
+        demoData[category] = [];
+      }
+
+      const dedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        normalizeSpaces(item.title || "").toLowerCase();
+
+      const alreadyExists = demoData[category].some((row) => {
+        const rowKey =
+          row.canonical_key ||
+          row.work_key ||
+          normalizeSpaces(row.title || "").toLowerCase();
+
+        return rowKey === dedupeKey;
+      });
+
+      if(!alreadyExists){
+        demoData[category].unshift(item);
+      }
+    }
+
+    async function renderAndSyncCategory(category){
+      if(currentCategory !== category){
+        return;
+      }
+
+      renderShelf();
+
+      try {
+        await loadCategoryFromSupabase(category);
+      } catch (error) {
+        console.error("Category sync error:", error);
+      }
+    }
+
     async function updateStatusInSupabase(itemId, status){
       const user = await getCurrentUser();
       if(!user || !itemId) return false;
@@ -1323,7 +1399,7 @@
       if(!user){
         demoData[category] = [];
         renderShelf();
-        return;
+        return false;
       }
 
       const { data, error } = await supabaseClient
@@ -1335,9 +1411,8 @@
 
       if(error){
         console.error("Supabase load error:", error);
-        demoData[category] = [];
         renderShelf();
-        return;
+        return false;
       }
 
       demoData[category] = [];
@@ -1370,6 +1445,7 @@
       });
 
       renderShelf();
+      return true;
     }
 
     function renderShelf(){
@@ -1582,9 +1658,20 @@
 
       if(!saved) return;
 
-      if(currentCategory === targetCategory){
-        await loadCategoryFromSupabase(targetCategory);
-      }
+      insertLocalShelfItem(targetCategory, buildLocalShelfItem({
+        title: item.title,
+        category: targetCategory,
+        status: "Planned",
+        cover: item.cover || "",
+        description: finalDescription || "",
+        creator: item.creator || "",
+        work_key: item.work_key || "",
+        canonical_key: item.canonical_key || "",
+        description_ru: finalDescriptionRu || "",
+        description_en: finalDescriptionEn || ""
+      }));
+
+      await renderAndSyncCategory(targetCategory);
     }
 
     async function saveManualItem(){
@@ -1629,9 +1716,21 @@
 
       if(!saved) return;
 
+      insertLocalShelfItem(currentCategory, buildLocalShelfItem({
+        title: title,
+        category: currentCategory,
+        status: "Planned",
+        cover: cover,
+        description: description,
+        creator: creator,
+        canonical_key: canonicalKey,
+        description_ru: translated.description_ru,
+        description_en: translated.description_en
+      }));
+
       closeManualModal();
       closeAddModal();
-      await loadCategoryFromSupabase(currentCategory);
+      await renderAndSyncCategory(currentCategory);
     }
 
     function changeStatusById(id){
@@ -1984,8 +2083,8 @@
         alert(error.message);
         return;
       }
-        
-   await showAuthorizedUI();
+
+      await showAuthorizedUI();
     }
 
     async function logout(){
@@ -1994,37 +2093,36 @@
       location.reload();
     }
 
+    function setAuthorizedButtons(isAuthorized){
+      const loginBtn = document.getElementById("login-top-btn");
+      const profileBtn = document.getElementById("profile-btn");
+
+      if(loginBtn){
+        loginBtn.classList.toggle("hidden", isAuthorized);
+      }
+
+      if(profileBtn){
+        profileBtn.classList.toggle("hidden", !isAuthorized);
+      }
+    }
+
     async function showAuthorizedUI(){
       document.getElementById("auth-screen").classList.add("hidden");
       document.getElementById("home-screen").classList.remove("hidden");
 
-      const loginBtn = document.getElementById("login-top-btn");
-      const profileBtn = document.getElementById("profile-btn");
-
-      if(loginBtn) loginBtn.classList.add("hidden");
-      if(profileBtn) profileBtn.classList.remove("hidden");
-
-     try {
-        await loadProfile();
-      } catch (error) {
-        console.error("Authorized UI profile sync error:", error);
-      }
+      setAuthorizedButtons(true);
+      safeLoadProfile("showAuthorizedUI");
     }
 
     async function checkAuth(){
       const user = await getCurrentUser();
 
-      const loginBtn = document.getElementById("login-top-btn");
-      const profileBtn = document.getElementById("profile-btn");
-
       if(!user){
         document.getElementById("auth-screen").classList.remove("hidden");
         document.getElementById("home-screen").classList.add("hidden");
-
-        if(loginBtn) loginBtn.classList.remove("hidden");
-        if(profileBtn) profileBtn.classList.add("hidden");
+        setAuthorizedButtons(false);
       } else {
-              await showAuthorizedUI();
+        await showAuthorizedUI();
       }
     }
 
@@ -2052,14 +2150,14 @@ function togglePasswordVisibility(){
 
   newPassword.type = nextType;
   confirmPassword.type = nextType;
-    }
+}
 
 async function changePassword(){
   const newPassword = document.getElementById("new-password")?.value || "";
   const confirmPassword = document.getElementById("confirm-password")?.value || "";
 
   if(!newPassword.trim()){
-      alert(t().profile.passwordRequired);
+    alert(t().profile.passwordRequired);
     return;
   }
 
@@ -2106,7 +2204,7 @@ async function changePassword(){
       id: user.id,
       username: username || null,
       display_name: displayName || null,
-     is_public: isPublic
+      is_public: isPublic
     });
 
   if(error){
@@ -2114,38 +2212,50 @@ async function changePassword(){
     return;
   }
 
-   await loadProfile();
+  await loadProfile();
   closeProfileModal();
   alert(t().profile.saved);
 }
 
     async function loadProfile(){
-  const user = await getCurrentUser();
-  if(!user) return;
-        
-const usernameInput = document.getElementById("profile-username");
+  const usernameInput = document.getElementById("profile-username");
   const displayNameInput = document.getElementById("profile-display-name");
   const publicInput = document.getElementById("profile-public");
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if(error || !data){
-       if(usernameInput) usernameInput.value = "";
+  const resetProfileFields = () => {
+    if(usernameInput) usernameInput.value = "";
     if(displayNameInput) displayNameInput.value = "";
     if(publicInput) publicInput.checked = true;
     setAvatarPreview("");
-    return;
+  };
+
+  try {
+    const user = await getCurrentUser();
+    if(!user){
+      resetProfileFields();
+      return;
+    }
+
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if(error || !data){
+      resetProfileFields();
+      return;
+    }
+
+    if(usernameInput) usernameInput.value = data.username || "";
+    if(displayNameInput) displayNameInput.value = data.display_name || "";
+    if(publicInput) publicInput.checked = data.is_public !== false;
+
+    setAvatarPreview(data.avatar_url || "");
+  } catch (error) {
+    console.error("Load profile error:", error);
+    resetProfileFields();
   }
-
-  if(usernameInput) usernameInput.value = data.username || "";
-  if(displayNameInput) displayNameInput.value = data.display_name || "";
-  if(publicInput) publicInput.checked = data.is_public !== false;
-
-  setAvatarPreview(data.avatar_url || "");
 }
 
     function openPublicCategory(name, profileName = "Library"){
@@ -2369,9 +2479,9 @@ async function uploadAvatar(){
   }
 
   setAvatarPreview(avatarUrl);
-if(fileInput) fileInput.value = "";
+  if(fileInput) fileInput.value = "";
   alert(t().profile.avatarUpdated);
-    
+
 }
 
 async function removeAvatar(){
@@ -2381,7 +2491,7 @@ async function removeAvatar(){
 
   const { error } = await supabaseClient
     .from("profiles")
-     .upsert({
+    .upsert({
       id: user.id,
       avatar_url: null
     });
@@ -2392,10 +2502,10 @@ async function removeAvatar(){
   }
 
   setAvatarPreview("");
-const fileInput = document.getElementById("avatar-file");
+  const fileInput = document.getElementById("avatar-file");
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarRemoved);
-    
+
 }
 
     function showRuntimeError(message){
