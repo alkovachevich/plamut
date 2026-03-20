@@ -36,7 +36,6 @@
     <div class="header-user-actions">
       <button id="profile-btn" class="button hidden" onclick="openProfileModal()">Profile</button>
       <button id="login-top-btn" class="button hidden" onclick="showAuthScreen()">Login</button>
-      <button id="logout-top-btn" class="button hidden" onclick="logout()">Logout</button>
     </div>
   </div>
 </header>
@@ -197,63 +196,84 @@
   <div class="modal-box profile-box">
 
     <h3 id="profile-title">Profile</h3>
-
+   <p class="small profile-subtitle" id="profile-subtitle">Manage your account settings, privacy, avatar and password.</p>
+    
     <div class="profile-layout">
 
       <div class="profile-avatar-section">
-
+     <div class="profile-section-heading">
+          <h4 id="profile-avatar-title">Avatar</h4>
+          <p class="small" id="profile-avatar-hint">Upload a profile image so your account is easier to recognize.</p>
+        </div>
+        
         <div class="avatar-preview">
           <img id="avatar-img" src="" alt="avatar">
         </div>
 
         <input type="file" id="avatar-file" accept="image/*">
 
-<button class="button" onclick="uploadAvatar()">Upload avatar</button>
+  <button id="profile-upload-avatar-btn" class="button" onclick="uploadAvatar()">Upload avatar</button>
 
-<button class="button" onclick="removeAvatar()">Remove avatar</button>
-
+        <button id="profile-remove-avatar-btn" class="button" onclick="removeAvatar()">Remove avatar</button>
+        
       </div>
 
 
       <div class="profile-info-section">
+     <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-account-title">Account</h4>
+          </div>
 
-        <label>Username</label>
-        <input id="profile-username" class="input">
+          <label id="profile-username-label" for="profile-username">Username</label>
+          <input id="profile-username" class="input">
 
-        <label>Display name</label>
-        <input id="profile-display-name" class="input">
+          <label id="profile-display-name-label" for="profile-display-name">Display name</label>
+          <input id="profile-display-name" class="input">
+        </section>
 
-        <label class="profile-checkbox">
-          <input type="checkbox" id="profile-public">
-          <span id="profile-public-label">Public library</span>
-        </label>
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-privacy-title">Privacy</h4>
+            <p class="small" id="profile-privacy-hint">Control whether other users can open your public library page.</p>
+          </div>
 
-        <hr class="profile-divider">
+          <label class="profile-checkbox">
+            <input type="checkbox" id="profile-public">
+            <span id="profile-public-label">Public library</span>
+          </label>
+        </section>
 
-        <h4>Security</h4>
+        <section class="profile-section-card">
+          <div class="profile-section-heading">
+            <h4 id="profile-security-title">Security</h4>
+            <p class="small" id="profile-security-hint">Change your password and save it securely for future sign-ins.</p>
+          </div>
 
-        <label>New password</label>
-        <input id="new-password" class="input" type="password">
+          <label id="profile-new-password-label" for="new-password">New password</label>
+          <input id="new-password" class="input" type="password">
 
-        <label>Confirm password</label>
-        <input id="confirm-password" class="input" type="password">
+          <label id="profile-confirm-password-label" for="confirm-password">Confirm password</label>
+          <input id="confirm-password" class="input" type="password">
 
-        <label class="profile-checkbox">
-          <input type="checkbox" onclick="togglePasswordVisibility()">
-          Show password
-        </label>
+          <label class="profile-checkbox">
+            <input type="checkbox" id="profile-show-password" onclick="togglePasswordVisibility()">
+            <span id="profile-show-password-label">Show password</span>
+          </label>
 
+          <button id="profile-change-password-btn" class="button profile-password-btn" onclick="changePassword()">Change password</button>
+        </section>
       </div>
 
     </div>
 
     <div class="modal-actions">
 
-      <button class="button" onclick="closeProfileModal()">Close</button>
+       <button class="button" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
 
-      <button class="button" onclick="changePassword()">Change password</button>
+      <button class="button" onclick="logout()" id="profile-logout-btn">Logout</button>
 
-      <button class="button" onclick="saveProfile()">Save profile</button>
+      <button class="button" onclick="saveProfile()" id="profile-save-btn">Save profile</button>
 
     </div>
 
