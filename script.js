@@ -13,6 +13,7 @@
         subtitle: "Personal Library and Media Universe Tracker",
         auth: {
           loginTitle: "Plamut Login",
+          text: "Save books, movies, series, anime and manga in one personal library.",
           email: "Email",
           password: "Password",
           login: "Login",
@@ -22,7 +23,13 @@
           profile: "Profile",
           login: "Login",
           logout: "Logout",
-          shareLibrary: "Share Library"
+          shareLibrary: "Share Library",
+          interface: "Interface",
+          language: "Language",
+          theme: "Theme",
+          themeLight: "Light",
+          themeDark: "Dark",
+          themeSystem: "System"
         },
         profile: {
           title: "Profile",
@@ -161,12 +168,21 @@
           Anime: "Anime",
           Manga: "Manga",
           Blacklist: "Blacklist"
+        },
+        home: {
+          heroBadge: "Your personal universe",
+          libraryTitle: "Library",
+          libraryNote: "Choose a category"
+        },
+        brand: {
+          subtitle: "Media Tracker"
         }
       },
       ru: {
         subtitle: "Персональная библиотека и трекер медиа-вселенных",
         auth: {
           loginTitle: "Вход в Plamut",
+          text: "Сохраняйте книги, фильмы, сериалы, аниме и мангу в одной личной библиотеке.",
           email: "Почта",
           password: "Пароль",
           login: "Войти",
@@ -176,7 +192,13 @@
           profile: "Профиль",
           login: "Войти",
           logout: "Выйти",
-          shareLibrary: "Поделиться библиотекой"
+          shareLibrary: "Поделиться библиотекой",
+          interface: "Интерфейс",
+          language: "Язык",
+          theme: "Тема",
+          themeLight: "Светлая",
+          themeDark: "Тёмная",
+          themeSystem: "Системная"
         },
         profile: {
           title: "Профиль",
@@ -315,11 +337,20 @@
           Anime: "Аниме",
           Manga: "Манга",
           Blacklist: "Чёрный список"
+        },
+        home: {
+          heroBadge: "Ваша личная вселенная",
+          libraryTitle: "Библиотека",
+          libraryNote: "Выберите категорию"
+        },
+        brand: {
+          subtitle: "Трекер медиа"
         }
       }
     };
 
     let currentLanguage = localStorage.getItem("plamut_language") || "ru";
+    let currentThemeMode = localStorage.getItem("plamut_theme_mode") || "system";
     let currentCategory = null;
     let currentOpenItemId = null;
     let currentStatusItemId = null;
@@ -338,6 +369,104 @@
       Manga: [],
       Blacklist: []
     };
+
+    const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function getLanguageLabel(lang = currentLanguage){
+      return String(lang || "ru").toUpperCase();
+    }
+
+    function getThemeModeLabel(mode = currentThemeMode){
+      if(mode === "light") return t().topbar.themeLight;
+      if(mode === "dark") return t().topbar.themeDark;
+      return t().topbar.themeSystem;
+    }
+
+    function resolveThemeMode(mode = currentThemeMode){
+      if(mode === "system"){
+        return systemThemeMedia.matches ? "dark" : "light";
+      }
+      return mode === "light" ? "light" : "dark";
+    }
+
+    function applyThemeMode(){
+      const resolvedTheme = resolveThemeMode();
+      document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.style.colorScheme = resolvedTheme;
+      updatePreferenceControls();
+    }
+
+    function setThemeMode(mode){
+      currentThemeMode = ["light", "dark", "system"].includes(mode) ? mode : "system";
+      localStorage.setItem("plamut_theme_mode", currentThemeMode);
+      applyThemeMode();
+    }
+
+    function updatePreferenceControls(){
+      const preferencesBtn = document.getElementById("preferences-btn");
+      const preferencesLabel = document.getElementById("preferences-btn-label");
+      const preferencesTitle = document.getElementById("preferences-title");
+      const languageTitle = document.getElementById("preferences-language-title");
+      const themeTitle = document.getElementById("preferences-theme-title");
+      const profileBtn = document.getElementById("profile-btn");
+
+      if(preferencesLabel){
+        preferencesLabel.textContent = getLanguageLabel();
+      }
+
+      if(preferencesBtn){
+        const titleText = `${t().topbar.interface}: ${getLanguageLabel()} · ${getThemeModeLabel()}`;
+        preferencesBtn.title = titleText;
+        preferencesBtn.setAttribute("aria-label", titleText);
+      }
+
+      if(preferencesTitle) preferencesTitle.textContent = t().topbar.interface;
+      if(languageTitle) languageTitle.textContent = t().topbar.language;
+      if(themeTitle) themeTitle.textContent = t().topbar.theme;
+
+      [["lang-option-ru", "ru"], ["lang-option-en", "en"]].forEach(([id, value]) => {
+        const button = document.getElementById(id);
+        if(!button) return;
+        const isActive = currentLanguage === value;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+
+      [["theme-option-light", "light", t().topbar.themeLight], ["theme-option-dark", "dark", t().topbar.themeDark], ["theme-option-system", "system", t().topbar.themeSystem]].forEach(([id, value, label]) => {
+        const button = document.getElementById(id);
+        if(!button) return;
+        const isActive = currentThemeMode === value;
+        button.textContent = label;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+
+      if(profileBtn){
+        profileBtn.title = t().topbar.profile;
+        profileBtn.setAttribute("aria-label", t().topbar.profile);
+      }
+    }
+
+    function togglePreferencesPanel(force){
+      const panel = document.getElementById("preferences-panel");
+      const button = document.getElementById("preferences-btn");
+      if(!panel || !button) return;
+
+      const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+      panel.classList.toggle("hidden", !shouldOpen);
+      button.setAttribute("aria-expanded", String(shouldOpen));
+    }
+
+    function closePreferencesPanel(){
+      togglePreferencesPanel(false);
+    }
+
+    function getProfileInitials(displayName = "", username = ""){
+      const source = normalizeSpaces(displayName || username || "P");
+      const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
+      const initials = parts.map((part) => part.charAt(0).toUpperCase()).join("");
+      return initials || "P";
+    }
 
     function t() {
       return translations[currentLanguage];
@@ -422,7 +551,9 @@
       localStorage.setItem("plamut_language", lang);
       document.documentElement.lang = lang;
       applyTranslations();
+      updatePreferenceControls();
       rerenderCurrentScreen();
+      closePreferencesPanel();
     }
 
     function setStatusFilter(value){
@@ -476,6 +607,10 @@
       document.documentElement.lang = currentLanguage;
 
       document.getElementById("home-subtitle").textContent = t().subtitle;
+      document.getElementById("hero-badge").textContent = t().home.heroBadge;
+      document.getElementById("library-section-title").textContent = t().home.libraryTitle;
+      document.getElementById("library-section-note").textContent = t().home.libraryNote;
+      document.getElementById("brand-subtitle").textContent = t().brand.subtitle;
 
       document.getElementById("cat-books").textContent = t().categories.Books;
       document.getElementById("cat-movies").textContent = t().categories.Movies;
@@ -553,8 +688,8 @@
       document.getElementById("profile-save-btn").textContent = t().profile.save;
 
       document.getElementById("login-top-btn").textContent = t().topbar.login;
-      document.getElementById("profile-btn").textContent = t().topbar.profile;
       document.getElementById("share-library-btn").textContent = t().topbar.shareLibrary;
+      document.getElementById("auth-text").textContent = t().auth.text;
 
       document.querySelector("#auth-screen h2").textContent = t().auth.loginTitle;
       document.getElementById("login-email").placeholder = t().auth.email;
@@ -577,6 +712,7 @@
       }
 
       refreshAccountCollectionsUI();
+      updatePreferenceControls();
     }
 
     function rerenderCurrentScreen() {
@@ -616,17 +752,20 @@
     }
 
     function goHome(){
+      closePreferencesPanel();
       isPublicView = false;
       hideAllScreens();
       document.getElementById("home-screen").classList.remove("hidden");
     }
 
     function backToCategory(){
+      closePreferencesPanel();
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
     }
 
     function openAddModal(){
+      closePreferencesPanel();
       document.getElementById("add-modal").classList.remove("hidden");
       document.getElementById("search-input").value = "";
       document.getElementById("search-results").innerHTML = "";
@@ -673,6 +812,7 @@
     function openProfileModal(){
       const modal = document.getElementById("profile-modal");
 
+      closePreferencesPanel();
       resetProfileSecurityFields();
 
       if(modal) modal.classList.remove("hidden");
@@ -773,6 +913,7 @@
     }
 
     function showAuthScreen(){
+      closePreferencesPanel();
       hideAllScreens();
       document.getElementById("auth-screen").classList.remove("hidden");
     }
@@ -1872,6 +2013,7 @@
     }
 
     async function openCategory(name){
+      closePreferencesPanel();
       isPublicView = false;
       currentCategory = name;
 
@@ -2504,9 +2646,14 @@
       if(profileBtn){
         profileBtn.classList.toggle("hidden", !isAuthorized);
       }
+
+      if(!isAuthorized){
+        setAvatarPreview("", "", "");
+      }
     }
 
     async function showAuthorizedUI(){
+      closePreferencesPanel();
       document.getElementById("auth-screen").classList.add("hidden");
       document.getElementById("home-screen").classList.remove("hidden");
 
@@ -2528,17 +2675,31 @@
       }
     }
 
-function setAvatarPreview(url){
-  const img = document.getElementById("avatar-img");
-  if(!img) return;
+function setAvatarPreview(url, displayName = "", username = ""){
+  const avatarImg = document.getElementById("avatar-img");
+  const avatarFallback = document.getElementById("avatar-fallback");
+  const headerAvatarImg = document.getElementById("header-avatar-img");
+  const headerAvatarFallback = document.getElementById("header-avatar-fallback");
+  const initials = getProfileInitials(displayName, username);
+  const hasUrl = Boolean(url && String(url).trim());
 
-  if(url && String(url).trim()){
-    img.src = url;
-    img.style.display = "block";
-  } else {
-    img.src = "https://via.placeholder.com/120x120?text=Avatar";
-    img.style.display = "block";
-  }
+  [avatarFallback, headerAvatarFallback].forEach((node) => {
+    if(node){
+      node.textContent = initials;
+      node.classList.toggle("hidden", hasUrl);
+    }
+  });
+
+  [avatarImg, headerAvatarImg].forEach((img) => {
+    if(!img) return;
+    if(hasUrl){
+      img.src = url;
+      img.classList.remove("hidden");
+    } else {
+      img.src = "";
+      img.classList.add("hidden");
+    }
+  });
 }
 
 function togglePasswordVisibility(){
@@ -2628,7 +2789,9 @@ async function changePassword(){
     if(usernameInput) usernameInput.value = "";
     if(displayNameInput) displayNameInput.value = "";
     if(publicInput) publicInput.checked = true;
-    setAvatarPreview("");
+    const displayName = document.getElementById("profile-display-name")?.value || "";
+  const username = document.getElementById("profile-username")?.value || "";
+  setAvatarPreview("", displayName, username);
   };
 
   try {
@@ -2653,7 +2816,7 @@ async function changePassword(){
     if(displayNameInput) displayNameInput.value = data.display_name || "";
     if(publicInput) publicInput.checked = data.is_public !== false;
 
-    setAvatarPreview(data.avatar_url || "");
+    setAvatarPreview(data.avatar_url || "", data.display_name || "", data.username || "");
   } catch (error) {
     console.error("Load profile error:", error);
     resetProfileFields();
@@ -2661,6 +2824,7 @@ async function changePassword(){
 }
 
     function openPublicCategory(name, profileName = "Library"){
+      closePreferencesPanel();
       if(!isPublicView){
         return;
       }
@@ -2925,7 +3089,9 @@ async function uploadAvatar(){
     return;
   }
 
-  setAvatarPreview(avatarUrl);
+  const displayName = document.getElementById("profile-display-name")?.value || "";
+  const username = document.getElementById("profile-username")?.value || "";
+  setAvatarPreview(avatarUrl, displayName, username);
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarUpdated);
 
@@ -2948,7 +3114,9 @@ async function removeAvatar(){
     return;
   }
 
-  setAvatarPreview("");
+  const displayName = document.getElementById("profile-display-name")?.value || "";
+  const username = document.getElementById("profile-username")?.value || "";
+  setAvatarPreview("", displayName, username);
   const fileInput = document.getElementById("avatar-file");
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarRemoved);
@@ -2965,7 +3133,28 @@ async function removeAvatar(){
     }
 
     async function init(){
-      applyTranslations();  
+      applyThemeMode();
+      applyTranslations();
+
+      systemThemeMedia.addEventListener("change", () => {
+        if(currentThemeMode === "system"){
+          applyThemeMode();
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        const panel = document.getElementById("preferences-panel");
+        const button = document.getElementById("preferences-btn");
+        if(!panel || panel.classList.contains("hidden")) return;
+        if(panel.contains(event.target) || button?.contains(event.target)) return;
+        closePreferencesPanel();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if(event.key === "Escape"){
+          closePreferencesPanel();
+        }
+      });
     
       window.addEventListener("error", (event) => {
         showRuntimeError(event?.message || "Unknown script error");
@@ -2984,8 +3173,10 @@ async function removeAvatar(){
         if(session?.user){
           await showAuthorizedUI();
         } else {
+          closePreferencesPanel();
           hideAllScreens();
           document.getElementById("auth-screen").classList.remove("hidden");
+          setAuthorizedButtons(false);
 
           if(loginBtn) loginBtn.classList.remove("hidden");
           if(profileBtn) profileBtn.classList.add("hidden");
