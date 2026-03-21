@@ -436,11 +436,18 @@
       if(!container) return;
 
       const statuses = await getAvailableStatuses();
-      container.innerHTML = statuses
-        .map((status) => `
-          <button class="button" onclick="setStatus(${JSON.stringify(status)})">${escapeHtml(translateStatus(status))}</button>
-        `)
-        .join("");
+      container.innerHTML = "";
+
+      statuses.forEach((status) => {
+        const button = document.createElement("button");
+        button.className = "button";
+        button.type = "button";
+        button.textContent = translateStatus(status);
+        button.addEventListener("click", () => {
+          setStatus(status);
+        });
+        container.appendChild(button);
+      });
     }
 
     async function renderFolderFilterOptions(){
