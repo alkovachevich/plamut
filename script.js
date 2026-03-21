@@ -376,7 +376,7 @@
         previewTitle: "Library preview",
         previewHint: "A read-only preview from this public library.",
         openLibrary: "Open library",
-        saveToMine: "Save to mine",
+        saveToMine: "Save to my library",
         savedToMine: "Library saved to your collection.",
         loginToSave: "Log in to save this library to your collection.",
         alreadySaved: "This library is already saved.",
@@ -428,7 +428,7 @@
         previewTitle: "Превью библиотеки",
         previewHint: "Read-only превью этой публичной библиотеки.",
         openLibrary: "Открыть библиотеку",
-        saveToMine: "Сохранить к себе",
+        saveToMine: "Сохранить в мою библиотеку",
         savedToMine: "Библиотека сохранена в вашу коллекцию.",
         loginToSave: "Войдите, чтобы сохранить эту библиотеку к себе.",
         alreadySaved: "Эта библиотека уже сохранена.",
@@ -590,13 +590,6 @@
 
     function normalizeSpaces(text){
       return String(text || "").replace(/\s+/g, " ").trim();
-    }
-
-    function generateShareToken(){
-      if(window.crypto?.randomUUID){
-        return window.crypto.randomUUID().replace(/-/g, "");
-      }
-      return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
     }
 
     function isShareEnabled(profile = {}){
@@ -3011,20 +3004,123 @@ async function fetchProfileByUserId(userId){
   return data || null;
 }
 
+function extractRpcToken(data){
+  if(!data) return "";
+  if(typeof data === "string") return data;
+  if(Array.isArray(data)){
+    return extractRpcToken(data[0]);
+  }
+  return data.public_share_token || data.token || data.p_token || data.share_token || "";
+}
+
+async function ensureProfileShareTokenRpc(){
+  const { data, error } = await supabaseClient.rpc("ensure_profile_share_token");
+  if(error){
+    console.error("ensure_profile_share_token error:", error);
+    throw error;
+  }
+  return extractRpcToken(data);
+}
+
+async function regenerateProfileShareTokenRpc(){
+  const { data, error } = await supabaseClient.rpc("regenerate_profile_share_token");
+  if(error){
+    console.error("regenerate_profile_share_token error:", error);
+    throw error;
+  }
+  return extractRpcToken(data);
+}
+
+function normalizePublicLibraryItem(item = {}){
+  const category = item.category || item.media_category || item.item_category || "Books";
+  const title = item.title || item.name || item.media_title || "";
+  return {
+    id: item.id || item.media_id || item.item_id || `${category}:${title}`,
+    title,
+    category,
+    status: item.status || item.media_status || "Planned",
+    cover_url: item.cover_url || item.cover || item.image_url || "",
+    description: item.description || item.media_description || "",
+    description_ru: item.description_ru || "",
+    description_en: item.description_en || "",
+    creator: item.creator || item.author || item.director || item.studio || "",
+    work_key: item.work_key || item.media_work_key || "",
+    canonical_key: item.canonical_key || item.media_canonical_key || ""
+  };
+}
+
+function normalizePublicProfileRpcPayload(data){
+  const rows = Array.isArray(data) ? data.filter(Boolean) : (data ? [data] : []);
+  if(rows.length === 0){
+    return { profile: null, items: [] };
+  }
+
+  const first = rows[0];
+  const nestedProfile = first.profile && typeof first.profile === "object" ? first.profile : null;
+  const profileSource = nestedProfile || first;
+  const profile = {
+    ...profileSource,
+    id: profileSource.id || profileSource.profile_id || profileSource.user_id || profileSource.owner_id || null,
+    username: profileSource.username || profileSource.profile_username || "",
+    display_name: profileSource.display_name || profileSource.profile_display_name || profileSource.public_card_title || "",
+    avatar_url: profileSource.avatar_url || profileSource.profile_avatar_url || "",
+    public_card_title: profileSource.public_card_title || profileSource.display_name || profileSource.username || "",
+    public_card_bio: profileSource.public_card_bio || profileSource.bio || profileSource.profile_bio || "",
+    public_share_enabled: typeof profileSource.public_share_enabled === "boolean"
+      ? profileSource.public_share_enabled
+      : profileSource.is_public !== false,
+    public_share_token: profileSource.public_share_token || profileSource.token || profileSource.p_token || activeShareToken || "",
+    public_library_mode: profileSource.public_library_mode || "preview"
+  };
+
+  const nestedItems =
+    (Array.isArray(first.library_items) && first.library_items) ||
+    (Array.isArray(first.items) && first.items) ||
+    (Array.isArray(first.media_items) && first.media_items) ||
+    (Array.isArray(first.library) && first.library) ||
+    [];
+
+  const items = nestedItems.length > 0
+    ? nestedItems.map(normalizePublicLibraryItem)
+    : rows
+        .filter((row) => row.title || row.name || row.media_title)
+        .map(normalizePublicLibraryItem);
+
+  return { profile, items };
+}
+
 async function ensureCurrentProfileData(){
   const user = await getCurrentUser();
   if(!user) return null;
 
-  const profile = await fetchProfileByUserId(user.id);
+  let profile = await fetchProfileByUserId(user.id);
+  if(!profile?.public_share_token){
+    try {
+      const ensuredToken = await ensureProfileShareTokenRpc();
+      profile = {
+        ...(profile || {}),
+        ...(await fetchProfileByUserId(user.id) || {}),
+        public_share_token: ensuredToken || profile?.public_share_token || ""
+      };
+    } catch (error) {
+      console.error("Ensure share token fallback error:", error);
+      profile = {
+        ...(profile || {}),
+        public_share_token: profile?.public_share_token || ""
+      };
+    }
+  }
+
   currentProfileData = profile
     ? {
         ...profile,
-        public_share_token: profile.public_share_token || generateShareToken()
+        public_share_enabled: isShareEnabled(profile),
+        public_library_mode: getShareLibraryMode(profile)
       }
     : {
         id: user.id,
         public_share_enabled: true,
-        public_share_token: generateShareToken(),
+        public_share_token: "",
         public_library_mode: "preview"
       };
 
@@ -3046,7 +3142,11 @@ async function upsertCurrentProfilePatch(patch = {}){
   };
 
   if(!nextProfile.public_share_token){
-    nextProfile.public_share_token = generateShareToken();
+    try {
+      nextProfile.public_share_token = await ensureProfileShareTokenRpc();
+    } catch (_error) {
+      nextProfile.public_share_token = existing?.public_share_token || "";
+    }
   }
 
   if(typeof nextProfile.public_share_enabled !== "boolean"){
@@ -3154,7 +3254,8 @@ async function shareLibrary(){
 
   const profile = await ensureCurrentProfileData();
   if(!profile?.public_share_token){
-    await upsertCurrentProfilePatch({ public_share_token: generateShareToken() });
+    alert(t().share.unavailable);
+    return;
   }
 
   applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
@@ -3217,7 +3318,7 @@ async function savePublicShareSettingsFromInputs(prefix = "share-modal"){
     public_card_title: title || null,
     public_card_bio: bio || null,
     public_library_mode: mode,
-    public_share_token: currentProfileData?.public_share_token || generateShareToken()
+    public_share_token: currentProfileData?.public_share_token || ""
   });
 
   if(!profile) return null;
@@ -3243,14 +3344,24 @@ async function savePublicShareSettings(){
 }
 
 async function regeneratePublicShareToken(){
-  const profile = await upsertCurrentProfilePatch({ public_share_token: generateShareToken() });
-  if(!profile) return;
-  applyShareSettingsToOwnerPanels(profile);
-  if(currentPublicProfile && currentPublicProfile.id === profile.id){
-    currentPublicProfile = { ...currentPublicProfile, ...profile };
-    renderPublicShareProfile(currentPublicProfile);
+  try {
+    const token = await regenerateProfileShareTokenRpc();
+    const refreshedProfile = await ensureCurrentProfileData();
+    const profile = {
+      ...(refreshedProfile || currentProfileData || {}),
+      public_share_token: token || refreshedProfile?.public_share_token || currentProfileData?.public_share_token || ""
+    };
+
+    currentProfileData = profile;
+    applyShareSettingsToOwnerPanels(profile);
+    if(currentPublicProfile && currentPublicProfile.id === profile.id){
+      currentPublicProfile = { ...currentPublicProfile, ...profile };
+      renderPublicShareProfile(currentPublicProfile);
+    }
+    alert(t().share.tokenRegenerated);
+  } catch (error) {
+    alert(error.message || String(error));
   }
-  alert(t().share.tokenRegenerated);
 }
 
 async function regeneratePublicShareTokenFromModal(){
@@ -3457,18 +3568,17 @@ async function showPublicShareScreen(profile){
 async function loadPublicShareRoute(token){
   activeShareToken = token || "";
 
-  const { data: profile, error: profileError } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("public_share_token", token)
-    .maybeSingle();
+  const { data, error } = await supabaseClient.rpc("get_public_profile_by_token", {
+    p_token: token
+  });
 
-  if(profileError){
-    console.error(profileError);
+  if(error){
+    console.error(error);
     alert(t().labels.profileLookupError);
     return false;
   }
 
+  const { profile, items } = normalizePublicProfileRpcPayload(data);
   if(!profile){
     alert(t().share.unavailable);
     return false;
@@ -3481,14 +3591,13 @@ async function loadPublicShareRoute(token){
 
   const user = await getCurrentUser();
   const isOwner = Boolean(user && user.id === profile.id);
-  const items = await fetchPublicLibraryItems(profile.id);
   applyPublicLibraryItems(items);
-  await showPublicShareScreen({ ...profile, isOwner });
+  await showPublicShareScreen({ ...profile, isOwner, public_share_token: token });
   return true;
 }
 
 async function saveSharedLibrary(){
-  if(!currentPublicProfile || !currentPublicProfile.id){
+  if(!currentPublicProfile || !currentPublicProfile.public_share_token){
     alert(t().share.unavailable);
     return;
   }
@@ -3506,18 +3615,12 @@ ${t().share.savePromptAfterLogin}`);
     return;
   }
 
-  const payload = {
-    user_id: user.id,
-    library_user_id: currentPublicProfile.id,
-    public_share_token: currentPublicProfile.public_share_token
-  };
-
-  const { error } = await supabaseClient
-    .from("saved_libraries")
-    .upsert(payload, { onConflict: "user_id,library_user_id" });
+  const { error } = await supabaseClient.rpc("save_library_by_token", {
+    p_token: currentPublicProfile.public_share_token
+  });
 
   if(error){
-    if(String(error.message || "").toLowerCase().includes("duplicate")){
+    if(String(error.message || "").toLowerCase().includes("already")){
       alert(t().share.alreadySaved);
       return;
     }
@@ -3582,7 +3685,7 @@ async function changePassword(){
     display_name: displayName || null,
     public_share_enabled: isPublic,
     is_public: isPublic,
-    public_share_token: currentProfileData?.public_share_token || generateShareToken(),
+    public_share_token: currentProfileData?.public_share_token || "",
     public_card_title: currentProfileData?.public_card_title || null,
     public_card_bio: currentProfileData?.public_card_bio || null,
     public_library_mode: currentProfileData?.public_library_mode || "preview"
