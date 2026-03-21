@@ -1,3 +1,562 @@
+ПОЛНЫЙ КОД ПРОЕКТА PLAMUT С РАЗБИВКОЙ ПО КЛЮЧЕВЫМ ФАЙЛАМ ДЛЯ РАБОТОСПОСОБНОСТИ
+
+===== FILE: index.html =====
+```html
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app-shell" class="page-shell">
+    <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
+    <header class="app-header">
+      <div class="brand-block">
+        <div class="brand-mark">P</div>
+        <div>
+          <div class="brand-title">Plamut</div>
+          <div class="brand-subtitle" id="brand-subtitle">Media Tracker</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="header-panel-wrap">
+          <button
+            id="preferences-btn"
+            class="button button-ghost header-control-btn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            onclick="togglePreferencesPanel()"
+          >
+            <span class="header-control-icon" aria-hidden="true">🌐</span>
+            <span id="preferences-btn-label">RU</span>
+          </button>
+
+          <div id="preferences-panel" class="preferences-panel hidden" role="dialog" aria-labelledby="preferences-title">
+            <div class="preferences-panel-header">
+              <h2 id="preferences-title" class="preferences-title">Interface</h2>
+            </div>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-language-title">Language</div>
+              <div class="option-group compact-option-group">
+                <button id="lang-option-ru" class="button option-button" type="button" onclick="setLanguage('ru')">RU</button>
+                <button id="lang-option-en" class="button option-button" type="button" onclick="setLanguage('en')">EN</button>
+              </div>
+            </section>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-theme-title">Theme</div>
+              <div class="option-group theme-option-group">
+                <button id="theme-option-light" class="button option-button" type="button" onclick="setThemeMode('light')">Light</button>
+                <button id="theme-option-dark" class="button option-button" type="button" onclick="setThemeMode('dark')">Dark</button>
+                <button id="theme-option-system" class="button option-button" type="button" onclick="setThemeMode('system')">System</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="header-user-actions">
+          <button id="profile-btn" class="profile-trigger hidden" type="button" onclick="openProfileModal()" aria-label="Profile" title="Profile">
+            <span id="header-avatar-fallback" class="profile-trigger-fallback">P</span>
+            <img id="header-avatar-img" class="profile-trigger-image hidden" src="" alt="">
+          </button>
+          <button id="login-top-btn" class="button button-secondary hidden" onclick="showAuthScreen()">Login</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="auth-screen" class="auth-screen">
+      <div class="auth-card">
+        <div class="auth-badge">Plamut</div>
+        <h2 class="auth-title">Plamut Login</h2>
+        <p class="auth-text" id="auth-text">Save books, movies, series, anime and manga in one personal library.</p>
+
+        <input id="login-email" class="input" placeholder="Email">
+        <input id="login-password" class="input" type="password" placeholder="Password">
+
+        <div class="auth-actions">
+          <button class="button button-primary" onclick="login()">Login</button>
+          <button class="button button-secondary" onclick="register()">Register</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="home-screen" class="hidden">
+      <section class="hero-block">
+        <div class="hero-content">
+          <div class="hero-badge" id="hero-badge">Your personal universe</div>
+          <h1 class="hero-title">Plamut</h1>
+          <div class="subtitle" id="home-subtitle"></div>
+
+          <div class="hero-actions">
+            <button id="share-library-btn" class="button button-primary share-library-btn" onclick="shareLibrary()">Share Library</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section panel-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="library-section-title">Library</h2>
+            <div class="section-note" id="library-section-note">Choose a category</div>
+          </div>
+        </div>
+
+        <div class="grid category-grid">
+          <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
+          <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
+          <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
+          <div class="card category-card" onclick="openCategory('Anime')" id="cat-anime"></div>
+          <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
+          <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="category-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="goHome()" id="back-home-btn"></button>
+          <h2 id="category-title" class="screen-title"></h2>
+        </div>
+        <div class="toolbar-actions">
+          <button class="button button-primary" onclick="openAddModal()" id="add-new-btn"></button>
+          <button class="button button-secondary" onclick="addCustomFolder()" id="add-folder-btn"></button>
+        </div>
+      </div>
+
+      <div id="public-category-tabs" class="public-category-tabs hidden">
+        <button class="button button-ghost" onclick="openPublicCategory('Books', currentPublicProfileName)" id="public-tab-books">Books</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Movies', currentPublicProfileName)" id="public-tab-movies">Movies</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Series', currentPublicProfileName)" id="public-tab-series">Series</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Anime', currentPublicProfileName)" id="public-tab-anime">Anime</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Manga', currentPublicProfileName)" id="public-tab-manga">Manga</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
+      </div>
+
+      <div class="toolbar-row filter-toolbar" id="filter-toolbar">
+        <label for="status-filter" id="status-filter-label"></label>
+        <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+          <option value="All">All</option>
+          <option value="Planned">Planned</option>
+          <option value="In progress">In progress</option>
+          <option value="Done">Done</option>
+          <option value="Dropped">Dropped</option>
+        </select>
+      </div>
+
+      <div class="shelf-shell">
+        <div class="shelf" id="shelf"></div>
+      </div>
+    </div>
+
+    <div id="details-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="backToCategory()" id="back-shelf-btn"></button>
+        </div>
+      </div>
+
+      <div class="details-layout">
+        <div class="details-cover">
+          <div class="details-cover-box" id="details-cover-box"></div>
+        </div>
+
+        <div class="details-panel">
+          <h2 id="details-title"></h2>
+          <div class="muted details-creator" id="details-creator"></div>
+
+          <div class="details-badges">
+            <span class="badge" id="details-category"></span>
+            <span class="badge" id="details-status"></span>
+          </div>
+
+          <div class="section">
+            <h3 id="description-label"></h3>
+            <div class="muted" id="details-description"></div>
+          </div>
+
+          <div class="section" id="details-folder-section">
+            <h3 id="details-folder-title">Folder</h3>
+            <div class="folder-assignment-row">
+              <select id="details-folder-select" class="select"></select>
+              <button class="button button-secondary" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+            </div>
+          </div>
+
+          <div class="section hidden" id="canonical-key-section">
+            <h3>Canonical Key</h3>
+            <input id="canonical-key-input" class="input" type="text">
+            <button class="button button-secondary" onclick="saveCanonicalKey()">Save</button>
+          </div>
+
+          <div class="section details-actions">
+            <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+            <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="public-share-screen" class="hidden screen-panel public-share-screen">
+      <div class="public-share-shell">
+        <button class="public-share-back-link" type="button" onclick="exitPublicShareRoute()" id="public-share-back-btn">← Back</button>
+
+        <section id="public-share-loading-card" class="public-card public-card-skeleton" aria-hidden="true">
+          <div class="public-card-skeleton-avatar"></div>
+          <div class="public-card-skeleton-lines">
+            <span class="public-card-skeleton-line public-card-skeleton-line-chip"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-title"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-handle"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-copy"></span>
+          </div>
+          <div class="public-card-skeleton-actions">
+            <span class="public-card-skeleton-button public-card-skeleton-button-main"></span>
+            <span class="public-card-skeleton-button"></span>
+            <span class="public-card-skeleton-button"></span>
+          </div>
+        </section>
+
+        <section id="public-share-main-card" class="public-card hidden">
+          <div class="public-card-orb public-card-orb-primary" aria-hidden="true"></div>
+          <div class="public-card-orb public-card-orb-secondary" aria-hidden="true"></div>
+
+          <div class="public-card-head">
+            <div class="avatar-preview public-share-avatar public-card-avatar-wrap">
+              <img id="public-share-avatar-img" src="" alt="avatar">
+              <span id="public-share-avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <div class="public-card-copy">
+              <div class="public-card-chip-row">
+                <span class="public-card-chip" id="public-share-badge">NFC card</span>
+              </div>
+              <h1 id="public-share-display-name" class="public-card-title">My Plamut</h1>
+              <div class="public-card-username" id="public-share-username">@plamut</div>
+              <p class="public-card-description" id="public-share-bio"></p>
+            </div>
+          </div>
+
+          <div class="public-card-actions">
+            <button class="button button-primary public-card-open-btn" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn" aria-label="Copy link" title="Copy link">⧉</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn" aria-label="Show QR" title="Show QR">⌁</button>
+          </div>
+
+          <input id="public-share-link-input" class="input hidden" readonly>
+
+          <div class="public-share-qr hidden" id="public-share-qr-box">
+            <img id="public-share-qr-image" alt="QR code">
+          </div>
+        </section>
+
+        <section id="public-share-error-card" class="public-card public-share-feedback hidden">
+          <div class="public-share-state-icon">⚠️</div>
+          <h2 id="public-share-error-title">Library not found</h2>
+          <p id="public-share-error-text">Please try another Plamut share link.</p>
+        </section>
+
+        <section class="public-owner-panel hidden" id="public-share-owner-controls">
+          <div class="profile-section-heading public-owner-panel-heading">
+            <h4 id="public-share-owner-controls-title">Manage NFC card</h4>
+            <p class="small" id="public-share-owner-controls-hint">Control your public link, QR and NFC tools.</p>
+          </div>
+
+          <div class="public-owner-panel-link-row">
+            <label class="small" for="owner-share-link-input" id="public-share-link-label">Public link</label>
+            <div class="public-owner-panel-link-wrap">
+              <input id="owner-share-link-input" class="input" readonly>
+            </div>
+          </div>
+
+          <label class="profile-checkbox">
+            <input type="checkbox" id="share-public-enabled-toggle">
+            <span id="share-public-enabled-label">Public access enabled</span>
+          </label>
+
+          <label for="share-card-title" id="share-card-title-label">Card title</label>
+          <input id="share-card-title" class="input" maxlength="80">
+
+          <label for="share-card-bio" id="share-card-bio-label">Short bio</label>
+          <textarea id="share-card-bio" class="textarea" rows="4"></textarea>
+
+          <label for="share-library-mode" id="share-library-mode-label">Library mode</label>
+          <select id="share-library-mode" class="select">
+            <option value="preview" id="share-library-mode-preview">Preview</option>
+            <option value="full" id="share-library-mode-full">Full library</option>
+          </select>
+
+          <div class="public-owner-panel-actions">
+            <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="owner-copy-link-btn">Copy link</button>
+            <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="owner-show-qr-btn">Show QR</button>
+            <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfc()" id="owner-write-nfc-btn">Write to NFC</button>
+            <button class="button button-secondary" type="button" onclick="regeneratePublicShareToken()" id="owner-regenerate-token-btn">Regenerate token</button>
+          </div>
+
+          <div class="small hidden" id="share-nfc-support-note"></div>
+
+          <details class="iphone-help-card" id="iphone-help-card">
+            <summary id="iphone-help-summary">How to write NFC on iPhone?</summary>
+            <ol id="iphone-help-steps">
+              <li>Copy your public Plamut link.</li>
+              <li>Install an NFC writing app such as NFC Tools.</li>
+              <li>Open the app.</li>
+              <li>Choose writing a URL/link record.</li>
+              <li>Paste your public Plamut link.</li>
+              <li>Hold the NFC tag near your iPhone and write the data.</li>
+              <li>Test the tag by tapping it with your phone.</li>
+            </ol>
+          </details>
+
+          <div class="modal-actions">
+            <button class="button button-primary" type="button" onclick="savePublicShareSettings()" id="share-save-settings-btn">Save sharing settings</button>
+          </div>
+        </section>
+
+        <section id="public-share-library-section" class="public-library-section hidden">
+          <div class="profile-section-heading public-library-heading">
+            <h4 id="public-preview-title">Shared library</h4>
+            <p class="small" id="public-preview-hint">Browse this library in read-only mode.</p>
+          </div>
+          <div id="public-share-loading" class="public-share-state hidden">
+            <div class="public-share-state-skeleton public-share-state-skeleton-large"></div>
+            <div class="public-share-state-skeleton"></div>
+            <div class="public-share-state-skeleton public-share-state-skeleton-short"></div>
+            <div id="public-share-loading-text" class="public-share-loading-text">Loading shared library…</div>
+          </div>
+          <div id="public-share-empty" class="public-share-state hidden">
+            <div class="public-share-state-icon">📚</div>
+            <div id="public-share-empty-title">В этой библиотеке пока нет публичных материалов</div>
+            <div class="small" id="public-share-empty-text">Вернитесь позже — владелец может добавить новые книги, фильмы или сериалы.</div>
+          </div>
+          <div class="shelf public-preview-grid hidden" id="public-share-preview-grid"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="share-item-modal" class="modal hidden">
+      <div class="modal-box share-item-modal-box">
+        <button class="button button-ghost share-item-close" type="button" onclick="closeShareItemModal()">×</button>
+        <div class="share-item-layout">
+          <div class="share-item-cover-box" id="share-item-modal-cover"></div>
+          <div class="share-item-content">
+            <h3 id="share-item-modal-title">Title</h3>
+            <div class="muted hidden" id="share-item-modal-original"></div>
+            <div class="share-item-badges" id="share-item-modal-badges"></div>
+            <div class="share-item-meta-list" id="share-item-modal-meta"></div>
+            <div class="share-item-description hidden" id="share-item-modal-description"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="add-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="search-modal-title"></h3>
+        <div class="small" id="search-modal-subtitle"></div>
+
+        <input id="search-input" class="input" type="text" oninput="renderCategorySearchResults()">
+
+        <div id="search-results"></div>
+
+        <div class="modal-actions">
+          <button class="button button-secondary" onclick="openManualModal()" id="manual-add-btn"></button>
+          <button class="button button-ghost" onclick="closeAddModal()" id="close-search-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="manual-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="manual-title"></h3>
+        <div class="small" id="manual-subtitle"></div>
+
+        <input id="manual-name" class="input" type="text">
+        <input id="manual-creator" class="input" type="text">
+        <input id="manual-cover" class="input" type="text">
+        <textarea id="manual-description" class="textarea"></textarea>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+          <button class="button button-primary" onclick="saveManualItem()" id="manual-save-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-box profile-box">
+        <h3 id="profile-title">Profile</h3>
+        <p class="small profile-subtitle" id="profile-subtitle">Manage your account settings, privacy, avatar and password.</p>
+
+        <div class="profile-layout">
+          <div class="profile-avatar-section">
+            <div class="profile-section-heading">
+              <h4 id="profile-avatar-title">Avatar</h4>
+              <p class="small" id="profile-avatar-hint">Upload a profile image so your account is easier to recognize.</p>
+            </div>
+
+            <div class="avatar-preview">
+              <img id="avatar-img" src="" alt="avatar">
+              <span id="avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <input type="file" id="avatar-file" accept="image/*">
+
+            <button id="profile-upload-avatar-btn" class="button button-primary" onclick="uploadAvatar()">Upload avatar</button>
+            <button id="profile-remove-avatar-btn" class="button button-secondary" onclick="removeAvatar()">Remove avatar</button>
+          </div>
+
+          <div class="profile-info-section">
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-account-title">Account</h4>
+              </div>
+
+              <label id="profile-username-label" for="profile-username">Username</label>
+              <input id="profile-username" class="input">
+
+              <label id="profile-display-name-label" for="profile-display-name">Display name</label>
+              <input id="profile-display-name" class="input">
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-privacy-title">Privacy</h4>
+                <p class="small" id="profile-privacy-hint">Control whether other users can open your public library page.</p>
+              </div>
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-public">
+                <span id="profile-public-label">Public library</span>
+              </label>
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-security-title">Security</h4>
+                <p class="small" id="profile-security-hint">Change your password and save it securely for future sign-ins.</p>
+              </div>
+
+              <label id="profile-new-password-label" for="new-password">New password</label>
+              <input id="new-password" class="input" type="password">
+
+              <label id="profile-confirm-password-label" for="confirm-password">Confirm password</label>
+              <input id="confirm-password" class="input" type="password">
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-show-password" onclick="togglePasswordVisibility()">
+                <span id="profile-show-password-label">Show password</span>
+              </label>
+
+              <button id="profile-change-password-btn" class="button button-secondary profile-password-btn" onclick="changePassword()">Change password</button>
+            </section>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
+          <button class="button button-secondary" onclick="logout()" id="profile-logout-btn">Logout</button>
+          <button class="button button-primary" onclick="saveProfile()" id="profile-save-btn">Save profile</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="share-modal" class="modal hidden">
+      <div class="modal-box share-modal-box">
+        <h3 id="share-modal-title">Share library</h3>
+        <p class="small" id="share-modal-subtitle">Create a public NFC-ready library link for your profile.</p>
+
+        <label class="profile-checkbox">
+          <input type="checkbox" id="share-modal-public-enabled">
+          <span id="share-modal-public-enabled-label">Public access enabled</span>
+        </label>
+
+        <label for="share-modal-card-title" id="share-modal-card-title-label">Card title</label>
+        <input id="share-modal-card-title" class="input" maxlength="80">
+
+        <label for="share-modal-card-bio" id="share-modal-card-bio-label">Short bio</label>
+        <textarea id="share-modal-card-bio" class="textarea" rows="4"></textarea>
+
+        <label for="share-modal-library-mode" id="share-modal-library-mode-label">Library mode</label>
+        <select id="share-modal-library-mode" class="select">
+          <option value="preview" id="share-modal-library-mode-preview">Preview</option>
+          <option value="full" id="share-modal-library-mode-full">Full library</option>
+        </select>
+
+        <label for="share-modal-link-input" id="share-modal-link-label">Public link</label>
+        <div class="public-share-link-actions">
+          <input id="share-modal-link-input" class="input" readonly>
+          <button class="button button-secondary" type="button" onclick="copyPublicShareLinkFromModal()" id="share-modal-copy-btn">Copy link</button>
+          <button class="button button-secondary" type="button" onclick="toggleShareModalQr()" id="share-modal-qr-btn">Show QR</button>
+          <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfcFromModal()" id="share-modal-write-nfc-btn">Write to NFC</button>
+        </div>
+
+        <div class="public-share-qr hidden" id="share-modal-qr-box">
+          <img id="share-modal-qr-image" alt="QR code">
+        </div>
+
+        <div class="small hidden" id="share-modal-nfc-note"></div>
+
+        <details class="iphone-help-card" id="share-modal-iphone-help-card">
+          <summary id="share-modal-iphone-help-summary">How to write NFC on iPhone?</summary>
+          <ol id="share-modal-iphone-help-steps">
+            <li>Copy your public Plamut link.</li>
+            <li>Install an NFC writing app such as NFC Tools.</li>
+            <li>Open the app.</li>
+            <li>Choose writing a URL/link record.</li>
+            <li>Paste your public Plamut link.</li>
+            <li>Hold the NFC tag near your iPhone and write the data.</li>
+            <li>Test the tag by tapping it with your phone.</li>
+          </ol>
+        </details>
+
+        <div class="modal-actions wrap-actions">
+          <button class="button button-secondary" type="button" onclick="openCurrentPublicCard()" id="share-modal-open-btn">Open public card</button>
+          <button class="button button-secondary" type="button" onclick="regeneratePublicShareTokenFromModal()" id="share-modal-regenerate-btn">Regenerate token</button>
+          <button class="button button-ghost" type="button" onclick="closeShareModal()" id="share-modal-close-btn">Close</button>
+          <button class="button button-primary" type="button" onclick="savePublicShareSettingsFromModal()" id="share-modal-save-btn">Save sharing settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-modal" class="modal hidden">
+      <div class="modal-box status-modal-box">
+        <h3 id="status-modal-title"></h3>
+
+        <div class="modal-actions status-button-list" id="status-buttons"></div>
+
+        <div class="status-custom-box">
+          <label id="status-custom-label" for="custom-status-input">Custom status</label>
+          <div class="profile-inline-form">
+            <input id="custom-status-input" class="input" type="text">
+            <button id="status-add-custom-btn" class="button button-secondary" onclick="addCustomStatus()">Add status</button>
+          </div>
+        </div>
+
+        <div class="modal-actions status-footer-actions">
+          <button class="button button-danger" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
+          <button class="button button-ghost" onclick="closeStatusModal()" id="status-cancel"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
+
+
+
+===== FILE: script.js =====
+```javascript
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
@@ -455,10 +1014,14 @@
 
     Object.assign(translations.en.share, {
       sharedLibrary: "Shared library",
-      libraryHint: "Browse this library in read-only mode.",
-      loading: "Loading shared library…",
-      emptyLibrary: "This shared library is empty.",
-      notFound: "Library not found or unavailable.",
+      libraryHint: "Open the read-only library to browse saved items.",
+      loading: "Loading public card…",
+      emptyLibrary: "This public library is empty.",
+      emptyLibraryHint: "Come back later — the owner may add books, movies or series.",
+      notFound: "This public card is unavailable.",
+      notFoundHint: "Please check the link and try again.",
+      guestBadge: "Public library",
+      ownerBadge: "NFC card",
       originalTitle: "Original title",
       rating: "Rating",
       year: "Year",
@@ -466,11 +1029,15 @@
     });
 
     Object.assign(translations.ru.share, {
-      sharedLibrary: "Shared library",
-      libraryHint: "Просматривайте эту библиотеку в режиме только чтения.",
-      loading: "Загрузка публичной библиотеки…",
-      emptyLibrary: "Эта публичная библиотека пуста.",
-      notFound: "Библиотека не найдена или недоступна.",
+      sharedLibrary: "Публичная библиотека",
+      libraryHint: "Откройте библиотеку, чтобы посмотреть материалы в режиме только чтения.",
+      loading: "Загрузка публичной визитки…",
+      emptyLibrary: "В этой библиотеке пока нет публичных материалов.",
+      emptyLibraryHint: "Вернитесь позже — владелец может добавить новые книги, фильмы или сериалы.",
+      notFound: "Эта публичная визитка недоступна.",
+      notFoundHint: "Проверьте ссылку и попробуйте ещё раз.",
+      guestBadge: "Public library",
+      ownerBadge: "NFC card",
       originalTitle: "Оригинальное название",
       rating: "Рейтинг",
       year: "Год",
@@ -492,6 +1059,8 @@
     let currentPublicProfile = null;
     let activeShareToken = "";
     let currentPublicShareItems = [];
+    let currentPublicShareState = "loading";
+    let publicLibraryExpanded = false;
 
     const demoData = {
       Books: [],
@@ -921,12 +1490,8 @@
       setTextIfPresent("share-modal-close-btn", t().share.close);
       setTextIfPresent("share-modal-save-btn", t().share.saveSettings);
       setTextIfPresent("public-share-back-btn", t().share.back);
-      setTextIfPresent("public-share-title", t().share.publicLibraryTitle);
       setTextIfPresent("public-share-link-label", t().share.publicLink);
-      setTextIfPresent("public-share-copy-btn", t().share.copyLink);
-      setTextIfPresent("public-share-qr-btn", t().share.showQr);
       setTextIfPresent("public-share-open-library-btn", t().share.openLibrary);
-      setTextIfPresent("public-share-save-btn", t().share.saveToMine);
       setTextIfPresent("public-share-owner-controls-title", t().share.ownerControlsTitle);
       setTextIfPresent("public-share-owner-controls-hint", t().share.ownerControlsHint);
       setTextIfPresent("share-public-enabled-label", t().share.publicAccess);
@@ -944,8 +1509,22 @@
       setTextIfPresent("public-preview-title", t().share.sharedLibrary);
       setTextIfPresent("public-preview-hint", t().share.libraryHint);
       setTextIfPresent("public-share-loading-text", t().share.loading);
-      setTextIfPresent("public-share-error", t().share.notFound);
-      setTextIfPresent("public-share-empty", t().share.emptyLibrary);
+      setTextIfPresent("public-share-error-title", t().share.notFound);
+      setTextIfPresent("public-share-error-text", t().share.notFoundHint);
+      setTextIfPresent("public-share-empty-title", t().share.emptyLibrary);
+      setTextIfPresent("public-share-empty-text", t().share.emptyLibraryHint);
+
+      const publicCopyBtn = document.getElementById("public-share-copy-btn");
+      if(publicCopyBtn){
+        publicCopyBtn.setAttribute("title", t().share.copyLink);
+        publicCopyBtn.setAttribute("aria-label", t().share.copyLink);
+      }
+
+      const publicQrBtn = document.getElementById("public-share-qr-btn");
+      if(publicQrBtn){
+        publicQrBtn.setAttribute("title", t().share.showQr);
+        publicQrBtn.setAttribute("aria-label", t().share.showQr);
+      }
 
       const iphoneSteps = currentLanguage === "ru"
         ? [
@@ -2837,7 +3416,7 @@
       renderShelf();
 
       const deleted = await deleteItemFromSupabase(removedItem, currentCategory);
-      
+
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, removedItem);
@@ -2850,7 +3429,7 @@
       if(currentOpenItemId === removedItem.id){
         currentOpenItemId = null;
       }
-      
+
       await loadCategoryFromSupabase(currentCategory);
     }
 
@@ -3289,6 +3868,7 @@ function applyShareSettingsToOwnerPanels(profile = {}){
   setValueIfPresent("share-card-bio", bio);
   setValueIfPresent("share-library-mode", mode);
   setValueIfPresent("public-share-link-input", url);
+  setValueIfPresent("owner-share-link-input", url);
   populateShareQr("public-share-qr-box", "public-share-qr-image", url);
 
   const modalNfcBtn = document.getElementById("share-modal-write-nfc-btn");
@@ -3362,7 +3942,10 @@ async function copyPublicShareLinkFromModal(){
 }
 
 async function copyCurrentPublicShareLink(){
-  const value = document.getElementById("public-share-link-input")?.value || document.getElementById("share-modal-link-input")?.value || "";
+  const value = document.getElementById("public-share-link-input")?.value
+    || document.getElementById("owner-share-link-input")?.value
+    || document.getElementById("share-modal-link-input")?.value
+    || "";
   await copyTextValue(value);
 }
 
@@ -3377,14 +3960,10 @@ function toggleShareModalQr(){
 
 function togglePublicShareQr(){
   const box = document.getElementById("public-share-qr-box");
-  const button = document.getElementById("public-share-qr-btn");
-  const ownerButton = document.getElementById("owner-show-qr-btn");
-  if(!box || !button) return;
+  if(!box) return;
   const nextHidden = !box.classList.contains("hidden");
   box.classList.toggle("hidden", nextHidden);
-  const nextText = nextHidden ? t().share.showQr : t().share.hideQr;
-  button.textContent = nextText;
-  if(ownerButton) ownerButton.textContent = nextText;
+  syncPublicQrButtons();
 }
 
 async function savePublicShareSettingsFromInputs(prefix = "share-modal"){
@@ -3637,22 +4216,63 @@ function renderPublicPreviewGrid(profile = {}){
   });
 }
 
-function renderPublicShareProfile(profile = {}){
+function syncPublicQrButtons(){
+  const qrBox = document.getElementById("public-share-qr-box");
+  const qrVisible = Boolean(qrBox && !qrBox.classList.contains("hidden"));
+  const publicQrBtn = document.getElementById("public-share-qr-btn");
+  const ownerQrBtn = document.getElementById("owner-show-qr-btn");
+  const qrLabel = qrVisible ? t().share.hideQr : t().share.showQr;
+
+  if(publicQrBtn){
+    publicQrBtn.setAttribute("title", qrLabel);
+    publicQrBtn.setAttribute("aria-label", qrLabel);
+  }
+
+  if(ownerQrBtn){
+    ownerQrBtn.textContent = qrLabel;
+  }
+}
+
+function setPublicLibraryExpanded(expanded = false, options = {}){
+  publicLibraryExpanded = Boolean(expanded);
+  const section = document.getElementById("public-share-library-section");
+  if(!section) return;
+
+  const shouldShowSection = publicLibraryExpanded && currentPublicShareState !== "error";
+  section.classList.toggle("hidden", !shouldShowSection);
+
+  if(shouldShowSection && options.scroll !== false){
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function renderOwnerPanel(profile = {}){
+  const ownerControls = document.getElementById("public-share-owner-controls");
+  if(!ownerControls) return;
+
+  const isOwner = Boolean(profile.isOwner);
+  ownerControls.classList.toggle("hidden", !isOwner);
+  if(!isOwner) return;
+
+  applyShareSettingsToOwnerPanels(profile);
+}
+
+function renderPublicCard(profile = {}){
   currentPublicProfile = profile;
   activeShareToken = profile.public_share_token || activeShareToken;
   currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
 
-  setTextIfPresent("public-share-title", t().share.publicLibraryTitle);
-  setTextIfPresent("public-share-display-name", getShareCardTitle(profile));
-  setTextIfPresent("public-share-username", profile.username ? `@${profile.username}` : "@plamut");
-  setTextIfPresent("public-share-bio", getShareCardBio(profile) || t().share.publicLibraryHint);
-  setTextIfPresent("public-share-badge", t().share.publicLibraryTitle);
-  setTextIfPresent("public-share-owner-note", profile.isOwner ? t().share.ownerNote : "");
+  const loadingCard = document.getElementById("public-share-loading-card");
+  const mainCard = document.getElementById("public-share-main-card");
+  const errorCard = document.getElementById("public-share-error-card");
+  if(loadingCard) loadingCard.classList.add("hidden");
+  if(mainCard) mainCard.classList.remove("hidden");
+  if(errorCard) errorCard.classList.add("hidden");
 
-  const ownerNote = document.getElementById("public-share-owner-note");
-  if(ownerNote){
-    ownerNote.classList.toggle("hidden", !profile.isOwner);
-  }
+  setTextIfPresent("public-share-display-name", getShareCardTitle(profile) || "My Plamut");
+  setTextIfPresent("public-share-username", profile.username ? `@${profile.username}` : "@plamut");
+  setTextIfPresent("public-share-bio", getShareCardBio(profile) || t().share.libraryHint);
+  setTextIfPresent("public-share-badge", profile.isOwner ? t().share.ownerBadge : t().share.guestBadge);
 
   const avatarImg = document.getElementById("public-share-avatar-img");
   const avatarFallback = document.getElementById("public-share-avatar-fallback");
@@ -3666,24 +4286,23 @@ function renderPublicShareProfile(profile = {}){
     avatarFallback.classList.toggle("hidden", hasAvatar);
   }
 
-  const ownerControls = document.getElementById("public-share-owner-controls");
-  if(ownerControls){
-    ownerControls.classList.toggle("hidden", !profile.isOwner);
-  }
-
-  const saveBtn = document.getElementById("public-share-save-btn");
-  if(saveBtn){
-    saveBtn.textContent = profile.isOwner ? t().share.ownerOnlyAction : t().share.saveToMine;
-    saveBtn.disabled = Boolean(profile.isOwner);
-  }
-
   const link = buildPublicShareUrl(profile.public_share_token || "");
   setValueIfPresent("public-share-link-input", link);
+  setValueIfPresent("owner-share-link-input", link);
   populateShareQr("public-share-qr-box", "public-share-qr-image", link);
 
-  if(profile.isOwner){
-    applyShareSettingsToOwnerPanels(profile);
+  const publicCopyBtn = document.getElementById("public-share-copy-btn");
+  if(publicCopyBtn){
+    publicCopyBtn.setAttribute("title", t().share.copyLink);
+    publicCopyBtn.setAttribute("aria-label", t().share.copyLink);
   }
+
+  syncPublicQrButtons();
+  renderOwnerPanel(profile);
+}
+
+function renderPublicShareProfile(profile = {}){
+  renderPublicCard(profile);
 }
 
 async function showPublicShareScreen(profile){
@@ -3695,90 +4314,63 @@ async function showPublicShareScreen(profile){
 
 async function loadPublicShareRoute(token){
   activeShareToken = token || "";
+  currentPublicProfile = null;
+  currentPublicShareItems = [];
+  currentPublicShareState = "loading";
+  publicLibraryExpanded = false;
 
-  const { data, error } = await supabaseClient.rpc("get_public_profile_by_token", {
-    p_token: token
-  });
+  setPublicRouteMode(true);
+  hideAllScreens();
+  document.getElementById("public-share-screen")?.classList.remove("hidden");
+  renderShareState("loading");
 
-  if(error){
-    console.error(error);
-    alert(t().labels.profileLookupError);
-    return false;
-  }
+  try {
+    const profile = await fetchPublicProfileByToken(token);
+    if(!profile || !isShareEnabled(profile)){
+      currentPublicProfile = null;
+      renderShareState("error");
+      return true;
+    }
 
-  const { profile, items } = normalizePublicProfileRpcPayload(data);
-  if(!profile){
-    alert(t().share.unavailable);
-    return false;
-  }
+    const user = await getCurrentUser();
+    const isOwner = Boolean(user && user.id === profile.id);
+    currentPublicProfile = { ...profile, isOwner, public_share_token: token };
+    renderPublicShareProfile(currentPublicProfile);
 
-  if(!isShareEnabled(profile)){
-    alert(t().share.private);
-    return false;
-  }
-
-  const user = await getCurrentUser();
-  const isOwner = Boolean(user && user.id === profile.id);
-  const normalizedProfile = { ...profile, isOwner, public_share_token: token };
-
-  applyPublicLibraryItems(items);
-
-  if(isOwner){
-    await openOwnerLibraryFromShareToken(normalizedProfile);
+    const items = await fetchPublicShareLibraryItems(profile.id);
+    renderShareLibrary(items);
+    return true;
+  } catch (error) {
+    console.error("Public share page init error:", error);
+    currentPublicProfile = null;
+    renderShareState("error");
     return true;
   }
-
-  showPublicLibraryCategoryView(normalizedProfile);
-  return true;
-}
-
-async function saveSharedLibrary(){
-  if(!currentPublicProfile || !currentPublicProfile.public_share_token){
-    alert(t().share.unavailable);
-    return;
-  }
-
-  if(currentPublicProfile.isOwner){
-    alert(t().share.ownerOnlyAction);
-    return;
-  }
-
-  const user = await getCurrentUser();
-  if(!user){
-    localStorage.setItem("plamut_pending_saved_library_token", currentPublicProfile.public_share_token || "");
-    alert(`${t().share.loginToSave}
-${t().share.savePromptAfterLogin}`);
-    return;
-  }
-
-  const { error } = await supabaseClient.rpc("save_library_by_token", {
-    p_token: currentPublicProfile.public_share_token
-  });
-
-  if(error){
-    if(String(error.message || "").toLowerCase().includes("already")){
-      alert(t().share.alreadySaved);
-      return;
-    }
-    console.error("Saved library error:", error);
-    alert(error.message);
-    return;
-  }
-
-  localStorage.removeItem("plamut_pending_saved_library_token");
-  alert(t().share.savedToMine);
 }
 
 function renderShareState(state = "loading"){
+  currentPublicShareState = state;
+  const loadingCard = document.getElementById("public-share-loading-card");
+  const mainCard = document.getElementById("public-share-main-card");
+  const errorCard = document.getElementById("public-share-error-card");
+  const ownerControls = document.getElementById("public-share-owner-controls");
   const loading = document.getElementById("public-share-loading");
-  const error = document.getElementById("public-share-error");
   const empty = document.getElementById("public-share-empty");
   const grid = document.getElementById("public-share-preview-grid");
 
-  if(loading) loading.classList.toggle("hidden", state !== "loading");
-  if(error) error.classList.toggle("hidden", state !== "error");
-  if(empty) empty.classList.toggle("hidden", state !== "empty");
-  if(grid) grid.classList.toggle("hidden", state !== "ready");
+  if(loadingCard) loadingCard.classList.toggle("hidden", state !== "loading");
+  if(errorCard) errorCard.classList.toggle("hidden", state !== "error");
+  if(mainCard) mainCard.classList.toggle("hidden", state === "loading" || state === "error" || !currentPublicProfile);
+  if(ownerControls && (state === "loading" || state === "error" || !currentPublicProfile)){
+    ownerControls.classList.add("hidden");
+  }
+
+  const showLibrarySection = publicLibraryExpanded && state !== "error";
+  setPublicLibraryExpanded(showLibrarySection, { scroll: false });
+
+  if(loading) loading.classList.toggle("hidden", !(showLibrarySection && state === "loading"));
+  if(empty) empty.classList.toggle("hidden", !(showLibrarySection && state === "empty"));
+  if(grid) grid.classList.toggle("hidden", !(showLibrarySection && state === "ready"));
 }
 
 function buildShareMetaRow(label, value){
@@ -3881,11 +4473,11 @@ function renderShareLibrary(items = []){
     return;
   }
 
-  renderShareState("ready");
   grid.innerHTML = "";
   currentPublicShareItems.forEach((item) => {
     grid.appendChild(renderShareItemCard(item));
   });
+  renderShareState("ready");
 }
 
 async function initPublicSharePage(){
@@ -3894,37 +4486,13 @@ async function initPublicSharePage(){
     return false;
   }
 
-  setPublicRouteMode(true);
-  hideAllScreens();
-  document.getElementById("public-share-screen")?.classList.remove("hidden");
-  renderShareState("loading");
-
-  try {
-    const profile = await fetchPublicProfileByToken(token);
-    if(!profile || !isShareEnabled(profile)){
-      renderShareState("error");
-      return true;
-    }
-
-    const items = await fetchPublicShareLibraryItems(profile.id);
-    const user = await getCurrentUser();
-    const isOwner = Boolean(user && user.id === profile.id);
-    currentPublicProfile = { ...profile, isOwner, public_share_token: token };
-    activeShareToken = token;
-
-    renderPublicShareProfile(currentPublicProfile);
-    renderShareLibrary(items);
-    return true;
-  } catch (error) {
-    console.error("Public share page init error:", error);
-    renderShareState("error");
-    return true;
-  }
+  return loadPublicShareRoute(token);
 }
 
 function openSharedLibrary(){
   if(document.body.classList.contains("public-route-active")){
-    document.getElementById("public-share-preview-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPublicLibraryExpanded(true);
+    renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState === "loading" ? "loading" : "empty");
     return;
   }
 
@@ -4345,7 +4913,7 @@ async function removeAvatar(){
           closeShareItemModal();
         }
       });
-    
+
       window.addEventListener("error", (event) => {
         showRuntimeError(event?.message || "Unknown script error");
       });
@@ -4365,3 +4933,21 @@ async function removeAvatar(){
     }
 
     init();
+
+```
+
+===== FILE: vercel.json =====
+```json
+{
+  "rewrites": [
+    {
+      "source": "/u/:username",
+      "destination": "/"
+    },
+    {
+      "source": "/share/:token",
+      "destination": "/"
+    }
+  ]
+}
+
