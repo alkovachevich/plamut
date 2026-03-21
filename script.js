@@ -81,6 +81,8 @@
           backHome: "← Back",
           addNew: "+ Add new",
           addFolder: "+ Add folder",
+          addToFolder: "Add to folder",
+          moreActions: "More actions",
           backShelf: "← Back to shelf",
           close: "Close",
           changeStatus: "Change status",
@@ -233,6 +235,8 @@
           backHome: "← Назад",
           addNew: "+ Добавить",
           addFolder: "+ Папка",
+          addToFolder: "Добавить в папку",
+          moreActions: "Ещё действия",
           backShelf: "← Назад к полке",
           close: "Закрыть",
           changeStatus: "Изменить статус",
@@ -324,6 +328,7 @@
     let currentPublicProfileName = "Library";
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
+    let currentOpenMenuItemId = null;
 
     const demoData = {
       Books: [],
@@ -1708,10 +1713,54 @@
       return true;
     }
 
+    function closeCardMenu(){
+      currentOpenMenuItemId = null;
+      document.querySelectorAll(".media-card.menu-open").forEach((card) => {
+        card.classList.remove("menu-open");
+      });
+      document.querySelectorAll(".media-menu-btn[aria-expanded='true']").forEach((button) => {
+        button.setAttribute("aria-expanded", "false");
+      });
+    }
+
+    function toggleCardMenu(event, id){
+      if(event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      const nextId = currentOpenMenuItemId === id ? null : id;
+      closeCardMenu();
+      currentOpenMenuItemId = nextId;
+
+      if(nextId === null){
+        return;
+      }
+
+      const card = document.querySelector(`.media-card[data-item-id="${id}"]`);
+      const button = card?.querySelector(".media-menu-btn");
+      if(card){
+        card.classList.add("menu-open");
+      }
+      if(button){
+        button.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    async function openFolderPickerById(id){
+      closeCardMenu();
+      await openCardById(id);
+      const folderSelect = document.getElementById("details-folder-select");
+      if(folderSelect){
+        folderSelect.focus();
+      }
+    }
+
     function renderShelf(){
       const shelf = document.getElementById("shelf");
       if(!shelf) return;
 
+      closeCardMenu();
       shelf.innerHTML = "";
 
       const filterToolbar = document.getElementById("filter-toolbar");
@@ -1733,31 +1782,44 @@
       const createCard = (item) => {
         const coverHtml = item.cover
           ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
-          : escapeHtml(t().labels.cover);
+          : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
 
         const creatorLine = item.creator
           ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
           : "";
 
-        const actionsHtml = isPublicView
-          ? `<div class="media-actions">
-               <button class="add-btn" onclick="openCardById(${item.id})">${escapeHtml(t().buttons.open)}</button>
-             </div>`
-          : `<div class="media-actions">
-               <button class="add-btn" onclick="changeStatusById(${item.id})">${escapeHtml(t().buttons.changeStatus)}</button>
-               <button class="add-btn" onclick="openCardById(${item.id})">${escapeHtml(t().buttons.open)}</button>
-               <button class="add-btn" onclick="deleteItemById(${item.id})">${escapeHtml(t().buttons.delete)}</button>
+        const menuHtml = isPublicView
+          ? ""
+          : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
+               <button
+                 class="media-menu-btn"
+                 type="button"
+                 aria-label="${escapeHtml(t().buttons.moreActions)}"
+                 aria-haspopup="true"
+                 aria-expanded="false"
+                 onclick="toggleCardMenu(event, ${item.id})"
+               >⋮</button>
+               <div class="media-menu" role="menu">
+                 <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(t().buttons.addToFolder)}</button>
+                 <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
+                 <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
+               </div>
              </div>`;
 
         const card = document.createElement("div");
         card.className = "media-card";
+        card.dataset.itemId = item.id;
         card.innerHTML = `
-          <div class="media-cover">${coverHtml}</div>
+          <div class="media-card-top">
+            <button class="media-cover media-cover-button" type="button" onclick="openCardById(${item.id})">
+              ${coverHtml}
+            </button>
+            ${menuHtml}
+          </div>
           <div class="media-info">
             <h3 class="media-title">${escapeHtml(item.title)}</h3>
             ${creatorLine}
             <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
-            ${actionsHtml}
           </div>
         `;
 
@@ -2041,6 +2103,7 @@
     }
 
     function changeStatusById(id){
+      closeCardMenu();
       const item = getItemById(currentCategory, id);
       if(!item) return;
       currentStatusItemId = id;
@@ -2233,6 +2296,7 @@
     }
 
     async function openCardById(id){
+      closeCardMenu();
       currentOpenItemId = id;
       const item = getItemById(currentCategory, id);
 
@@ -2336,6 +2400,18 @@
       
       await loadCategoryFromSupabase(currentCategory);
     }
+
+    document.addEventListener("click", (event) => {
+      if(!event.target.closest(".media-menu-wrap")){
+        closeCardMenu();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if(event.key === "Escape"){
+        closeCardMenu();
+      }
+    });
 
     async function deleteCurrentItem(){
       if(isPublicView) return;
