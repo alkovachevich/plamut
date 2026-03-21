@@ -1,9 +1,3 @@
-ПОЛНЫЙ КОД ПРОЕКТА PLAMUT С РАЗБИВКОЙ ПО КЛЮЧЕВЫМ ФАЙЛАМ ДЛЯ РАБОТОСПОСОБНОСТИ
-
-```
-
-===== FILE: style.css =====
-```css
 :root {
   color-scheme: dark;
   --bg: #09111f;
@@ -824,21 +818,4 @@ h1, h2, h3, h4, p { margin-top: 0; }
   .public-share-link-actions {
     grid-template-columns: 1fr;
   }
-}
-
-```
-
-===== FILE: vercel.json =====
-```json
-{
-  "rewrites": [
-    {
-      "source": "/u/:username",
-      "destination": "/"
-    },
-    {
-      "source": "/share/:token",
-      "destination": "/"
-    }
-  ]
 }
