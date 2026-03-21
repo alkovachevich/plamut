@@ -1,3 +1,537 @@
+ПОЛНЫЙ КОД ПРОЕКТА PLAMUT С РАЗБИВКОЙ ПО КЛЮЧЕВЫМ ФАЙЛАМ ДЛЯ РАБОТОСПОСОБНОСТИ
+
+===== FILE: index.html =====
+```html
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app-shell" class="page-shell">
+    <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
+    <header class="app-header">
+      <div class="brand-block">
+        <div class="brand-mark">P</div>
+        <div>
+          <div class="brand-title">Plamut</div>
+          <div class="brand-subtitle" id="brand-subtitle">Media Tracker</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="header-panel-wrap">
+          <button
+            id="preferences-btn"
+            class="button button-ghost header-control-btn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            onclick="togglePreferencesPanel()"
+          >
+            <span class="header-control-icon" aria-hidden="true">🌐</span>
+            <span id="preferences-btn-label">RU</span>
+          </button>
+
+          <div id="preferences-panel" class="preferences-panel hidden" role="dialog" aria-labelledby="preferences-title">
+            <div class="preferences-panel-header">
+              <h2 id="preferences-title" class="preferences-title">Interface</h2>
+            </div>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-language-title">Language</div>
+              <div class="option-group compact-option-group">
+                <button id="lang-option-ru" class="button option-button" type="button" onclick="setLanguage('ru')">RU</button>
+                <button id="lang-option-en" class="button option-button" type="button" onclick="setLanguage('en')">EN</button>
+              </div>
+            </section>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-theme-title">Theme</div>
+              <div class="option-group theme-option-group">
+                <button id="theme-option-light" class="button option-button" type="button" onclick="setThemeMode('light')">Light</button>
+                <button id="theme-option-dark" class="button option-button" type="button" onclick="setThemeMode('dark')">Dark</button>
+                <button id="theme-option-system" class="button option-button" type="button" onclick="setThemeMode('system')">System</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="header-user-actions">
+          <button id="profile-btn" class="profile-trigger hidden" type="button" onclick="openProfileModal()" aria-label="Profile" title="Profile">
+            <span id="header-avatar-fallback" class="profile-trigger-fallback">P</span>
+            <img id="header-avatar-img" class="profile-trigger-image hidden" src="" alt="">
+          </button>
+          <button id="login-top-btn" class="button button-secondary hidden" onclick="showAuthScreen()">Login</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="auth-screen" class="auth-screen">
+      <div class="auth-card">
+        <div class="auth-badge">Plamut</div>
+        <h2 class="auth-title">Plamut Login</h2>
+        <p class="auth-text" id="auth-text">Save books, movies, series, anime and manga in one personal library.</p>
+
+        <input id="login-email" class="input" placeholder="Email">
+        <input id="login-password" class="input" type="password" placeholder="Password">
+
+        <div class="auth-actions">
+          <button class="button button-primary" onclick="login()">Login</button>
+          <button class="button button-secondary" onclick="register()">Register</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="home-screen" class="hidden">
+      <section class="hero-block">
+        <div class="hero-content">
+          <div class="hero-badge" id="hero-badge">Your personal universe</div>
+          <h1 class="hero-title">Plamut</h1>
+          <div class="subtitle" id="home-subtitle"></div>
+
+          <div class="hero-actions">
+            <button id="share-library-btn" class="button button-primary share-library-btn" onclick="shareLibrary()">Share Library</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section panel-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="library-section-title">Library</h2>
+            <div class="section-note" id="library-section-note">Choose a category</div>
+          </div>
+        </div>
+
+        <div class="grid category-grid">
+          <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
+          <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
+          <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
+          <div class="card category-card" onclick="openCategory('Anime')" id="cat-anime"></div>
+          <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
+          <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="category-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="goHome()" id="back-home-btn"></button>
+          <h2 id="category-title" class="screen-title"></h2>
+        </div>
+        <div class="toolbar-actions">
+          <button class="button button-primary" onclick="openAddModal()" id="add-new-btn"></button>
+          <button class="button button-secondary" onclick="addCustomFolder()" id="add-folder-btn"></button>
+        </div>
+      </div>
+
+      <div id="public-category-tabs" class="public-category-tabs hidden">
+        <button class="button button-ghost" onclick="openPublicCategory('Books', currentPublicProfileName)" id="public-tab-books">Books</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Movies', currentPublicProfileName)" id="public-tab-movies">Movies</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Series', currentPublicProfileName)" id="public-tab-series">Series</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Anime', currentPublicProfileName)" id="public-tab-anime">Anime</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Manga', currentPublicProfileName)" id="public-tab-manga">Manga</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
+      </div>
+
+      <div class="toolbar-row filter-toolbar" id="filter-toolbar">
+        <label for="status-filter" id="status-filter-label"></label>
+        <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+          <option value="All">All</option>
+          <option value="Planned">Planned</option>
+          <option value="In progress">In progress</option>
+          <option value="Done">Done</option>
+          <option value="Dropped">Dropped</option>
+        </select>
+      </div>
+
+      <div class="shelf-shell">
+        <div class="shelf" id="shelf"></div>
+      </div>
+    </div>
+
+    <div id="details-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="backToCategory()" id="back-shelf-btn"></button>
+        </div>
+      </div>
+
+      <div class="details-layout">
+        <div class="details-cover">
+          <div class="details-cover-box" id="details-cover-box"></div>
+        </div>
+
+        <div class="details-panel">
+          <h2 id="details-title"></h2>
+          <div class="muted details-creator" id="details-creator"></div>
+
+          <div class="details-badges">
+            <span class="badge" id="details-category"></span>
+            <span class="badge" id="details-status"></span>
+          </div>
+
+          <div class="section">
+            <h3 id="description-label"></h3>
+            <div class="muted" id="details-description"></div>
+          </div>
+
+          <div class="section" id="details-folder-section">
+            <h3 id="details-folder-title">Folder</h3>
+            <div class="folder-assignment-row">
+              <select id="details-folder-select" class="select"></select>
+              <button class="button button-secondary" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+            </div>
+          </div>
+
+          <div class="section hidden" id="canonical-key-section">
+            <h3>Canonical Key</h3>
+            <input id="canonical-key-input" class="input" type="text">
+            <button class="button button-secondary" onclick="saveCanonicalKey()">Save</button>
+          </div>
+
+          <div class="section details-actions">
+            <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+            <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="public-share-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" type="button" onclick="exitPublicShareRoute()" id="public-share-back-btn">← Back</button>
+          <h2 id="public-share-title" class="screen-title">Public library</h2>
+        </div>
+      </div>
+
+      <div class="public-share-layout">
+        <section class="public-share-card">
+          <div class="public-share-header">
+            <div class="avatar-preview public-share-avatar">
+              <img id="public-share-avatar-img" src="" alt="avatar">
+              <span id="public-share-avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <div class="public-share-header-text">
+              <div class="badge public-share-badge" id="public-share-badge">NFC card</div>
+              <h3 id="public-share-display-name">Plamut</h3>
+              <div class="muted" id="public-share-username">@plamut</div>
+              <p class="public-share-bio" id="public-share-bio"></p>
+            </div>
+          </div>
+
+          <div class="public-share-owner-note hidden" id="public-share-owner-note"></div>
+
+          <div class="public-share-link-row">
+            <label class="small" for="public-share-link-input" id="public-share-link-label">Public link</label>
+            <div class="public-share-link-actions">
+              <input id="public-share-link-input" class="input" readonly>
+              <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn">Copy link</button>
+              <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn">Show QR</button>
+            </div>
+          </div>
+
+          <div class="public-share-qr hidden" id="public-share-qr-box">
+            <img id="public-share-qr-image" alt="QR code">
+          </div>
+
+          <div class="public-share-actions">
+            <button class="button button-primary" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
+            <button class="button button-secondary" type="button" onclick="saveSharedLibrary()" id="public-share-save-btn">Save to mine</button>
+          </div>
+        </section>
+
+        <section class="public-share-card hidden" id="public-share-owner-controls">
+          <div class="profile-section-heading">
+            <h4 id="public-share-owner-controls-title">Manage NFC card</h4>
+            <p class="small" id="public-share-owner-controls-hint">Control your public link, QR and NFC tools.</p>
+          </div>
+
+          <label class="profile-checkbox">
+            <input type="checkbox" id="share-public-enabled-toggle">
+            <span id="share-public-enabled-label">Public access enabled</span>
+          </label>
+
+          <label for="share-card-title" id="share-card-title-label">Card title</label>
+          <input id="share-card-title" class="input" maxlength="80">
+
+          <label for="share-card-bio" id="share-card-bio-label">Short bio</label>
+          <textarea id="share-card-bio" class="textarea" rows="4"></textarea>
+
+          <label for="share-library-mode" id="share-library-mode-label">Library mode</label>
+          <select id="share-library-mode" class="select">
+            <option value="preview" id="share-library-mode-preview">Preview</option>
+            <option value="full" id="share-library-mode-full">Full library</option>
+          </select>
+
+          <div class="public-share-actions owner-actions-grid">
+            <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="owner-copy-link-btn">Copy link</button>
+            <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="owner-show-qr-btn">Show QR</button>
+            <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfc()" id="owner-write-nfc-btn">Write to NFC</button>
+            <button class="button button-secondary" type="button" onclick="regeneratePublicShareToken()" id="owner-regenerate-token-btn">Regenerate token</button>
+          </div>
+
+          <div class="small hidden" id="share-nfc-support-note"></div>
+
+          <details class="iphone-help-card" id="iphone-help-card">
+            <summary id="iphone-help-summary">How to write NFC on iPhone?</summary>
+            <ol id="iphone-help-steps">
+              <li>Copy your public Plamut link.</li>
+              <li>Install an NFC writing app such as NFC Tools.</li>
+              <li>Open the app.</li>
+              <li>Choose writing a URL/link record.</li>
+              <li>Paste your public Plamut link.</li>
+              <li>Hold the NFC tag near your iPhone and write the data.</li>
+              <li>Test the tag by tapping it with your phone.</li>
+            </ol>
+          </details>
+
+          <div class="modal-actions">
+            <button class="button button-primary" type="button" onclick="savePublicShareSettings()" id="share-save-settings-btn">Save sharing settings</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="public-share-card public-library-section">
+        <div class="profile-section-heading">
+          <h4 id="public-preview-title">Shared library</h4>
+          <p class="small" id="public-preview-hint">Browse this library in read-only mode.</p>
+        </div>
+        <div id="public-share-loading" class="public-share-state">
+          <div class="public-share-spinner" aria-hidden="true"></div>
+          <div id="public-share-loading-text">Loading shared library…</div>
+        </div>
+        <div id="public-share-error" class="public-share-state hidden">Library not found or unavailable.</div>
+        <div id="public-share-empty" class="public-share-state hidden">This shared library is empty.</div>
+        <div class="shelf public-preview-grid hidden" id="public-share-preview-grid"></div>
+      </section>
+    </div>
+
+    <div id="share-item-modal" class="modal hidden">
+      <div class="modal-box share-item-modal-box">
+        <button class="button button-ghost share-item-close" type="button" onclick="closeShareItemModal()">×</button>
+        <div class="share-item-layout">
+          <div class="share-item-cover-box" id="share-item-modal-cover"></div>
+          <div class="share-item-content">
+            <h3 id="share-item-modal-title">Title</h3>
+            <div class="muted hidden" id="share-item-modal-original"></div>
+            <div class="share-item-badges" id="share-item-modal-badges"></div>
+            <div class="share-item-meta-list" id="share-item-modal-meta"></div>
+            <div class="share-item-description hidden" id="share-item-modal-description"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="add-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="search-modal-title"></h3>
+        <div class="small" id="search-modal-subtitle"></div>
+
+        <input id="search-input" class="input" type="text" oninput="renderCategorySearchResults()">
+
+        <div id="search-results"></div>
+
+        <div class="modal-actions">
+          <button class="button button-secondary" onclick="openManualModal()" id="manual-add-btn"></button>
+          <button class="button button-ghost" onclick="closeAddModal()" id="close-search-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="manual-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="manual-title"></h3>
+        <div class="small" id="manual-subtitle"></div>
+
+        <input id="manual-name" class="input" type="text">
+        <input id="manual-creator" class="input" type="text">
+        <input id="manual-cover" class="input" type="text">
+        <textarea id="manual-description" class="textarea"></textarea>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+          <button class="button button-primary" onclick="saveManualItem()" id="manual-save-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-box profile-box">
+        <h3 id="profile-title">Profile</h3>
+        <p class="small profile-subtitle" id="profile-subtitle">Manage your account settings, privacy, avatar and password.</p>
+
+        <div class="profile-layout">
+          <div class="profile-avatar-section">
+            <div class="profile-section-heading">
+              <h4 id="profile-avatar-title">Avatar</h4>
+              <p class="small" id="profile-avatar-hint">Upload a profile image so your account is easier to recognize.</p>
+            </div>
+
+            <div class="avatar-preview">
+              <img id="avatar-img" src="" alt="avatar">
+              <span id="avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <input type="file" id="avatar-file" accept="image/*">
+
+            <button id="profile-upload-avatar-btn" class="button button-primary" onclick="uploadAvatar()">Upload avatar</button>
+            <button id="profile-remove-avatar-btn" class="button button-secondary" onclick="removeAvatar()">Remove avatar</button>
+          </div>
+
+          <div class="profile-info-section">
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-account-title">Account</h4>
+              </div>
+
+              <label id="profile-username-label" for="profile-username">Username</label>
+              <input id="profile-username" class="input">
+
+              <label id="profile-display-name-label" for="profile-display-name">Display name</label>
+              <input id="profile-display-name" class="input">
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-privacy-title">Privacy</h4>
+                <p class="small" id="profile-privacy-hint">Control whether other users can open your public library page.</p>
+              </div>
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-public">
+                <span id="profile-public-label">Public library</span>
+              </label>
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-security-title">Security</h4>
+                <p class="small" id="profile-security-hint">Change your password and save it securely for future sign-ins.</p>
+              </div>
+
+              <label id="profile-new-password-label" for="new-password">New password</label>
+              <input id="new-password" class="input" type="password">
+
+              <label id="profile-confirm-password-label" for="confirm-password">Confirm password</label>
+              <input id="confirm-password" class="input" type="password">
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-show-password" onclick="togglePasswordVisibility()">
+                <span id="profile-show-password-label">Show password</span>
+              </label>
+
+              <button id="profile-change-password-btn" class="button button-secondary profile-password-btn" onclick="changePassword()">Change password</button>
+            </section>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
+          <button class="button button-secondary" onclick="logout()" id="profile-logout-btn">Logout</button>
+          <button class="button button-primary" onclick="saveProfile()" id="profile-save-btn">Save profile</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="share-modal" class="modal hidden">
+      <div class="modal-box share-modal-box">
+        <h3 id="share-modal-title">Share library</h3>
+        <p class="small" id="share-modal-subtitle">Create a public NFC-ready library link for your profile.</p>
+
+        <label class="profile-checkbox">
+          <input type="checkbox" id="share-modal-public-enabled">
+          <span id="share-modal-public-enabled-label">Public access enabled</span>
+        </label>
+
+        <label for="share-modal-card-title" id="share-modal-card-title-label">Card title</label>
+        <input id="share-modal-card-title" class="input" maxlength="80">
+
+        <label for="share-modal-card-bio" id="share-modal-card-bio-label">Short bio</label>
+        <textarea id="share-modal-card-bio" class="textarea" rows="4"></textarea>
+
+        <label for="share-modal-library-mode" id="share-modal-library-mode-label">Library mode</label>
+        <select id="share-modal-library-mode" class="select">
+          <option value="preview" id="share-modal-library-mode-preview">Preview</option>
+          <option value="full" id="share-modal-library-mode-full">Full library</option>
+        </select>
+
+        <label for="share-modal-link-input" id="share-modal-link-label">Public link</label>
+        <div class="public-share-link-actions">
+          <input id="share-modal-link-input" class="input" readonly>
+          <button class="button button-secondary" type="button" onclick="copyPublicShareLinkFromModal()" id="share-modal-copy-btn">Copy link</button>
+          <button class="button button-secondary" type="button" onclick="toggleShareModalQr()" id="share-modal-qr-btn">Show QR</button>
+          <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfcFromModal()" id="share-modal-write-nfc-btn">Write to NFC</button>
+        </div>
+
+        <div class="public-share-qr hidden" id="share-modal-qr-box">
+          <img id="share-modal-qr-image" alt="QR code">
+        </div>
+
+        <div class="small hidden" id="share-modal-nfc-note"></div>
+
+        <details class="iphone-help-card" id="share-modal-iphone-help-card">
+          <summary id="share-modal-iphone-help-summary">How to write NFC on iPhone?</summary>
+          <ol id="share-modal-iphone-help-steps">
+            <li>Copy your public Plamut link.</li>
+            <li>Install an NFC writing app such as NFC Tools.</li>
+            <li>Open the app.</li>
+            <li>Choose writing a URL/link record.</li>
+            <li>Paste your public Plamut link.</li>
+            <li>Hold the NFC tag near your iPhone and write the data.</li>
+            <li>Test the tag by tapping it with your phone.</li>
+          </ol>
+        </details>
+
+        <div class="modal-actions wrap-actions">
+          <button class="button button-secondary" type="button" onclick="openCurrentPublicCard()" id="share-modal-open-btn">Open public card</button>
+          <button class="button button-secondary" type="button" onclick="regeneratePublicShareTokenFromModal()" id="share-modal-regenerate-btn">Regenerate token</button>
+          <button class="button button-ghost" type="button" onclick="closeShareModal()" id="share-modal-close-btn">Close</button>
+          <button class="button button-primary" type="button" onclick="savePublicShareSettingsFromModal()" id="share-modal-save-btn">Save sharing settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-modal" class="modal hidden">
+      <div class="modal-box status-modal-box">
+        <h3 id="status-modal-title"></h3>
+
+        <div class="modal-actions status-button-list" id="status-buttons"></div>
+
+        <div class="status-custom-box">
+          <label id="status-custom-label" for="custom-status-input">Custom status</label>
+          <div class="profile-inline-form">
+            <input id="custom-status-input" class="input" type="text">
+            <button id="status-add-custom-btn" class="button button-secondary" onclick="addCustomStatus()">Add status</button>
+          </div>
+        </div>
+
+        <div class="modal-actions status-footer-actions">
+          <button class="button button-danger" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
+          <button class="button button-ghost" onclick="closeStatusModal()" id="status-cancel"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
+
+```
+
+===== FILE: script.js =====
+```js
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
@@ -3089,6 +3623,49 @@ function normalizePublicLibraryItem(item = {}){
   };
 }
 
+async function fetchPublicProfileByToken(token){
+  if(!token) return null;
+
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("id, username, display_name, avatar_url, public_card_title, public_card_bio, public_share_enabled, public_share_token, public_library_mode")
+    .eq("public_share_token", token)
+    .maybeSingle();
+
+  if(error){
+    console.error("Public profile by token error:", error);
+    throw error;
+  }
+
+  return data || null;
+}
+
+async function fetchPublicShareLibraryItems(ownerProfileId){
+  if(!ownerProfileId) return [];
+
+  let { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", ownerProfileId)
+    .or("is_public.is.null,is_public.eq.true")
+    .order("id", { ascending: false });
+
+  if(error && /is_public/i.test(error.message || "")){
+    ({ data, error } = await supabaseClient
+      .from("user_media")
+      .select("*")
+      .eq("user_id", ownerProfileId)
+      .order("id", { ascending: false }));
+  }
+
+  if(error){
+    console.error("Public library items error:", error);
+    throw error;
+  }
+
+  return (data || []).map(normalizePublicLibraryItem);
+}
+
 function normalizePublicProfileRpcPayload(data){
   const rows = Array.isArray(data) ? data.filter(Boolean) : (data ? [data] : []);
   if(rows.length === 0){
@@ -3857,17 +4434,13 @@ async function initPublicSharePage(){
   renderShareState("loading");
 
   try {
-    const { data, error } = await supabaseClient.rpc("get_public_profile_by_token", { p_token: token });
-    if(error){
-      throw error;
-    }
-
-    const { profile, items } = normalizePublicProfileRpcPayload(data);
+    const profile = await fetchPublicProfileByToken(token);
     if(!profile || !isShareEnabled(profile)){
       renderShareState("error");
       return true;
     }
 
+    const items = await fetchPublicShareLibraryItems(profile.id);
     const user = await getCurrentUser();
     const isOwner = Boolean(user && user.id === profile.id);
     currentPublicProfile = { ...profile, isOwner, public_share_token: token };
@@ -4326,3 +4899,987 @@ async function removeAvatar(){
     }
 
     init();
+
+```
+
+===== FILE: style.css =====
+```css
+:root {
+  color-scheme: dark;
+  --bg: #09111f;
+  --bg-elevated: rgba(15, 23, 39, 0.84);
+  --panel: rgba(18, 28, 47, 0.92);
+  --panel-strong: #15213a;
+  --panel-muted: #0f1828;
+  --surface: #1a2640;
+  --surface-hover: #223151;
+  --surface-soft: rgba(25, 38, 64, 0.76);
+  --surface-active: #2b3e68;
+  --border: rgba(141, 168, 215, 0.18);
+  --border-strong: rgba(144, 175, 231, 0.3);
+  --text: #f5f8ff;
+  --text-muted: #9fb0cf;
+  --text-soft: #7f90ae;
+  --accent: #74a7ff;
+  --accent-strong: #4a8dff;
+  --accent-contrast: #081120;
+  --danger: #ff6f7d;
+  --danger-soft: rgba(255, 111, 125, 0.18);
+  --success: #73d7a5;
+  --shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.24);
+  --shadow-medium: 0 22px 48px rgba(0, 0, 0, 0.28);
+  --shadow-strong: 0 28px 70px rgba(3, 8, 18, 0.45);
+  --radius-xl: 28px;
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --transition: 180ms ease;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f5fb;
+  --bg-elevated: rgba(255, 255, 255, 0.88);
+  --panel: rgba(255, 255, 255, 0.95);
+  --panel-strong: #ffffff;
+  --panel-muted: #eef3fb;
+  --surface: #edf3ff;
+  --surface-hover: #dce9ff;
+  --surface-soft: rgba(238, 243, 251, 0.92);
+  --surface-active: #d2e2ff;
+  --border: rgba(71, 93, 137, 0.14);
+  --border-strong: rgba(74, 109, 182, 0.26);
+  --text: #132238;
+  --text-muted: #55657f;
+  --text-soft: #74839b;
+  --accent: #2e6ff3;
+  --accent-strong: #1f59cf;
+  --accent-contrast: #ffffff;
+  --danger: #cc4055;
+  --danger-soft: rgba(204, 64, 85, 0.14);
+  --success: #268a5d;
+  --shadow-soft: 0 16px 32px rgba(67, 84, 120, 0.08);
+  --shadow-medium: 0 24px 48px rgba(67, 84, 120, 0.12);
+  --shadow-strong: 0 30px 60px rgba(67, 84, 120, 0.18);
+}
+
+* { box-sizing: border-box; }
+html { font-size: 16px; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, Arial, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(116, 167, 255, 0.14), transparent 24%),
+    radial-gradient(circle at top right, rgba(98, 89, 208, 0.14), transparent 22%),
+    linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 92%, #000 8%) 100%);
+}
+
+button, input, select, textarea { font: inherit; }
+a { color: inherit; }
+h1, h2, h3, h4, p { margin-top: 0; }
+.hidden { display: none !important; }
+
+.page-shell {
+  width: min(1240px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 48px;
+}
+
+.app-header,
+.panel-section,
+.screen-panel,
+.auth-card,
+.modal-box,
+.details-panel,
+.details-cover,
+.media-card,
+.card,
+.search-item,
+.profile-section-card,
+.preferences-panel,
+.shelf-shell {
+  backdrop-filter: blur(18px);
+}
+
+.app-header {
+  position: sticky;
+  top: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 28px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow-soft);
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #6eabff 0%, #7f61ff 100%);
+  box-shadow: 0 16px 30px rgba(70, 117, 255, 0.3);
+}
+
+.brand-title { font-size: 1.1rem; font-weight: 700; }
+.brand-subtitle { color: var(--text-soft); font-size: 0.82rem; }
+
+.header-actions,
+.header-user-actions,
+.topbar,
+.toolbar-row,
+.modal-actions,
+.hero-actions,
+.auth-actions,
+.profile-inline-form,
+.folder-assignment-row,
+.details-actions,
+.option-group,
+.public-category-tabs,
+.toolbar-primary,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.header-actions { justify-content: flex-end; }
+.header-panel-wrap { position: relative; }
+.header-control-btn { min-width: 90px; justify-content: center; }
+.header-control-icon { font-size: 1rem; }
+
+.preferences-panel {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(320px, calc(100vw - 32px));
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  box-shadow: var(--shadow-strong);
+}
+
+.preferences-panel-header { margin-bottom: 14px; }
+.preferences-title { margin: 0; font-size: 1rem; }
+.preferences-section + .preferences-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.preferences-section-title {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.compact-option-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.theme-option-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.option-button { justify-content: center; }
+.option-button.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface) 82%);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-strong) 58%);
+  color: var(--text);
+}
+
+.profile-trigger {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, transparent 10%) 0%, var(--panel-muted) 100%);
+  box-shadow: var(--shadow-soft);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.profile-trigger:hover,
+.profile-trigger:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-strong) 62%);
+  box-shadow: var(--shadow-medium);
+  outline: none;
+}
+
+.profile-trigger-fallback,
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-weight: 700;
+  color: var(--accent-contrast);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, #fff 22%) 0%, color-mix(in srgb, var(--accent-strong) 88%, #2f3d6c 12%) 100%);
+}
+
+.profile-trigger-image,
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.button,
+.select,
+.input,
+.textarea {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  transition: border-color var(--transition), background var(--transition), transform var(--transition), box-shadow var(--transition), color var(--transition);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 16px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.button:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.button:active { transform: translateY(0); background: var(--surface-active); }
+.button:focus-visible,
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.media-cover-button:focus-visible,
+.media-menu-btn:focus-visible,
+.category-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent 74%);
+}
+.button-primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, #fff 18%) 0%, var(--accent-strong) 100%);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--accent-strong) 28%, transparent 72%);
+}
+.button-primary:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 74%, #fff 26%) 0%, color-mix(in srgb, var(--accent-strong) 92%, #000 8%) 100%); }
+.button-secondary { background: color-mix(in srgb, var(--surface) 88%, var(--panel-strong) 12%); }
+.button-ghost { background: transparent; box-shadow: none; }
+.button-danger {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border) 68%);
+  color: var(--danger);
+}
+.button-danger:hover { background: color-mix(in srgb, var(--danger-soft) 80%, var(--surface) 20%); }
+
+.select,
+.input,
+.textarea {
+  width: 100%;
+  background: color-mix(in srgb, var(--panel-muted) 88%, transparent 12%);
+  color: var(--text);
+  padding: 12px 14px;
+}
+.select { min-width: 180px; }
+.textarea { min-height: 120px; resize: vertical; }
+.input::placeholder,
+.textarea::placeholder { color: var(--text-soft); }
+.select:focus,
+.input:focus,
+.textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong) 52%);
+  background: color-mix(in srgb, var(--panel) 90%, transparent 10%);
+}
+
+.auth-screen { display: flex; justify-content: center; padding: 40px 0 0; }
+.auth-card,
+.panel-section,
+.screen-panel,
+.shelf-shell,
+.modal-box,
+.details-panel,
+.details-cover {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-medium);
+}
+.auth-card {
+  width: min(460px, 100%);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+}
+.auth-badge,
+.hero-badge,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+.auth-badge,
+.hero-badge { padding: 7px 12px; font-size: 0.82rem; }
+.auth-text,
+.small,
+.section-note,
+.subtitle,
+.muted,
+.media-meta,
+.media-status,
+.search-item-meta,
+.brand-subtitle { color: var(--text-muted); }
+.small { font-size: 0.88rem; }
+
+.hero-block { margin-bottom: 24px; }
+.hero-content {
+  padding: 36px;
+  border-radius: 32px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top right, rgba(116, 167, 255, 0.18), transparent 24%),
+    radial-gradient(circle at bottom left, rgba(127, 97, 255, 0.18), transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, #fff 4%) 0%, var(--panel-strong) 100%);
+  box-shadow: var(--shadow-medium);
+}
+.hero-title { margin-bottom: 12px; font-size: clamp(2.7rem, 8vw, 4.1rem); letter-spacing: -0.04em; }
+.subtitle { max-width: 650px; margin-bottom: 0; font-size: 1.02rem; line-height: 1.65; }
+.share-library-btn { min-width: 220px; }
+.panel-section,
+.screen-panel,
+.shelf-shell {
+  border-radius: 28px;
+  padding: 20px;
+}
+.screen-title { margin: 0; }
+.panel-toolbar { justify-content: space-between; margin-bottom: 16px; }
+.filter-toolbar {
+  justify-content: flex-start;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-soft) 76%, transparent 24%);
+  border: 1px solid var(--border);
+}
+.public-category-tabs { margin-bottom: 16px; }
+
+.grid,
+.shelf {
+  display: grid;
+  gap: 18px;
+}
+.grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.category-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.shelf { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.card,
+.media-card,
+.search-item,
+.profile-section-card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 95%, #fff 5%) 0%, var(--panel-muted) 100%);
+  box-shadow: var(--shadow-soft);
+}
+.card,
+.media-card { transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition), background var(--transition); }
+.card:hover,
+.media-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-strong) 72%);
+  box-shadow: var(--shadow-medium);
+}
+.category-card {
+  min-height: 110px;
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 1.02rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.media-card {
+  position: relative;
+  overflow: hidden;
+}
+.media-card-top { position: relative; padding: 14px 14px 0; }
+.media-cover-button {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.media-cover,
+.details-cover-box,
+.search-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-muted) 92%, #fff 8%) 0%, color-mix(in srgb, var(--surface) 85%, transparent 15%) 100%);
+}
+.media-cover {
+  height: 260px;
+  border-radius: 18px;
+  padding: 14px;
+}
+.media-cover img,
+.details-cover-box img,
+.search-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
+.media-cover-fallback { padding: 24px; text-align: center; color: var(--text-soft); }
+.media-info { padding: 16px 18px 18px; }
+.media-title { margin: 0 0 8px; font-size: 1rem; }
+.media-status { font-size: 0.88rem; }
+.media-menu-wrap { position: absolute; top: 24px; right: 24px; z-index: 2; }
+.media-menu-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 92%, transparent 8%);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+.media-menu {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  min-width: 196px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow-strong);
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+.media-card.menu-open .media-menu { display: flex; }
+.media-menu-item {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.media-menu-item:hover,
+.media-menu-item:focus-visible { background: var(--surface); outline: none; }
+.media-menu-item-danger { color: var(--danger); }
+
+.search-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.search-item-left { display: flex; gap: 12px; min-width: 0; }
+.search-thumb {
+  width: 56px;
+  height: 80px;
+  flex: 0 0 56px;
+  border-radius: 12px;
+  padding: 6px;
+}
+.search-item-title { margin-bottom: 4px; font-size: 0.95rem; }
+.search-item-text { min-width: 0; }
+
+.details-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 22px;
+}
+.details-cover,
+.details-panel { border-radius: 28px; }
+.details-cover-box {
+  min-height: 420px;
+  padding: 20px;
+  color: var(--text-soft);
+}
+.details-panel { padding: 26px; }
+.details-creator { margin-bottom: 12px; }
+.details-badges { margin-bottom: 8px; }
+.badge { padding: 7px 12px; font-size: 0.82rem; margin: 0 8px 8px 0; }
+.section + .section { margin-top: 22px; }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 10, 18, 0.6);
+  backdrop-filter: blur(8px);
+}
+.modal-box {
+  width: min(720px, 100%);
+  max-height: min(88vh, 900px);
+  padding: 24px;
+  border-radius: 28px;
+  overflow: auto;
+}
+.status-modal-box { width: min(520px, 100%); }
+.status-button-list,
+.status-footer-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+.status-button-list .button,
+.status-footer-actions .button { width: 100%; }
+.status-custom-box { margin: 16px 0; }
+
+.profile-box { width: min(760px, 100%); }
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
+  gap: 22px;
+  margin-top: 16px;
+}
+.profile-avatar-section { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.avatar-preview {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-soft);
+  background: var(--surface);
+}
+.avatar-fallback {
+  position: absolute;
+  inset: 0;
+}
+.profile-info-section { display: flex; flex-direction: column; gap: 12px; }
+.profile-section-card { padding: 18px; }
+.profile-section-heading .small { margin-bottom: 0; }
+.profile-checkbox { display: inline-flex; align-items: center; gap: 10px; }
+.profile-password-btn { align-self: flex-start; }
+#avatar-file { max-width: 100%; color: var(--text-muted); }
+
+.folder-block { margin-top: 24px; }
+.folder-block-title { margin: 0 0 14px; font-size: 1rem; }
+.runtime-error-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 120;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 48%, transparent 52%);
+  color: #fff;
+  background: color-mix(in srgb, var(--danger) 36%, #23060b 64%);
+  box-shadow: var(--shadow-strong);
+}
+
+@media (max-width: 900px) {
+  .page-shell { width: min(100% - 24px, 1240px); padding-top: 16px; }
+  .app-header { top: 8px; align-items: flex-start; }
+  .details-layout,
+  .profile-layout { grid-template-columns: 1fr; }
+  .details-cover-box { min-height: 300px; }
+}
+
+@media (max-width: 720px) {
+  .app-header,
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover { border-radius: 22px; }
+  .app-header,
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel { padding: 18px; }
+  .hero-content { padding: 24px; border-radius: 24px; }
+  .hero-title { font-size: 2.4rem; }
+  .header-actions,
+  .header-user-actions,
+  .toolbar-actions,
+  .toolbar-primary,
+  .topbar { width: 100%; }
+  .header-actions,
+  .topbar { justify-content: space-between; }
+  .preferences-panel { left: 0; right: 0; width: auto; }
+  .category-grid,
+  .shelf { grid-template-columns: 1fr; }
+  .media-cover { height: 220px; }
+  .search-item { flex-direction: column; align-items: stretch; }
+  .filter-toolbar { align-items: stretch; }
+  .filter-toolbar label { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .page-shell { width: min(100% - 20px, 1240px); }
+  .app-header { flex-direction: column; }
+  .header-actions { width: 100%; justify-content: space-between; }
+  .toolbar-actions .button,
+  .details-actions .button,
+  .folder-assignment-row .button,
+  .folder-assignment-row .select,
+  .modal-actions .button,
+  .auth-actions .button,
+  .hero-actions .button { width: 100%; }
+  .folder-assignment-row,
+  .details-actions,
+  .modal-actions,
+  .auth-actions,
+  .hero-actions,
+  .toolbar-actions,
+  .profile-inline-form { align-items: stretch; }
+  .theme-option-group { grid-template-columns: 1fr; }
+}
+
+.public-share-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.public-share-card,
+.share-modal-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.share-modal-box {
+  width: min(760px, 100%);
+}
+
+.public-share-card {
+  padding: 20px;
+  border-radius: 24px;
+  background: var(--panel-bg, rgba(255,255,255,0.85));
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.1));
+  box-shadow: var(--panel-shadow, 0 18px 40px rgba(15, 23, 42, 0.12));
+}
+
+.public-share-header {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.public-share-avatar {
+  flex-shrink: 0;
+}
+
+.public-share-avatar #public-share-avatar-img,
+.public-share-avatar #public-share-avatar-fallback {
+  width: 104px;
+  height: 104px;
+}
+
+.public-share-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.public-share-badge {
+  width: fit-content;
+}
+
+.public-share-bio,
+.public-share-owner-note {
+  margin: 0;
+}
+
+.public-share-owner-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.public-share-link-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.public-share-link-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  gap: 10px;
+  align-items: center;
+}
+
+.public-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.owner-actions-grid {
+  margin-top: 6px;
+}
+
+.public-share-qr {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.public-share-qr img {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  border-radius: 16px;
+  background: white;
+  padding: 10px;
+}
+
+.public-preview-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.iphone-help-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.iphone-help-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.iphone-help-card ol {
+  margin: 12px 0 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.wrap-actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+  .public-share-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .public-share-header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .public-share-header-text {
+    align-items: center;
+  }
+
+  .public-share-link-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+body.public-route-active {
+  background:
+    radial-gradient(circle at top, rgba(91, 33, 182, 0.28), transparent 34%),
+    linear-gradient(180deg, #080b14 0%, #0f172a 48%, #050816 100%);
+}
+
+body.public-route-active .app-header,
+body.public-route-active #auth-screen,
+body.public-route-active #home-screen,
+body.public-route-active #category-screen,
+body.public-route-active #details-screen,
+body.public-route-active #add-modal,
+body.public-route-active #manual-modal,
+body.public-route-active #profile-modal,
+body.public-route-active #status-modal,
+body.public-route-active #share-modal {
+  display: none !important;
+}
+
+body.public-route-active #public-share-screen {
+  display: block !important;
+  width: min(1240px, calc(100vw - 32px));
+  margin: 40px auto 64px;
+}
+
+body.public-route-active .page-shell {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+}
+
+.public-library-section {
+  min-height: 340px;
+}
+
+.public-share-state {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  color: var(--muted-text, rgba(255,255,255,0.7));
+}
+
+.public-share-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 3px solid rgba(255,255,255,0.16);
+  border-top-color: rgba(255,255,255,0.92);
+  animation: plamut-spin 0.9s linear infinite;
+}
+
+@keyframes plamut-spin {
+  to { transform: rotate(360deg); }
+}
+
+.public-preview-grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.public-preview-grid .media-card {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.public-preview-grid .media-card:hover,
+.public-preview-grid .media-card:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.35);
+  border-color: rgba(129, 140, 248, 0.55);
+}
+
+.share-item-modal-box {
+  width: min(920px, 100%);
+  position: relative;
+}
+
+.share-item-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.share-item-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.share-item-cover-box {
+  min-height: 360px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-item-cover-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.share-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.share-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-item-meta-list {
+  display: grid;
+  gap: 10px;
+}
+
+.share-item-meta-row {
+  display: grid;
+  gap: 4px;
+}
+
+.share-item-meta-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-text, rgba(255,255,255,0.56));
+}
+
+.share-item-description {
+  line-height: 1.6;
+  color: var(--muted-text, rgba(255,255,255,0.82));
+}
+
+@media (max-width: 860px) {
+  .share-item-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .share-item-cover-box {
+    min-height: 280px;
+  }
+}
+```
+
+===== FILE: vercel.json =====
+```json
+
