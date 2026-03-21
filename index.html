@@ -202,55 +202,75 @@
     </div>
 
 
-    <div id="public-share-screen" class="hidden screen-panel">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="exitPublicShareRoute()" id="public-share-back-btn">← Back</button>
-          <h2 id="public-share-title" class="screen-title">Public library</h2>
-        </div>
-      </div>
+    <div id="public-share-screen" class="hidden screen-panel public-share-screen">
+      <div class="public-share-shell">
+        <button class="public-share-back-link" type="button" onclick="exitPublicShareRoute()" id="public-share-back-btn">← Back</button>
 
-      <div class="public-share-layout">
-        <section class="public-share-card">
-          <div class="public-share-header">
-            <div class="avatar-preview public-share-avatar">
+        <section id="public-share-loading-card" class="public-card public-card-skeleton" aria-hidden="true">
+          <div class="public-card-skeleton-avatar"></div>
+          <div class="public-card-skeleton-lines">
+            <span class="public-card-skeleton-line public-card-skeleton-line-chip"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-title"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-handle"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-copy"></span>
+          </div>
+          <div class="public-card-skeleton-actions">
+            <span class="public-card-skeleton-button public-card-skeleton-button-main"></span>
+            <span class="public-card-skeleton-button"></span>
+            <span class="public-card-skeleton-button"></span>
+          </div>
+        </section>
+
+        <section id="public-share-main-card" class="public-card hidden">
+          <div class="public-card-orb public-card-orb-primary" aria-hidden="true"></div>
+          <div class="public-card-orb public-card-orb-secondary" aria-hidden="true"></div>
+
+          <div class="public-card-head">
+            <div class="avatar-preview public-share-avatar public-card-avatar-wrap">
               <img id="public-share-avatar-img" src="" alt="avatar">
               <span id="public-share-avatar-fallback" class="avatar-fallback">P</span>
             </div>
 
-            <div class="public-share-header-text">
-              <div class="badge public-share-badge" id="public-share-badge">NFC card</div>
-              <h3 id="public-share-display-name">Plamut</h3>
-              <div class="muted" id="public-share-username">@plamut</div>
-              <p class="public-share-bio" id="public-share-bio"></p>
+            <div class="public-card-copy">
+              <div class="public-card-chip-row">
+                <span class="public-card-chip" id="public-share-badge">NFC card</span>
+              </div>
+              <h1 id="public-share-display-name" class="public-card-title">My Plamut</h1>
+              <div class="public-card-username" id="public-share-username">@plamut</div>
+              <p class="public-card-description" id="public-share-bio"></p>
             </div>
           </div>
 
-          <div class="public-share-owner-note hidden" id="public-share-owner-note"></div>
-
-          <div class="public-share-link-row">
-            <label class="small" for="public-share-link-input" id="public-share-link-label">Public link</label>
-            <div class="public-share-link-actions">
-              <input id="public-share-link-input" class="input" readonly>
-              <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn">Copy link</button>
-              <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn">Show QR</button>
-            </div>
+          <div class="public-card-actions">
+            <button class="button button-primary public-card-open-btn" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn" aria-label="Copy link" title="Copy link">⧉</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn" aria-label="Show QR" title="Show QR">⌁</button>
           </div>
+
+          <input id="public-share-link-input" class="input hidden" readonly>
 
           <div class="public-share-qr hidden" id="public-share-qr-box">
             <img id="public-share-qr-image" alt="QR code">
           </div>
-
-          <div class="public-share-actions">
-            <button class="button button-primary" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
-            <button class="button button-secondary" type="button" onclick="saveSharedLibrary()" id="public-share-save-btn">Save to mine</button>
-          </div>
         </section>
 
-        <section class="public-share-card hidden" id="public-share-owner-controls">
-          <div class="profile-section-heading">
+        <section id="public-share-error-card" class="public-card public-share-feedback hidden">
+          <div class="public-share-state-icon">⚠️</div>
+          <h2 id="public-share-error-title">Library not found</h2>
+          <p id="public-share-error-text">Please try another Plamut share link.</p>
+        </section>
+
+        <section class="public-owner-panel hidden" id="public-share-owner-controls">
+          <div class="profile-section-heading public-owner-panel-heading">
             <h4 id="public-share-owner-controls-title">Manage NFC card</h4>
             <p class="small" id="public-share-owner-controls-hint">Control your public link, QR and NFC tools.</p>
+          </div>
+
+          <div class="public-owner-panel-link-row">
+            <label class="small" for="owner-share-link-input" id="public-share-link-label">Public link</label>
+            <div class="public-owner-panel-link-wrap">
+              <input id="owner-share-link-input" class="input" readonly>
+            </div>
           </div>
 
           <label class="profile-checkbox">
@@ -270,7 +290,7 @@
             <option value="full" id="share-library-mode-full">Full library</option>
           </select>
 
-          <div class="public-share-actions owner-actions-grid">
+          <div class="public-owner-panel-actions">
             <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="owner-copy-link-btn">Copy link</button>
             <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="owner-show-qr-btn">Show QR</button>
             <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfc()" id="owner-write-nfc-btn">Write to NFC</button>
@@ -296,21 +316,26 @@
             <button class="button button-primary" type="button" onclick="savePublicShareSettings()" id="share-save-settings-btn">Save sharing settings</button>
           </div>
         </section>
-      </div>
 
-      <section class="public-share-card public-library-section">
-        <div class="profile-section-heading">
-          <h4 id="public-preview-title">Shared library</h4>
-          <p class="small" id="public-preview-hint">Browse this library in read-only mode.</p>
-        </div>
-        <div id="public-share-loading" class="public-share-state">
-          <div class="public-share-spinner" aria-hidden="true"></div>
-          <div id="public-share-loading-text">Loading shared library…</div>
-        </div>
-        <div id="public-share-error" class="public-share-state hidden">Library not found or unavailable.</div>
-        <div id="public-share-empty" class="public-share-state hidden">This shared library is empty.</div>
-        <div class="shelf public-preview-grid hidden" id="public-share-preview-grid"></div>
-      </section>
+        <section id="public-share-library-section" class="public-library-section hidden">
+          <div class="profile-section-heading public-library-heading">
+            <h4 id="public-preview-title">Shared library</h4>
+            <p class="small" id="public-preview-hint">Browse this library in read-only mode.</p>
+          </div>
+          <div id="public-share-loading" class="public-share-state hidden">
+            <div class="public-share-state-skeleton public-share-state-skeleton-large"></div>
+            <div class="public-share-state-skeleton"></div>
+            <div class="public-share-state-skeleton public-share-state-skeleton-short"></div>
+            <div id="public-share-loading-text" class="public-share-loading-text">Loading shared library…</div>
+          </div>
+          <div id="public-share-empty" class="public-share-state hidden">
+            <div class="public-share-state-icon">📚</div>
+            <div id="public-share-empty-title">В этой библиотеке пока нет публичных материалов</div>
+            <div class="small" id="public-share-empty-text">Вернитесь позже — владелец может добавить новые книги, фильмы или сериалы.</div>
+          </div>
+          <div class="shelf public-preview-grid hidden" id="public-share-preview-grid"></div>
+        </section>
+      </div>
     </div>
 
     <div id="share-item-modal" class="modal hidden">
