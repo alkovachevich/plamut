@@ -349,6 +349,110 @@
       }
     };
 
+    Object.assign(translations.en, {
+      share: {
+        modalTitle: "Share library",
+        modalSubtitle: "Create a public NFC-ready library link for your profile.",
+        publicAccess: "Public access enabled",
+        cardTitle: "Card title",
+        shortBio: "Short bio",
+        libraryMode: "Library mode",
+        previewMode: "Preview",
+        fullMode: "Full library",
+        publicLink: "Public link",
+        copyLink: "Copy link",
+        showQr: "Show QR",
+        hideQr: "Hide QR",
+        writeNfc: "Write to NFC",
+        rewriteNfc: "Rewrite NFC",
+        regenerateToken: "Regenerate token",
+        openPublicCard: "Open public card",
+        saveSettings: "Save sharing settings",
+        publicLibraryTitle: "Public library / NFC card",
+        publicLibraryHint: "A public read-only library page you can share with NFC, QR and direct link.",
+        ownerControlsTitle: "Manage NFC card",
+        ownerControlsHint: "Control your public link, QR and optional NFC writing tools.",
+        ownerNote: "This is your own NFC card. Visitors can only view it in read-only mode.",
+        previewTitle: "Library preview",
+        previewHint: "A read-only preview from this public library.",
+        openLibrary: "Open library",
+        saveToMine: "Save to mine",
+        savedToMine: "Library saved to your collection.",
+        loginToSave: "Log in to save this library to your collection.",
+        alreadySaved: "This library is already saved.",
+        unavailable: "This public card is unavailable.",
+        private: "Public access is disabled for this card.",
+        noItems: "No public items yet.",
+        noPreview: "No items are available for the public preview yet.",
+        tokenRegenerated: "New public token generated.",
+        settingsSaved: "Sharing settings saved.",
+        nfcNotSupported: "Web NFC is not available in this browser. Use the link, QR code or iPhone instructions instead.",
+        nfcReady: "Web NFC is available in this browser.",
+        nfcPrompt: "Hold your NFC tag near the device to write the public Plamut link.",
+        nfcSuccess: "Public Plamut link written to NFC tag.",
+        nfcError: "Could not write the NFC tag",
+        iphoneHelp: "How to write NFC on iPhone?",
+        close: "Close",
+        linkCopied: "Public link copied:",
+        savePromptAfterLogin: "After login, return here and tap Save to mine again.",
+        qrAlt: "QR code for public Plamut card",
+        back: "← Back",
+        ownerOnlyAction: "Only the owner can manage this NFC card."
+      }
+    });
+
+    Object.assign(translations.ru, {
+      share: {
+        modalTitle: "Поделиться библиотекой",
+        modalSubtitle: "Создайте публичную NFC-ready ссылку на свой профиль.",
+        publicAccess: "Публичный доступ включён",
+        cardTitle: "Заголовок карточки",
+        shortBio: "Короткое описание",
+        libraryMode: "Режим библиотеки",
+        previewMode: "Превью",
+        fullMode: "Полная библиотека",
+        publicLink: "Публичная ссылка",
+        copyLink: "Скопировать ссылку",
+        showQr: "Показать QR",
+        hideQr: "Скрыть QR",
+        writeNfc: "Записать на NFC",
+        rewriteNfc: "Перезаписать NFC",
+        regenerateToken: "Регенерировать токен",
+        openPublicCard: "Открыть публичную карточку",
+        saveSettings: "Сохранить настройки шаринга",
+        publicLibraryTitle: "Публичная библиотека / NFC-карта",
+        publicLibraryHint: "Публичная read-only страница библиотеки для NFC, QR и прямой ссылки.",
+        ownerControlsTitle: "Управление NFC-картой",
+        ownerControlsHint: "Управляйте публичной ссылкой, QR и дополнительной записью на NFC.",
+        ownerNote: "Это ваша собственная NFC-карта. Для посетителей она доступна только в режиме просмотра.",
+        previewTitle: "Превью библиотеки",
+        previewHint: "Read-only превью этой публичной библиотеки.",
+        openLibrary: "Открыть библиотеку",
+        saveToMine: "Сохранить к себе",
+        savedToMine: "Библиотека сохранена в вашу коллекцию.",
+        loginToSave: "Войдите, чтобы сохранить эту библиотеку к себе.",
+        alreadySaved: "Эта библиотека уже сохранена.",
+        unavailable: "Эта публичная карточка недоступна.",
+        private: "Публичный доступ к этой карточке выключен.",
+        noItems: "Публичных материалов пока нет.",
+        noPreview: "Пока нет элементов для публичного превью.",
+        tokenRegenerated: "Создан новый публичный токен.",
+        settingsSaved: "Настройки шаринга сохранены.",
+        nfcNotSupported: "Web NFC недоступен в этом браузере. Используйте ссылку, QR-код или инструкцию для iPhone.",
+        nfcReady: "Web NFC доступен в этом браузере.",
+        nfcPrompt: "Поднесите NFC-метку к устройству, чтобы записать публичную ссылку Plamut.",
+        nfcSuccess: "Публичная ссылка Plamut записана на NFC-метку.",
+        nfcError: "Не удалось записать NFC-метку",
+        iphoneHelp: "Как записать NFC на iPhone?",
+        close: "Закрыть",
+        linkCopied: "Публичная ссылка скопирована:",
+        savePromptAfterLogin: "После входа вернитесь сюда и снова нажмите «Сохранить к себе».",
+        qrAlt: "QR-код публичной карточки Plamut",
+        back: "← Назад",
+        ownerOnlyAction: "Управлять этой NFC-картой может только владелец."
+      }
+    });
+
     let currentLanguage = localStorage.getItem("plamut_language") || "ru";
     let currentThemeMode = localStorage.getItem("plamut_theme_mode") || "system";
     let currentCategory = null;
@@ -360,6 +464,9 @@
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
     let currentOpenMenuItemId = null;
+    let currentProfileData = null;
+    let currentPublicProfile = null;
+    let activeShareToken = "";
 
     const demoData = {
       Books: [],
@@ -483,6 +590,93 @@
 
     function normalizeSpaces(text){
       return String(text || "").replace(/\s+/g, " ").trim();
+    }
+
+    function generateShareToken(){
+      if(window.crypto?.randomUUID){
+        return window.crypto.randomUUID().replace(/-/g, "");
+      }
+      return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    }
+
+    function isShareEnabled(profile = {}){
+      if(typeof profile.public_share_enabled === "boolean"){
+        return profile.public_share_enabled;
+      }
+      if(typeof profile.is_public === "boolean"){
+        return profile.is_public;
+      }
+      return true;
+    }
+
+    function getShareCardTitle(profile = {}){
+      return normalizeSpaces(profile.public_card_title || profile.display_name || profile.username || "Plamut");
+    }
+
+    function getShareCardBio(profile = {}){
+      return normalizeSpaces(profile.public_card_bio || "");
+    }
+
+    function getShareLibraryMode(profile = {}){
+      const mode = String(profile.public_library_mode || "preview").toLowerCase();
+      return mode === "full" ? "full" : "preview";
+    }
+
+    function buildPublicShareUrl(token){
+      return `${window.location.origin}/share/${encodeURIComponent(token || "")}`;
+    }
+
+    function buildQrImageUrl(url){
+      return `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(url || "")}`;
+    }
+
+    function browserSupportsWebNfc(){
+      return typeof window.NDEFWriter !== "undefined" || typeof window.NDEFReader !== "undefined";
+    }
+
+    function isLikelyIphone(){
+      const ua = navigator.userAgent || "";
+      return /iPhone|iPad|iPod/i.test(ua);
+    }
+
+    function populateShareQr(containerId, imageId, url){
+      const box = document.getElementById(containerId);
+      const img = document.getElementById(imageId);
+      if(!box || !img || !url){
+        return;
+      }
+      img.src = buildQrImageUrl(url);
+      img.alt = t().share.qrAlt;
+    }
+
+    function setValueIfPresent(id, value){
+      const element = document.getElementById(id);
+      if(element){
+        element.value = value;
+      }
+    }
+
+    function setCheckedIfPresent(id, value){
+      const element = document.getElementById(id);
+      if(element){
+        element.checked = Boolean(value);
+      }
+    }
+
+    function setTextIfPresent(id, value){
+      const element = document.getElementById(id);
+      if(element){
+        element.textContent = value;
+      }
+    }
+
+    function ensurePublicProfileCollectionsReset(){
+      demoData.Books = [];
+      demoData.Movies = [];
+      demoData.Series = [];
+      demoData.Anime = [];
+      demoData.Manga = [];
+      demoData.Blacklist = [];
     }
 
     function getItemStorageKey(itemOrParts = {}){
@@ -691,6 +885,74 @@
       document.getElementById("share-library-btn").textContent = t().topbar.shareLibrary;
       document.getElementById("auth-text").textContent = t().auth.text;
 
+      setTextIfPresent("share-modal-title", t().share.modalTitle);
+      setTextIfPresent("share-modal-subtitle", t().share.modalSubtitle);
+      setTextIfPresent("share-modal-public-enabled-label", t().share.publicAccess);
+      setTextIfPresent("share-modal-card-title-label", t().share.cardTitle);
+      setTextIfPresent("share-modal-card-bio-label", t().share.shortBio);
+      setTextIfPresent("share-modal-library-mode-label", t().share.libraryMode);
+      setTextIfPresent("share-modal-library-mode-preview", t().share.previewMode);
+      setTextIfPresent("share-modal-library-mode-full", t().share.fullMode);
+      setTextIfPresent("share-modal-link-label", t().share.publicLink);
+      setTextIfPresent("share-modal-copy-btn", t().share.copyLink);
+      setTextIfPresent("share-modal-qr-btn", t().share.showQr);
+      setTextIfPresent("share-modal-write-nfc-btn", t().share.writeNfc);
+      setTextIfPresent("share-modal-iphone-help-summary", t().share.iphoneHelp);
+      setTextIfPresent("share-modal-open-btn", t().share.openPublicCard);
+      setTextIfPresent("share-modal-regenerate-btn", t().share.regenerateToken);
+      setTextIfPresent("share-modal-close-btn", t().share.close);
+      setTextIfPresent("share-modal-save-btn", t().share.saveSettings);
+      setTextIfPresent("public-share-back-btn", t().share.back);
+      setTextIfPresent("public-share-title", t().share.publicLibraryTitle);
+      setTextIfPresent("public-share-link-label", t().share.publicLink);
+      setTextIfPresent("public-share-copy-btn", t().share.copyLink);
+      setTextIfPresent("public-share-qr-btn", t().share.showQr);
+      setTextIfPresent("public-share-open-library-btn", t().share.openLibrary);
+      setTextIfPresent("public-share-save-btn", t().share.saveToMine);
+      setTextIfPresent("public-share-owner-controls-title", t().share.ownerControlsTitle);
+      setTextIfPresent("public-share-owner-controls-hint", t().share.ownerControlsHint);
+      setTextIfPresent("share-public-enabled-label", t().share.publicAccess);
+      setTextIfPresent("share-card-title-label", t().share.cardTitle);
+      setTextIfPresent("share-card-bio-label", t().share.shortBio);
+      setTextIfPresent("share-library-mode-label", t().share.libraryMode);
+      setTextIfPresent("share-library-mode-preview", t().share.previewMode);
+      setTextIfPresent("share-library-mode-full", t().share.fullMode);
+      setTextIfPresent("owner-copy-link-btn", t().share.copyLink);
+      setTextIfPresent("owner-show-qr-btn", t().share.showQr);
+      setTextIfPresent("owner-write-nfc-btn", t().share.writeNfc);
+      setTextIfPresent("owner-regenerate-token-btn", t().share.regenerateToken);
+      setTextIfPresent("iphone-help-summary", t().share.iphoneHelp);
+      setTextIfPresent("share-save-settings-btn", t().share.saveSettings);
+      setTextIfPresent("public-preview-title", t().share.previewTitle);
+      setTextIfPresent("public-preview-hint", t().share.previewHint);
+
+      const iphoneSteps = currentLanguage === "ru"
+        ? [
+            "Скопируйте свою публичную ссылку Plamut.",
+            "Установите приложение для записи NFC-меток, например NFC Tools.",
+            "Откройте приложение.",
+            "Выберите запись URL/ссылки.",
+            "Вставьте свою публичную ссылку Plamut.",
+            "Поднесите NFC-метку к iPhone и запишите данные.",
+            "После записи проверьте метку, приложив её к телефону."
+          ]
+        : [
+            "Copy your public Plamut link.",
+            "Install an NFC writing app such as NFC Tools.",
+            "Open the app.",
+            "Choose writing a URL/link record.",
+            "Paste your public Plamut link.",
+            "Hold the NFC tag near your iPhone and write the data.",
+            "Test the tag by tapping it with your phone."
+          ];
+
+      ["iphone-help-steps", "share-modal-iphone-help-steps"].forEach((id) => {
+        const list = document.getElementById(id);
+        if(list){
+          list.innerHTML = iphoneSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+        }
+      });
+
       document.querySelector("#auth-screen h2").textContent = t().auth.loginTitle;
       document.getElementById("login-email").placeholder = t().auth.email;
       document.getElementById("login-password").placeholder = t().auth.password;
@@ -726,6 +988,10 @@
         renderShelf();
       }
 
+      if(!document.getElementById("public-share-screen").classList.contains("hidden") && currentPublicProfile){
+        renderPublicShareProfile(currentPublicProfile);
+      }
+
       if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenItemId) {
         const item = getItemById(currentCategory, currentOpenItemId);
         if(item) openCardById(currentOpenItemId);
@@ -749,10 +1015,15 @@
       document.getElementById("category-screen").classList.add("hidden");
       document.getElementById("details-screen").classList.add("hidden");
       document.getElementById("auth-screen").classList.add("hidden");
+      document.getElementById("public-share-screen")?.classList.add("hidden");
     }
 
     function goHome(){
       closePreferencesPanel();
+      if(activeShareToken && currentPublicProfile){
+        showPublicShareScreen(currentPublicProfile);
+        return;
+      }
       isPublicView = false;
       hideAllScreens();
       document.getElementById("home-screen").classList.remove("hidden");
@@ -2665,6 +2936,14 @@
     async function checkAuth(){
       const user = await getCurrentUser();
 
+      if(activeShareToken){
+        setAuthorizedButtons(Boolean(user));
+        if(user){
+          await ensureCurrentProfileData();
+        }
+        return;
+      }
+
       if(!user){
         document.getElementById("auth-screen").classList.remove("hidden");
         document.getElementById("home-screen").classList.add("hidden");
@@ -2715,6 +2994,549 @@ function togglePasswordVisibility(){
   confirmPassword.type = nextType;
 }
 
+async function fetchProfileByUserId(userId){
+  if(!userId) return null;
+
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if(error){
+    console.error("Profile fetch error:", error);
+    throw error;
+  }
+
+  return data || null;
+}
+
+async function ensureCurrentProfileData(){
+  const user = await getCurrentUser();
+  if(!user) return null;
+
+  const profile = await fetchProfileByUserId(user.id);
+  currentProfileData = profile
+    ? {
+        ...profile,
+        public_share_token: profile.public_share_token || generateShareToken()
+      }
+    : {
+        id: user.id,
+        public_share_enabled: true,
+        public_share_token: generateShareToken(),
+        public_library_mode: "preview"
+      };
+
+  return currentProfileData;
+}
+
+async function upsertCurrentProfilePatch(patch = {}){
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return null;
+  }
+
+  const existing = await ensureCurrentProfileData();
+  const nextProfile = {
+    ...(existing || {}),
+    ...patch,
+    id: user.id
+  };
+
+  if(!nextProfile.public_share_token){
+    nextProfile.public_share_token = generateShareToken();
+  }
+
+  if(typeof nextProfile.public_share_enabled !== "boolean"){
+    nextProfile.public_share_enabled = isShareEnabled(existing || {});
+  }
+
+  if(typeof nextProfile.is_public !== "boolean"){
+    nextProfile.is_public = nextProfile.public_share_enabled;
+  }
+
+  const payload = {
+    id: user.id,
+    username: nextProfile.username || null,
+    display_name: nextProfile.display_name || null,
+    avatar_url: nextProfile.avatar_url || null,
+    is_public: nextProfile.public_share_enabled,
+    public_share_enabled: nextProfile.public_share_enabled,
+    public_share_token: nextProfile.public_share_token,
+    public_card_title: nextProfile.public_card_title || null,
+    public_card_bio: nextProfile.public_card_bio || null,
+    public_library_mode: getShareLibraryMode(nextProfile)
+  };
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert(payload);
+
+  if(error){
+    console.error("Profile upsert error:", error);
+    alert(error.message);
+    return null;
+  }
+
+  currentProfileData = { ...nextProfile, ...payload };
+  return currentProfileData;
+}
+
+function applyShareSettingsToOwnerPanels(profile = {}){
+  const token = profile.public_share_token || "";
+  const url = token ? buildPublicShareUrl(token) : "";
+  const enabled = isShareEnabled(profile);
+  const title = profile.public_card_title || profile.display_name || profile.username || "";
+  const bio = profile.public_card_bio || "";
+  const mode = getShareLibraryMode(profile);
+  const nfcSupported = browserSupportsWebNfc();
+  const shouldShowIphoneHelp = !nfcSupported || isLikelyIphone();
+
+  setCheckedIfPresent("share-modal-public-enabled", enabled);
+  setValueIfPresent("share-modal-card-title", title);
+  setValueIfPresent("share-modal-card-bio", bio);
+  setValueIfPresent("share-modal-library-mode", mode);
+  setValueIfPresent("share-modal-link-input", url);
+  populateShareQr("share-modal-qr-box", "share-modal-qr-image", url);
+
+  setCheckedIfPresent("share-public-enabled-toggle", enabled);
+  setValueIfPresent("share-card-title", title);
+  setValueIfPresent("share-card-bio", bio);
+  setValueIfPresent("share-library-mode", mode);
+  setValueIfPresent("public-share-link-input", url);
+  populateShareQr("public-share-qr-box", "public-share-qr-image", url);
+
+  const modalNfcBtn = document.getElementById("share-modal-write-nfc-btn");
+  const ownerNfcBtn = document.getElementById("owner-write-nfc-btn");
+  const modalNfcNote = document.getElementById("share-modal-nfc-note");
+  const ownerNfcNote = document.getElementById("share-nfc-support-note");
+
+  [modalNfcBtn, ownerNfcBtn].forEach((button) => {
+    if(!button) return;
+    button.classList.toggle("hidden", !nfcSupported);
+    button.textContent = t().share.writeNfc;
+  });
+
+  [modalNfcNote, ownerNfcNote].forEach((note) => {
+    if(!note) return;
+    note.classList.remove("hidden");
+    note.textContent = nfcSupported ? t().share.nfcReady : t().share.nfcNotSupported;
+  });
+
+  [document.getElementById("iphone-help-card"), document.getElementById("share-modal-iphone-help-card")].forEach((card) => {
+    if(!card) return;
+    card.classList.toggle("hidden", !shouldShowIphoneHelp);
+  });
+}
+
+function openShareModal(){
+  const modal = document.getElementById("share-modal");
+  if(modal){
+    modal.classList.remove("hidden");
+  }
+}
+
+function closeShareModal(){
+  const modal = document.getElementById("share-modal");
+  if(modal){
+    modal.classList.add("hidden");
+  }
+}
+
+async function shareLibrary(){
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return;
+  }
+
+  const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    await upsertCurrentProfilePatch({ public_share_token: generateShareToken() });
+  }
+
+  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  openShareModal();
+}
+
+async function copyTextValue(value){
+  if(!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    alert(`${t().share.linkCopied}
+${value}`);
+  } catch (_error) {
+    prompt(t().share.linkCopied, value);
+  }
+}
+
+async function copyPublicShareLinkFromModal(){
+  const value = document.getElementById("share-modal-link-input")?.value || "";
+  await copyTextValue(value);
+}
+
+async function copyCurrentPublicShareLink(){
+  const value = document.getElementById("public-share-link-input")?.value || document.getElementById("share-modal-link-input")?.value || "";
+  await copyTextValue(value);
+}
+
+function toggleShareModalQr(){
+  const box = document.getElementById("share-modal-qr-box");
+  const button = document.getElementById("share-modal-qr-btn");
+  if(!box || !button) return;
+  const nextHidden = !box.classList.contains("hidden");
+  box.classList.toggle("hidden", nextHidden);
+  button.textContent = nextHidden ? t().share.showQr : t().share.hideQr;
+}
+
+function togglePublicShareQr(){
+  const box = document.getElementById("public-share-qr-box");
+  const button = document.getElementById("public-share-qr-btn");
+  const ownerButton = document.getElementById("owner-show-qr-btn");
+  if(!box || !button) return;
+  const nextHidden = !box.classList.contains("hidden");
+  box.classList.toggle("hidden", nextHidden);
+  const nextText = nextHidden ? t().share.showQr : t().share.hideQr;
+  button.textContent = nextText;
+  if(ownerButton) ownerButton.textContent = nextText;
+}
+
+async function savePublicShareSettingsFromInputs(prefix = "share-modal"){
+  const enabled = document.getElementById(`${prefix}-public-enabled`)?.checked
+    ?? document.getElementById("share-public-enabled-toggle")?.checked
+    ?? true;
+  const title = normalizeSpaces(document.getElementById(`${prefix}-card-title`)?.value || document.getElementById("share-card-title")?.value || "");
+  const bio = normalizeSpaces(document.getElementById(`${prefix}-card-bio`)?.value || document.getElementById("share-card-bio")?.value || "");
+  const mode = document.getElementById(`${prefix}-library-mode`)?.value || document.getElementById("share-library-mode")?.value || "preview";
+
+  const profile = await upsertCurrentProfilePatch({
+    public_share_enabled: Boolean(enabled),
+    is_public: Boolean(enabled),
+    public_card_title: title || null,
+    public_card_bio: bio || null,
+    public_library_mode: mode,
+    public_share_token: currentProfileData?.public_share_token || generateShareToken()
+  });
+
+  if(!profile) return null;
+
+  applyShareSettingsToOwnerPanels(profile);
+  if(currentPublicProfile && currentPublicProfile.id === profile.id){
+    currentPublicProfile = { ...currentPublicProfile, ...profile };
+    renderPublicShareProfile(currentPublicProfile);
+  }
+  alert(t().share.settingsSaved);
+  return profile;
+}
+
+async function savePublicShareSettingsFromModal(){
+  const profile = await savePublicShareSettingsFromInputs("share-modal");
+  if(profile){
+    closeShareModal();
+  }
+}
+
+async function savePublicShareSettings(){
+  await savePublicShareSettingsFromInputs("share");
+}
+
+async function regeneratePublicShareToken(){
+  const profile = await upsertCurrentProfilePatch({ public_share_token: generateShareToken() });
+  if(!profile) return;
+  applyShareSettingsToOwnerPanels(profile);
+  if(currentPublicProfile && currentPublicProfile.id === profile.id){
+    currentPublicProfile = { ...currentPublicProfile, ...profile };
+    renderPublicShareProfile(currentPublicProfile);
+  }
+  alert(t().share.tokenRegenerated);
+}
+
+async function regeneratePublicShareTokenFromModal(){
+  await regeneratePublicShareToken();
+}
+
+async function writePublicLinkToNfcFromModal(){
+  const value = document.getElementById("share-modal-link-input")?.value || "";
+  await writeUrlToNfc(value);
+}
+
+async function writePublicLinkToNfc(){
+  const value = document.getElementById("public-share-link-input")?.value || "";
+  await writeUrlToNfc(value);
+}
+
+async function writeUrlToNfc(url){
+  if(!browserSupportsWebNfc()){
+    alert(t().share.nfcNotSupported);
+    return;
+  }
+  if(!url){
+    alert(t().share.unavailable);
+    return;
+  }
+
+  try {
+    alert(t().share.nfcPrompt);
+    if(typeof window.NDEFWriter !== "undefined"){
+      const writer = new window.NDEFWriter();
+      await writer.write({ records: [{ recordType: "url", data: url }] });
+    } else {
+      const writer = new window.NDEFReader();
+      await writer.write({ records: [{ recordType: "url", data: url }] });
+    }
+    alert(t().share.nfcSuccess);
+  } catch (error) {
+    console.error("Web NFC write error:", error);
+    alert(`${t().share.nfcError}: ${error.message || error}`);
+  }
+}
+
+function openCurrentPublicCard(){
+  const url = document.getElementById("share-modal-link-input")?.value || "";
+  if(!url) return;
+  window.open(url, "_blank", "noopener");
+}
+
+function exitPublicShareRoute(){
+  window.location.href = window.location.origin + "/";
+}
+
+async function fetchPublicLibraryItems(userId){
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", userId)
+    .order("id", { ascending: false });
+
+  if(error){
+    console.error(error);
+    throw error;
+  }
+
+  return data || [];
+}
+
+function applyPublicLibraryItems(data = []){
+  ensurePublicProfileCollectionsReset();
+  const seen = new Set();
+
+  data.forEach((item) => {
+    const dedupeKey = item.canonical_key || item.work_key || (item.title || "").trim().toLowerCase();
+    const fullKey = `${item.category}:${dedupeKey}`;
+    if(seen.has(fullKey)){
+      return;
+    }
+    seen.add(fullKey);
+
+    if(!demoData[item.category]){
+      demoData[item.category] = [];
+    }
+
+    demoData[item.category].push({
+      id: item.id,
+      title: item.title,
+      status: item.status || "Planned",
+      cover: item.cover_url || "",
+      description: item.description || "",
+      description_ru: item.description_ru || "",
+      description_en: item.description_en || "",
+      creator: item.creator || "",
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || "",
+      folder: ""
+    });
+  });
+}
+
+function collectPublicPreviewItems(limit = 8){
+  const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  const items = [];
+  orderedCategories.forEach((category) => {
+    (demoData[category] || []).forEach((item) => {
+      items.push({ ...item, category });
+    });
+  });
+  return items.slice(0, limit);
+}
+
+function renderPublicPreviewGrid(profile = {}){
+  const container = document.getElementById("public-share-preview-grid");
+  if(!container) return;
+
+  const limit = getShareLibraryMode(profile) === "full" ? 12 : 6;
+  const items = collectPublicPreviewItems(limit);
+  if(items.length === 0){
+    container.innerHTML = `<div class="small">${escapeHtml(t().share.noPreview)}</div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  items.forEach((item) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "media-card";
+    card.addEventListener("click", () => {
+      openPublicCategory(item.category, currentPublicProfileName);
+      openCardById(item.id);
+    });
+    card.innerHTML = `
+      <div class="media-card-top">
+        <div class="media-cover">
+          ${item.cover ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">` : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`}
+        </div>
+      </div>
+      <div class="media-info">
+        <h3 class="media-title">${escapeHtml(item.title)}</h3>
+        <div class="media-meta">${escapeHtml(translateCategory(item.category))}</div>
+        <div class="media-status">${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function renderPublicShareProfile(profile = {}){
+  currentPublicProfile = profile;
+  activeShareToken = profile.public_share_token || activeShareToken;
+  currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+
+  setTextIfPresent("public-share-title", t().share.publicLibraryTitle);
+  setTextIfPresent("public-share-display-name", getShareCardTitle(profile));
+  setTextIfPresent("public-share-username", profile.username ? `@${profile.username}` : "@plamut");
+  setTextIfPresent("public-share-bio", getShareCardBio(profile) || t().share.publicLibraryHint);
+  setTextIfPresent("public-share-badge", t().share.publicLibraryTitle);
+  setTextIfPresent("public-share-owner-note", profile.isOwner ? t().share.ownerNote : "");
+
+  const ownerNote = document.getElementById("public-share-owner-note");
+  if(ownerNote){
+    ownerNote.classList.toggle("hidden", !profile.isOwner);
+  }
+
+  const avatarImg = document.getElementById("public-share-avatar-img");
+  const avatarFallback = document.getElementById("public-share-avatar-fallback");
+  const hasAvatar = Boolean(profile.avatar_url);
+  if(avatarImg){
+    avatarImg.src = hasAvatar ? profile.avatar_url : "";
+    avatarImg.classList.toggle("hidden", !hasAvatar);
+  }
+  if(avatarFallback){
+    avatarFallback.textContent = getProfileInitials(profile.display_name || getShareCardTitle(profile), profile.username || "P");
+    avatarFallback.classList.toggle("hidden", hasAvatar);
+  }
+
+  const ownerControls = document.getElementById("public-share-owner-controls");
+  if(ownerControls){
+    ownerControls.classList.toggle("hidden", !profile.isOwner);
+  }
+
+  const saveBtn = document.getElementById("public-share-save-btn");
+  if(saveBtn){
+    saveBtn.textContent = profile.isOwner ? t().share.ownerOnlyAction : t().share.saveToMine;
+    saveBtn.disabled = Boolean(profile.isOwner);
+  }
+
+  const link = buildPublicShareUrl(profile.public_share_token || "");
+  setValueIfPresent("public-share-link-input", link);
+  populateShareQr("public-share-qr-box", "public-share-qr-image", link);
+  renderPublicPreviewGrid(profile);
+
+  if(profile.isOwner){
+    applyShareSettingsToOwnerPanels(profile);
+  }
+}
+
+async function showPublicShareScreen(profile){
+  isPublicView = true;
+  renderPublicShareProfile(profile);
+  hideAllScreens();
+  document.getElementById("public-share-screen").classList.remove("hidden");
+}
+
+async function loadPublicShareRoute(token){
+  activeShareToken = token || "";
+
+  const { data: profile, error: profileError } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("public_share_token", token)
+    .maybeSingle();
+
+  if(profileError){
+    console.error(profileError);
+    alert(t().labels.profileLookupError);
+    return false;
+  }
+
+  if(!profile){
+    alert(t().share.unavailable);
+    return false;
+  }
+
+  if(!isShareEnabled(profile)){
+    alert(t().share.private);
+    return false;
+  }
+
+  const user = await getCurrentUser();
+  const isOwner = Boolean(user && user.id === profile.id);
+  const items = await fetchPublicLibraryItems(profile.id);
+  applyPublicLibraryItems(items);
+  await showPublicShareScreen({ ...profile, isOwner });
+  return true;
+}
+
+async function saveSharedLibrary(){
+  if(!currentPublicProfile || !currentPublicProfile.id){
+    alert(t().share.unavailable);
+    return;
+  }
+
+  if(currentPublicProfile.isOwner){
+    alert(t().share.ownerOnlyAction);
+    return;
+  }
+
+  const user = await getCurrentUser();
+  if(!user){
+    localStorage.setItem("plamut_pending_saved_library_token", currentPublicProfile.public_share_token || "");
+    alert(`${t().share.loginToSave}
+${t().share.savePromptAfterLogin}`);
+    return;
+  }
+
+  const payload = {
+    user_id: user.id,
+    library_user_id: currentPublicProfile.id,
+    public_share_token: currentPublicProfile.public_share_token
+  };
+
+  const { error } = await supabaseClient
+    .from("saved_libraries")
+    .upsert(payload, { onConflict: "user_id,library_user_id" });
+
+  if(error){
+    if(String(error.message || "").toLowerCase().includes("duplicate")){
+      alert(t().share.alreadySaved);
+      return;
+    }
+    console.error("Saved library error:", error);
+    alert(error.message);
+    return;
+  }
+
+  localStorage.removeItem("plamut_pending_saved_library_token");
+  alert(t().share.savedToMine);
+}
+
+function openSharedLibrary(){
+  if(!currentPublicProfile){
+    return;
+  }
+  openPublicCategory("Books", currentPublicProfileName);
+}
+
 async function changePassword(){
   const newPassword = document.getElementById("new-password")?.value || "";
   const confirmPassword = document.getElementById("confirm-password")?.value || "";
@@ -2755,23 +3577,18 @@ async function changePassword(){
   const displayName = document.getElementById("profile-display-name").value.trim();
   const isPublic = document.getElementById("profile-public").checked;
 
-  const user = await getCurrentUser();
-  if(!user){
-    alert(t().labels.mustBeLoggedIn);
-    return;
-  }
+  const profile = await upsertCurrentProfilePatch({
+    username: username || null,
+    display_name: displayName || null,
+    public_share_enabled: isPublic,
+    is_public: isPublic,
+    public_share_token: currentProfileData?.public_share_token || generateShareToken(),
+    public_card_title: currentProfileData?.public_card_title || null,
+    public_card_bio: currentProfileData?.public_card_bio || null,
+    public_library_mode: currentProfileData?.public_library_mode || "preview"
+  });
 
-  const { error } = await supabaseClient
-    .from("profiles")
-    .upsert({
-      id: user.id,
-      username: username || null,
-      display_name: displayName || null,
-      is_public: isPublic
-    });
-
-  if(error){
-    alert(error.message);
+  if(!profile){
     return;
   }
 
@@ -2786,12 +3603,13 @@ async function changePassword(){
   const publicInput = document.getElementById("profile-public");
 
   const resetProfileFields = () => {
+    currentProfileData = null;
     if(usernameInput) usernameInput.value = "";
     if(displayNameInput) displayNameInput.value = "";
     if(publicInput) publicInput.checked = true;
     const displayName = document.getElementById("profile-display-name")?.value || "";
-  const username = document.getElementById("profile-username")?.value || "";
-  setAvatarPreview("", displayName, username);
+    const username = document.getElementById("profile-username")?.value || "";
+    setAvatarPreview("", displayName, username);
   };
 
   try {
@@ -2801,22 +3619,18 @@ async function changePassword(){
       return;
     }
 
-    const { data, error } = await supabaseClient
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if(error || !data){
+    const data = await ensureCurrentProfileData();
+    if(!data){
       resetProfileFields();
       return;
     }
 
     if(usernameInput) usernameInput.value = data.username || "";
     if(displayNameInput) displayNameInput.value = data.display_name || "";
-    if(publicInput) publicInput.checked = data.is_public !== false;
+    if(publicInput) publicInput.checked = isShareEnabled(data);
 
     setAvatarPreview(data.avatar_url || "", data.display_name || "", data.username || "");
+    applyShareSettingsToOwnerPanels(data);
   } catch (error) {
     console.error("Load profile error:", error);
     resetProfileFields();
@@ -2860,7 +3674,7 @@ async function changePassword(){
     async function loadPublicLibrary(username){
       const { data: profile, error: profileError } = await supabaseClient
         .from("profiles")
-        .select("id, username, display_name, is_public")
+        .select("*")
         .eq("username", username)
         .maybeSingle();
 
@@ -2875,66 +3689,16 @@ async function changePassword(){
         return false;
       }
 
-      if(profile.is_public === false){
+      if(!isShareEnabled(profile)){
         alert(t().labels.libraryPrivate);
         return false;
       }
 
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("*")
-        .eq("user_id", profile.id)
-        .order("id", { ascending: false });
-
-      if(error){
-        console.error(error);
-        return false;
-      }
-
+      const items = await fetchPublicLibraryItems(profile.id);
+      applyPublicLibraryItems(items);
       isPublicView = true;
-      currentPublicProfileName = profile.display_name || profile.username || "Library";
-
-      demoData.Books = [];
-      demoData.Movies = [];
-      demoData.Series = [];
-      demoData.Anime = [];
-      demoData.Manga = [];
-      demoData.Blacklist = [];
-
-      const seen = new Set();
-
-      data.forEach(item => {
-        const dedupeKey =
-          item.canonical_key ||
-          item.work_key ||
-          (item.title || "").trim().toLowerCase();
-
-        const fullKey = `${item.category}:${dedupeKey}`;
-
-        if(seen.has(fullKey)){
-          return;
-        }
-
-        seen.add(fullKey);
-
-        if(!demoData[item.category]){
-          demoData[item.category] = [];
-        }
-
-        demoData[item.category].push({
-          id: item.id,
-          title: item.title,
-          status: item.status || "Planned",
-          cover: item.cover_url || "",
-          description: item.description || "",
-          description_ru: item.description_ru || "",
-          description_en: item.description_en || "",
-          creator: item.creator || "",
-          work_key: item.work_key || "",
-          canonical_key: item.canonical_key || "",
-          folder: ""
-        });
-      });
+      currentPublicProfile = profile;
+      currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
 
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
@@ -2957,7 +3721,6 @@ async function changePassword(){
       }
 
       currentCategory = "Books";
-
       document.getElementById("category-title").textContent =
         currentPublicProfileName + " — " + translateCategory("Books");
 
@@ -2968,44 +3731,22 @@ async function changePassword(){
     async function checkPublicRoute(){
       const path = window.location.pathname;
 
-      if(path.startsWith("/u/")){
-        const username = path.replace("/u/", "").trim();
+      if(path.startsWith("/share/")){
+        const token = decodeURIComponent(path.replace("/share/", "").trim());
+        if(token){
+          return await loadPublicShareRoute(token);
+        }
+      }
 
+      if(path.startsWith("/u/")){
+        const username = decodeURIComponent(path.replace("/u/", "").trim());
         if(username){
           return await loadPublicLibrary(username);
         }
       }
 
+      activeShareToken = "";
       return false;
-    }
-
-    async function shareLibrary(){
-      const user = await getCurrentUser();
-
-      if(!user){
-        alert(t().labels.mustBeLoggedIn);
-        return;
-      }
-
-      const { data, error } = await supabaseClient
-        .from("profiles")
-        .select("username")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if(error || !data?.username){
-        alert(t().labels.setUsernameFirst);
-        return;
-      }
-
-      const url = window.location.origin + "/u/" + data.username;
-
-      try {
-        await navigator.clipboard.writeText(url);
-        alert(t().labels.libraryLinkCopied + "\n" + url);
-      } catch (e) {
-        prompt(t().labels.libraryLinkCopied, url);
-      }
     }
 
 async function uploadAvatar(){
@@ -3092,6 +3833,14 @@ async function uploadAvatar(){
   const displayName = document.getElementById("profile-display-name")?.value || "";
   const username = document.getElementById("profile-username")?.value || "";
   setAvatarPreview(avatarUrl, displayName, username);
+  if(currentProfileData){
+    currentProfileData.avatar_url = avatarUrl;
+    applyShareSettingsToOwnerPanels(currentProfileData);
+  }
+  if(currentPublicProfile?.isOwner){
+    currentPublicProfile.avatar_url = avatarUrl;
+    renderPublicShareProfile(currentPublicProfile);
+  }
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarUpdated);
 
@@ -3117,6 +3866,14 @@ async function removeAvatar(){
   const displayName = document.getElementById("profile-display-name")?.value || "";
   const username = document.getElementById("profile-username")?.value || "";
   setAvatarPreview("", displayName, username);
+  if(currentProfileData){
+    currentProfileData.avatar_url = "";
+    applyShareSettingsToOwnerPanels(currentProfileData);
+  }
+  if(currentPublicProfile?.isOwner){
+    currentPublicProfile.avatar_url = "";
+    renderPublicShareProfile(currentPublicProfile);
+  }
   const fileInput = document.getElementById("avatar-file");
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarRemoved);
@@ -3169,6 +3926,15 @@ async function removeAvatar(){
       supabaseClient.auth.onAuthStateChange(async (_event, session) => {
         const loginBtn = document.getElementById("login-top-btn");
         const profileBtn = document.getElementById("profile-btn");
+
+        if(activeShareToken){
+          setAuthorizedButtons(Boolean(session?.user));
+          if(session?.user){
+            await ensureCurrentProfileData();
+          }
+          await loadPublicShareRoute(activeShareToken);
+          return;
+        }
 
         if(session?.user){
           await showAuthorizedUI();
