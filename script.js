@@ -1013,8 +1013,8 @@
 
     function goHome(){
       closePreferencesPanel();
-      if(activeShareToken && currentPublicProfile){
-        showPublicShareScreen(currentPublicProfile);
+      if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
+        showPublicLibraryCategoryView(currentPublicProfile);
         return;
       }
       isPublicView = false;
@@ -3472,6 +3472,52 @@ function collectPublicPreviewItems(limit = 8){
   return items.slice(0, limit);
 }
 
+function getDefaultPublicCategory(){
+  const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  return orderedCategories.find((category) => (demoData[category] || []).length > 0) || "Books";
+}
+
+function showPublicLibraryCategoryView(profile = {}){
+  isPublicView = true;
+  currentPublicProfile = profile;
+  currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+  currentCategory = getDefaultPublicCategory();
+
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+
+  const addBtn = document.getElementById("add-new-btn");
+  const addFolderBtn = document.getElementById("add-folder-btn");
+  if(addBtn){
+    addBtn.classList.add("hidden");
+    addBtn.style.display = "none";
+  }
+  if(addFolderBtn){
+    addFolderBtn.classList.add("hidden");
+    addFolderBtn.style.display = "none";
+  }
+
+  const tabs = document.getElementById("public-category-tabs");
+  if(tabs){
+    tabs.classList.remove("hidden");
+    tabs.style.display = "flex";
+  }
+
+  document.getElementById("category-title").textContent =
+    currentPublicProfileName + " — " + translateCategory(currentCategory);
+
+  renderShelf();
+}
+
+async function openOwnerLibraryFromShareToken(profile = {}){
+  activeShareToken = "";
+  currentPublicProfile = { ...profile, isOwner: true };
+  currentProfileData = { ...(currentProfileData || {}), ...profile };
+  isPublicView = false;
+  window.history.replaceState({}, "", "/");
+  await showAuthorizedUI();
+}
+
 function renderPublicPreviewGrid(profile = {}){
   const container = document.getElementById("public-share-preview-grid");
   if(!container) return;
@@ -3591,8 +3637,16 @@ async function loadPublicShareRoute(token){
 
   const user = await getCurrentUser();
   const isOwner = Boolean(user && user.id === profile.id);
+  const normalizedProfile = { ...profile, isOwner, public_share_token: token };
+
   applyPublicLibraryItems(items);
-  await showPublicShareScreen({ ...profile, isOwner, public_share_token: token });
+
+  if(isOwner){
+    await openOwnerLibraryFromShareToken(normalizedProfile);
+    return true;
+  }
+
+  showPublicLibraryCategoryView(normalizedProfile);
   return true;
 }
 
@@ -3637,7 +3691,7 @@ function openSharedLibrary(){
   if(!currentPublicProfile){
     return;
   }
-  openPublicCategory("Books", currentPublicProfileName);
+  openPublicCategory(getDefaultPublicCategory(), currentPublicProfileName);
 }
 
 async function changePassword(){
