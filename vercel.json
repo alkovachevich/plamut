@@ -3,6 +3,10 @@
     {
       "source": "/u/:username",
       "destination": "/"
+    },
+    {
+      "source": "/share/:token",
+      "destination": "/"
     }
   ]
 }
