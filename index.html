@@ -143,11 +143,26 @@
         <div id="home-now-grid" class="dashboard-compact-grid"></div>
       </section>
 
-      <section class="dashboard-section panel-section" id="home-stats-section">
+      <section class="dashboard-section panel-section home-shortcuts-section" id="home-shortcuts-section">
+        <div class="section-heading compact-heading">
+          <div>
+            <h2 class="section-title" id="home-shortcuts-title">Быстрые переходы</h2>
+            <div class="section-note" id="home-shortcuts-note">Главная отвечает только на вопрос, что делать сейчас.</div>
+          </div>
+        </div>
+        <div id="home-shortcuts-grid" class="home-shortcuts-grid">
+          <button class="button button-primary" type="button" onclick="showNowScreen()" id="home-shortcut-now">Сейчас</button>
+          <button class="button button-secondary" type="button" onclick="showLibraryRoot()" id="home-shortcut-library">Библиотека</button>
+          <button class="button button-secondary" type="button" onclick="showUniversesScreen()" id="home-shortcut-universes">Связи</button>
+          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="home-shortcut-stats">Статистика</button>
+        </div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-summary-section">
         <div class="section-heading">
           <div>
-            <h2 class="section-title" id="stats-section-title">Статистика</h2>
-            <div class="section-note" id="stats-section-note">Сводка по библиотеке и активности</div>
+            <h2 class="section-title" id="home-summary-title">Краткая сводка</h2>
+            <div class="section-note" id="home-summary-note">Только ключевые цифры по библиотеке.</div>
           </div>
           <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="open-stats-screen-btn">Открыть</button>
         </div>
@@ -157,22 +172,30 @@
       <section class="dashboard-section panel-section" id="home-activity-section">
         <div class="section-heading">
           <div>
-            <h2 class="section-title" id="activity-section-title">Недавняя активность</h2>
-            <div class="section-note" id="activity-section-note">Последние изменения статуса и прогресса</div>
+            <h2 class="section-title" id="activity-section-title">Продолжить</h2>
+            <div class="section-note" id="activity-section-note">Последние изменения и то, к чему стоит вернуться.</div>
           </div>
         </div>
         <div id="home-activity-list" class="activity-list"></div>
       </section>
+    </div>
 
-      <section class="home-section panel-section">
+    <div id="library-screen" class="hidden screen-panel section-screen">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" type="button" onclick="goHome()" id="back-library-root-btn">←</button>
+          <h2 id="library-screen-title" class="screen-title">Библиотека</h2>
+        </div>
+      </div>
+      <section class="panel-section library-root-section">
         <div class="section-heading">
           <div>
             <h2 class="section-title" id="library-section-title">Library</h2>
             <div class="section-note" id="library-section-note">Choose a category</div>
           </div>
         </div>
-
-        <div class="grid category-grid">
+        <div id="library-summary-grid" class="dashboard-stats-grid"></div>
+        <div class="grid category-grid library-category-grid">
           <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
           <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
           <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
