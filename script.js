@@ -5336,4 +5336,617 @@ async function removeAvatar(){
       await initApp();
     }
 
+
+Object.assign(translations.en.topbar, {
+  nfc: "NFC"
+});
+Object.assign(translations.ru.topbar, {
+  nfc: "NFC"
+});
+Object.assign(translations.en.profile, {
+  nfcTitle: "NFC",
+  nfcHint: "Manage the connected tag, public card link and future replacement options in a separate settings section.",
+  openNfc: "Open NFC settings"
+});
+Object.assign(translations.ru.profile, {
+  nfcTitle: "NFC",
+  nfcHint: "Управление подключённой меткой, публичной ссылкой и будущей заменой вынесено в отдельный раздел настроек.",
+  openNfc: "Открыть NFC"
+});
+Object.assign(translations.en.buttons, {
+  addFab: "Add"
+});
+Object.assign(translations.ru.buttons, {
+  addFab: "Добавить"
+});
+Object.assign(translations.en.share, {
+  modalTitle: "NFC settings",
+  modalSubtitle: "Manage the public card, QR and NFC link for your profile.",
+  quickActions: "Share library"
+});
+Object.assign(translations.ru.share, {
+  modalTitle: "NFC",
+  modalSubtitle: "Управляйте публичной карточкой, QR-кодом и NFC-ссылкой для профиля.",
+  quickActions: "Поделиться библиотекой"
+});
+
+const baseApplyTranslations = applyTranslations;
+applyTranslations = function applyTranslationsWithRefresh(){
+  baseApplyTranslations();
+  setTextIfPresent("profile-menu-open-btn", t().profile.title);
+  setTextIfPresent("profile-menu-nfc-btn", t().topbar.nfc);
+  setTextIfPresent("profile-menu-logout-btn", t().profile.logout);
+  setTextIfPresent("profile-nfc-title", t().profile.nfcTitle);
+  setTextIfPresent("profile-nfc-hint", t().profile.nfcHint);
+  setTextIfPresent("profile-open-nfc-btn", t().profile.openNfc);
+  setTextIfPresent("share-library-btn", t().topbar.shareLibrary);
+  setTextIfPresent("share-library-copy-action", t().share.copyLink);
+  setTextIfPresent("share-library-qr-action", t().share.showQr);
+  setTextIfPresent("share-library-open-action", t().share.openPublicCard);
+  setTextIfPresent("global-add-fab-label", t().buttons.addFab);
+  updatePrimaryActionVisibility();
+  syncHeaderProfileIdentity();
+};
+
+const baseSetAvatarPreview = setAvatarPreview;
+setAvatarPreview = function setAvatarPreviewWithHeader(url, displayName = "", username = ""){
+  baseSetAvatarPreview(url, displayName, username);
+  const extraImgs = [document.getElementById("header-popover-avatar-img")];
+  const extraFallbacks = [document.getElementById("header-popover-avatar-fallback")];
+  const initials = getProfileInitials(displayName, username);
+  const hasUrl = Boolean(url && String(url).trim());
+
+  extraFallbacks.forEach((node) => {
+    if(node){
+      node.textContent = initials;
+      node.classList.toggle("hidden", hasUrl);
+    }
+  });
+
+  extraImgs.forEach((img) => {
+    if(!img) return;
+    if(hasUrl){
+      img.src = url;
+      img.classList.remove("hidden");
+    } else {
+      img.src = "";
+      img.classList.add("hidden");
+    }
+  });
+
+  syncHeaderProfileIdentity(displayName, username);
+};
+
+function getCurrentShareUrl(){
+  return document.getElementById("share-modal-link-input")?.value || buildPublicShareUrl(currentProfileData?.nfc_token || currentProfileData?.public_share_token || "");
+}
+
+function syncHeaderProfileIdentity(displayName = "", username = ""){
+  const profile = currentProfileData || {};
+  const resolvedName = normalizeSpaces(displayName || profile.display_name || profile.public_card_title || profile.username || "Plamut");
+  const resolvedUsername = normalizeSpaces(username || profile.username || "");
+  const nameNode = document.getElementById("header-popover-name");
+  const handleNode = document.getElementById("header-popover-handle");
+  if(nameNode) nameNode.textContent = resolvedName || "Plamut";
+  if(handleNode) handleNode.textContent = resolvedUsername ? `@${resolvedUsername}` : t().brand.subtitle;
+}
+
+function toggleProfileMenu(force){
+  const menu = document.getElementById("profile-menu");
+  const button = document.getElementById("profile-btn");
+  if(!menu || !button) return;
+  const shouldOpen = typeof force === "boolean" ? force : menu.classList.contains("hidden");
+  closeShareMenu();
+  menu.classList.toggle("hidden", !shouldOpen);
+  button.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function closeProfileMenu(){
+  toggleProfileMenu(false);
+}
+
+function toggleShareMenu(force){
+  const menu = document.getElementById("share-library-menu");
+  const button = document.getElementById("share-library-btn");
+  if(!menu || !button) return;
+  const shouldOpen = typeof force === "boolean" ? force : menu.classList.contains("hidden");
+  closeProfileMenu();
+  menu.classList.toggle("hidden", !shouldOpen);
+  button.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function closeShareMenu(){
+  const menu = document.getElementById("share-library-menu");
+  const button = document.getElementById("share-library-btn");
+  if(menu) menu.classList.add("hidden");
+  if(button) button.setAttribute("aria-expanded", "false");
+  const qrBox = document.getElementById("share-library-menu-qr-box");
+  if(qrBox) qrBox.classList.add("hidden");
+  setTextIfPresent("share-library-qr-action", t().share.showQr);
+}
+
+function closePreferencesPanel(){
+  closeProfileMenu();
+  closeShareMenu();
+}
+
+function openProfileFromMenu(){
+  closeProfileMenu();
+  openProfileModal();
+}
+
+async function openNfcSettingsModal(){
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return;
+  }
+  closePreferencesPanel();
+  const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    alert(t().share.unavailable);
+    return;
+  }
+  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  openShareModal();
+}
+
+function openNfcSettingsFromMenu(){
+  closeProfileMenu();
+  openNfcSettingsModal();
+}
+
+function openCurrentPublicCardFromMenu(){
+  closeShareMenu();
+  openCurrentPublicCard();
+}
+
+async function copyPublicShareLinkFromMenu(){
+  await copyTextValue(getCurrentShareUrl());
+  closeShareMenu();
+}
+
+function toggleShareMenuQr(){
+  const box = document.getElementById("share-library-menu-qr-box");
+  if(!box) return;
+  const shouldOpen = box.classList.contains("hidden");
+  if(shouldOpen){
+    const url = getCurrentShareUrl();
+    populateShareQr("share-library-menu-qr-box", "share-library-menu-qr-image", url);
+  }
+  box.classList.toggle("hidden", !shouldOpen);
+  setTextIfPresent("share-library-qr-action", shouldOpen ? t().share.hideQr : t().share.showQr);
+}
+
+function handlePrimaryAddAction(){
+  if(document.getElementById("home-screen") && !document.getElementById("home-screen").classList.contains("hidden")){
+    toggleHomeAddPanel();
+    return;
+  }
+  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !isPublicView && currentCategory !== "Blacklist"){
+    openAddModal();
+  }
+}
+
+function updatePrimaryActionVisibility(){
+  const fab = document.getElementById("global-add-fab");
+  if(!fab) return;
+  const isAuthorized = Boolean(document.getElementById("header-profile-menu-wrap") && !document.getElementById("header-profile-menu-wrap").classList.contains("hidden"));
+  const homeVisible = !document.getElementById("home-screen")?.classList.contains("hidden");
+  const categoryVisible = !document.getElementById("category-screen")?.classList.contains("hidden");
+  const detailsVisible = !document.getElementById("details-screen")?.classList.contains("hidden");
+  const authVisible = !document.getElementById("auth-screen")?.classList.contains("hidden");
+  const canShow = isAuthorized && !isPublicView && !detailsVisible && !authVisible && (homeVisible || (categoryVisible && currentCategory !== "Blacklist"));
+  fab.classList.toggle("hidden", !canShow);
+}
+
+function setAuthorizedButtons(isAuthorized){
+  const loginBtn = document.getElementById("login-top-btn");
+  const profileWrap = document.getElementById("header-profile-menu-wrap");
+
+  if(loginBtn){
+    loginBtn.classList.toggle("hidden", isAuthorized);
+  }
+
+  if(profileWrap){
+    profileWrap.classList.toggle("hidden", !isAuthorized);
+  }
+
+  if(!isAuthorized){
+    setAvatarPreview("", "", "");
+    currentProfileData = null;
+    closePreferencesPanel();
+  }
+
+  updatePrimaryActionVisibility();
+}
+
+function applyShareSettingsToOwnerPanels(profile = {}){
+  const token = profile.nfc_token || profile.public_share_token || "";
+  const url = token ? buildPublicShareUrl(token) : "";
+  const enabled = isShareEnabled(profile);
+  const title = profile.public_card_title || profile.display_name || profile.username || "";
+  const bio = profile.public_card_bio || "";
+  const mode = getShareLibraryMode(profile);
+  const nfcSupported = browserSupportsWebNfc();
+  const shouldShowIphoneHelp = !nfcSupported || isLikelyIphone();
+
+  setCheckedIfPresent("share-modal-public-enabled", enabled);
+  setValueIfPresent("share-modal-card-title", title);
+  setValueIfPresent("share-modal-card-bio", bio);
+  setValueIfPresent("share-modal-library-mode", mode);
+  setValueIfPresent("share-modal-link-input", url);
+  populateShareQr("share-modal-qr-box", "share-modal-qr-image", url);
+  populateShareQr("share-library-menu-qr-box", "share-library-menu-qr-image", url);
+
+  setCheckedIfPresent("share-public-enabled-toggle", enabled);
+  setValueIfPresent("share-card-title", title);
+  setValueIfPresent("share-card-bio", bio);
+  setValueIfPresent("share-library-mode", mode);
+  setValueIfPresent("public-share-link-input", url);
+  setValueIfPresent("owner-share-link-input", url);
+  populateShareQr("public-share-qr-box", "public-share-qr-image", url);
+
+  const modalNfcBtn = document.getElementById("share-modal-write-nfc-btn");
+  const ownerNfcBtn = document.getElementById("owner-write-nfc-btn");
+  const modalNfcNote = document.getElementById("share-modal-nfc-note");
+  const ownerNfcNote = document.getElementById("share-nfc-support-note");
+  const shareBtn = document.getElementById("share-library-btn");
+
+  [modalNfcBtn, ownerNfcBtn].forEach((button) => {
+    if(!button) return;
+    button.classList.toggle("hidden", !nfcSupported);
+    button.textContent = t().share.writeNfc;
+  });
+
+  [modalNfcNote, ownerNfcNote].forEach((note) => {
+    if(!note) return;
+    note.classList.remove("hidden");
+    note.textContent = nfcSupported ? t().share.nfcReady : t().share.nfcNotSupported;
+  });
+
+  [document.getElementById("iphone-help-card"), document.getElementById("share-modal-iphone-help-card")].forEach((card) => {
+    if(!card) return;
+    card.classList.toggle("hidden", !shouldShowIphoneHelp);
+  });
+
+  if(shareBtn){
+    shareBtn.disabled = !url;
+  }
+}
+
+async function shareLibrary(){
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return;
+  }
+
+  const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    alert(t().share.unavailable);
+    return;
+  }
+
+  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  toggleShareMenu();
+}
+
+function renderShelf(){
+  const shelf = document.getElementById("shelf");
+  if(!shelf) return;
+
+  closeCardMenu();
+  shelf.innerHTML = "";
+  syncShelfSearchInput();
+
+  const filterToolbar = document.getElementById("filter-toolbar");
+  const statusFilterWrap = document.getElementById("status-filter-wrap");
+  if(filterToolbar){
+    filterToolbar.classList.toggle("hidden", currentCategory === "Blacklist");
+  }
+  if(statusFilterWrap){
+    statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
+  }
+
+  const items = getFilteredItems();
+  if(items.length === 0){
+    shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+    return;
+  }
+
+  const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
+  const createCard = (item) => {
+    const coverHtml = item.cover
+      ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
+      : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
+    const creatorLine = item.creator ? `<div class="media-meta">${escapeHtml(item.creator)}</div>` : "";
+    const chips = [
+      buildChip(item.folder || "", "is-folder"),
+      buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
+      buildChip(translateCategory(currentCategory), "is-category")
+    ].join("");
+    const menuHtml = isPublicView
+      ? ""
+      : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
+           <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
+           <div class="media-menu" role="menu">
+             <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(t().buttons.addToFolder)}</button>
+             <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
+             <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
+           </div>
+         </div>`;
+
+    const card = document.createElement("article");
+    card.className = "media-card";
+    card.dataset.itemId = item.id;
+    card.innerHTML = `
+      <div class="media-card-top">
+        <button class="media-cover-button" type="button" aria-label="${escapeHtml(item.title || t().buttons.open)}" onclick="event.stopPropagation(); openCardById(${item.id})">
+          <div class="media-cover">${coverHtml}</div>
+        </button>
+        ${menuHtml}
+      </div>
+      <div class="media-info">
+        <div class="media-meta-chips">${chips}</div>
+        <h3 class="media-title">${escapeHtml(item.title)}</h3>
+        ${creatorLine}
+      </div>
+    `;
+    return card;
+  };
+
+  const folders = [];
+  const ungroupedItems = [];
+  const grouped = new Map();
+
+  items.forEach((item) => {
+    const folder = getItemFolder(item);
+    if(!folder){
+      ungroupedItems.push(item);
+      return;
+    }
+    if(!grouped.has(folder)){
+      grouped.set(folder, []);
+      folders.push(folder);
+    }
+    grouped.get(folder).push(item);
+  });
+
+  if(ungroupedItems.length){
+    const defaultGrid = document.createElement("div");
+    defaultGrid.className = "shelf";
+    ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
+    shelf.appendChild(defaultGrid);
+  }
+
+  folders.forEach((folder) => {
+    const section = document.createElement("section");
+    section.className = "folder-block";
+    section.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(folder)}</span><span class="small">${grouped.get(folder).length}</span></h3>`;
+    const folderGrid = document.createElement("div");
+    folderGrid.className = "shelf";
+    grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
+    section.appendChild(folderGrid);
+    shelf.appendChild(section);
+  });
+}
+
+function goHome(){
+  closePreferencesPanel();
+  resetShelfSearchQuery();
+  toggleHomeAddPanel(false);
+  if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
+    if(document.body.classList.contains("public-route-active")){
+      showPublicShareScreen(currentPublicProfile);
+      renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
+    } else {
+      showPublicLibraryCategoryView(currentPublicProfile);
+    }
+    updatePrimaryActionVisibility();
+    return;
+  }
+  isPublicView = false;
+  hideAllScreens();
+  document.getElementById("home-screen").classList.remove("hidden");
+  updatePrimaryActionVisibility();
+}
+
+function backToCategory(){
+  closePreferencesPanel();
+  syncShelfSearchInput();
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+  updatePrimaryActionVisibility();
+}
+
+async function openCategory(name){
+  closePreferencesPanel();
+  isPublicView = false;
+  currentCategory = name;
+  resetShelfSearchQuery();
+
+  hideAllScreens();
+  document.getElementById("category-screen").classList.remove("hidden");
+  document.getElementById("category-title").textContent = translateCategory(name);
+
+  const addFolderBtn = document.getElementById("add-folder-btn");
+  if(addFolderBtn){
+    addFolderBtn.classList.toggle("hidden", name === "Blacklist");
+    addFolderBtn.style.display = name === "Blacklist" ? "none" : "";
+  }
+
+  const tabs = document.getElementById("public-category-tabs");
+  if(tabs){
+    tabs.classList.add("hidden");
+    tabs.style.display = "none";
+  }
+
+  await loadCategoryFromSupabase(name);
+  updatePrimaryActionVisibility();
+}
+
+async function openCardById(id){
+  closeCardMenu();
+  closePreferencesPanel();
+  currentOpenItemId = id;
+  const item = getItemById(currentCategory, id);
+
+  hideAllScreens();
+  document.getElementById("details-screen").classList.remove("hidden");
+
+  document.getElementById("details-title").textContent = item?.title || "";
+  document.getElementById("details-creator").textContent = item?.creator || "";
+  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
+  document.getElementById("details-folder-badge").textContent = item?.folder || t().labels.noFolder;
+
+  const coverBox = document.getElementById("details-cover-box");
+  if(item && item.cover){
+    coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`;
+  } else {
+    coverBox.textContent = t().labels.cover;
+  }
+
+  const descriptionEl = document.getElementById("details-description");
+  if(!item){
+    descriptionEl.textContent = t().labels.noDescription;
+  } else {
+    descriptionEl.textContent = t().labels.searching;
+    await ensureItemDescriptions(item);
+    const bestDescription = pickBestDescription(item, currentLanguage);
+    descriptionEl.textContent = bestDescription || t().labels.noDescription;
+  }
+
+  const canonicalSection = document.getElementById("canonical-key-section");
+  const canonicalInput = document.getElementById("canonical-key-input");
+  const folderSection = document.getElementById("details-folder-section");
+  const folderCurrent = document.getElementById("details-folder-current");
+  const folderButton = document.getElementById("open-folder-modal-btn");
+
+  if(canonicalInput && canonicalSection){
+    canonicalSection.classList.add("hidden");
+    canonicalInput.value = item?.canonical_key || "";
+  }
+
+  if(folderSection && folderCurrent && folderButton){
+    if(isPublicView){
+      folderSection.classList.add("hidden");
+    } else {
+      folderSection.classList.remove("hidden");
+      folderCurrent.textContent = item?.folder || t().labels.noFolder;
+      folderButton.disabled = !item;
+    }
+  }
+
+  const statusBtn = document.getElementById("change-status-details-btn");
+  const deleteBtn = document.getElementById("delete-details-btn");
+  if(statusBtn) statusBtn.classList.toggle("hidden", isPublicView);
+  if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
+
+  updatePrimaryActionVisibility();
+}
+
+async function showAuthorizedUI(){
+  closePreferencesPanel();
+  setPublicRouteMode(false);
+  hideAllScreens();
+  document.getElementById("home-screen").classList.remove("hidden");
+  setAuthorizedButtons(true);
+  refreshAccountCollectionsUI();
+  safeLoadProfile("showAuthorizedUI");
+  updatePrimaryActionVisibility();
+}
+
+function showAuthScreen(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("auth-screen").classList.remove("hidden");
+  updatePrimaryActionVisibility();
+}
+
+async function logout(){
+  closePreferencesPanel();
+  closeProfileModal();
+  closeShareModal();
+  await supabaseClient.auth.signOut();
+  location.reload();
+}
+
+function openProfileModal(){
+  const modal = document.getElementById("profile-modal");
+  closePreferencesPanel();
+  resetProfileSecurityFields();
+  if(modal) modal.classList.remove("hidden");
+  refreshAccountCollectionsUI();
+  safeLoadProfile("openProfileModal");
+}
+
+function toggleHomeAddPanel(force){
+  const panel = document.getElementById("home-add-panel");
+  if(!panel) return;
+  const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !shouldOpen);
+}
+
+function updateHeaderCompactState(){
+  document.body.classList.toggle("header-compact", window.scrollY > 8);
+}
+
+async function init(){
+  applyThemeMode();
+  applyTranslations();
+  updateHeaderCompactState();
+
+  systemThemeMedia.addEventListener("change", () => {
+    if(currentThemeMode === "system"){
+      applyThemeMode();
+    }
+  });
+
+  window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
+
+  document.addEventListener("click", (event) => {
+    const profileMenu = document.getElementById("profile-menu");
+    const profileButton = document.getElementById("profile-btn");
+    if(profileMenu && !profileMenu.classList.contains("hidden") && !profileMenu.contains(event.target) && !profileButton?.contains(event.target)){
+      closeProfileMenu();
+    }
+
+    const shareMenu = document.getElementById("share-library-menu");
+    const shareButton = document.getElementById("share-library-btn");
+    if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)){
+      closeShareMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if(event.key === "Escape"){
+      closePreferencesPanel();
+      closeShareItemModal();
+      closeFolderModal();
+      toggleHomeAddPanel(false);
+    }
+  });
+
+  window.addEventListener("error", (event) => {
+    showRuntimeError(event?.message || "Unknown script error");
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    const message = reason?.message || reason || "Unhandled promise rejection";
+    showRuntimeError(message);
+  });
+
+  if(isPublicShareRoute()){
+    await initPublicSharePage();
+    updatePrimaryActionVisibility();
+    return;
+  }
+
+  await initApp();
+  updatePrimaryActionVisibility();
+}
+
     init();
