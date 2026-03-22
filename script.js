@@ -3080,7 +3080,7 @@
       await loadCategoryFromSupabase(currentCategory);
     }
 
-    async function addSearchResultToLibrary(item){
+    async function addSearchResultToLibrary(item, options = {}){
       if(!isOwnerControlAllowed()) return;
       if(!item) return;
 
@@ -3154,6 +3154,36 @@
       }));
 
       await renderAndSyncCategory(targetCategory);
+      if(!options.suppressAssist){
+        await handlePostAddRelationshipAssist({
+          category: targetCategory,
+          title: item.title,
+          canonical_key: item.canonical_key || "",
+          work_key: item.work_key || ""
+        });
+      }
+    }
+
+    function findLibraryItemByIdentity({ category, title = "", canonical_key = "", work_key = "" } = {}){
+      return (demoData[category] || []).find((entry) =>
+        (canonical_key && entry.canonical_key === canonical_key) ||
+        (work_key && entry.work_key === work_key) ||
+        normalizeComparisonText(entry.title || "") === normalizeComparisonText(title || "")
+      ) || null;
+    }
+
+    async function handlePostAddRelationshipAssist(identity){
+      const item = findLibraryItemByIdentity(identity);
+      if(!item) return;
+      currentCategory = identity.category || currentCategory;
+      await ensureItemEnrichmentHydrated(item);
+      await enrichItemFromWikidata(item, { force: false });
+      const store = await getUniverseStore();
+      const insight = buildSeriesInsight(item, store);
+      const shouldOpenAssist = insight.totalParts > 1 || insight.missingCount > 0 || insight.candidateLinks.length > 0 || insight.primaryUniverse;
+      if(shouldOpenAssist){
+        renderSeriesInsightModal(item);
+      }
     }
 
     async function saveManualItem(){
@@ -3217,6 +3247,12 @@
       closeManualModal();
       closeAddModal();
       await renderAndSyncCategory(currentCategory);
+      await handlePostAddRelationshipAssist({
+        category: currentCategory,
+        title,
+        canonical_key: canonicalKey,
+        work_key: ""
+      });
     }
 
     function changeStatusById(id){
@@ -6833,6 +6869,7 @@ function buildEnrichmentState(overrides = {}){
     matchCandidates: [],
     externalRelations: [],
     universeHints: [],
+    seriesCatalog: [],
     status: "idle",
     confidence: 0,
     error: "",
@@ -7046,6 +7083,7 @@ function buildWikidataUniverseHints(entity = {}, relatedEntities = {}){
       const target = relatedEntities[targetId] || {};
       return {
         wikidataEntityId: targetId,
+        propertyId,
         kind,
         name: readWikidataTextValue(target.labels) || targetId,
         description: readWikidataTextValue(target.descriptions),
@@ -7053,6 +7091,35 @@ function buildWikidataUniverseHints(entity = {}, relatedEntities = {}){
       };
     });
   });
+}
+
+async function fetchWikidataUniverseCatalog(universeHint, category){
+  if(!universeHint?.wikidataEntityId || !universeHint?.propertyId) return [];
+  const query = `
+    SELECT ?work ?workLabel ?workDescription ?inception WHERE {
+      VALUES (?property ?cluster) { (wdt:${universeHint.propertyId} wd:${universeHint.wikidataEntityId}) }
+      ?work ?property ?cluster .
+      OPTIONAL { ?work wdt:P577 ?inception . }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "${currentLanguage === "ru" ? "ru,en" : "en,ru"}". }
+    }
+    LIMIT 30
+  `;
+  const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(query)}`;
+  const data = await fetchJsonWithRetry(url, {
+    headers: {
+      Accept: "application/sparql-results+json"
+    }
+  });
+  const bindings = Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
+  return bindings
+    .map((entry) => ({
+      entityId: (entry?.work?.value || "").split("/").pop() || "",
+      label: entry?.workLabel?.value || "",
+      description: entry?.workDescription?.value || "",
+      releaseDate: entry?.inception?.value || ""
+    }))
+    .filter((entry) => entry.entityId && categoryMatchesWikidataDescription(category, entry.description))
+    .sort((left, right) => String(left.releaseDate || "").localeCompare(String(right.releaseDate || "")) || String(left.label || "").localeCompare(String(right.label || "")));
 }
 
 function mapWikidataBindingsToRelations(bindings = [], currentEntityId){
@@ -7227,6 +7294,12 @@ async function buildWikidataEnrichmentForItem(item){
   const relatedEntities = await fetchWikidataEntitiesByIds(relatedIds);
   const graphBindings = await fetchWikidataGraphForEntity(best.id);
   const universeHints = buildWikidataUniverseHints(entity, relatedEntities);
+  const seriesCatalog = mergeUniqueBy((await Promise.all(
+    universeHints
+      .filter((hint) => hint.kind === "series" || hint.kind === "franchise")
+      .slice(0, 2)
+      .map((hint) => fetchWikidataUniverseCatalog(hint, item?.category))
+  )).flat(), (entry) => entry.entityId);
   const externalRelations = mapWikidataBindingsToRelations(graphBindings, best.id);
 
   return buildEnrichmentState({
@@ -7244,6 +7317,7 @@ async function buildWikidataEnrichmentForItem(item){
     matchCandidates: rankedCandidates.slice(0, 5),
     externalRelations,
     universeHints,
+    seriesCatalog,
     status: best.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "ready" : "suggested",
     confidence: Number(best.confidence || 0),
     error: "",
@@ -7690,6 +7764,66 @@ async function renderTrackerSummaryForCurrentItem(){
   container.innerHTML = cards.map(([value,label]) => `<article class="tracker-stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
 }
 
+function buildSeriesInsight(item, store){
+  const enrichment = buildEnrichmentState(item?.enrichment || {});
+  const catalog = Array.isArray(enrichment.seriesCatalog) ? enrichment.seriesCatalog : [];
+  const primaryUniverse = enrichment.universeHints.find((hint) => hint.kind === "series") || enrichment.universeHints[0] || null;
+  const currentEntityId = enrichment.wikidataEntityId || "";
+  const currentIndex = catalog.findIndex((entry) => entry.entityId === currentEntityId);
+  const allItems = getAllLibraryItems();
+  const libraryCatalogEntries = catalog.filter((entry) => allItems.some((candidate) => buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId === entry.entityId));
+  const missingEntries = catalog.filter((entry) => !allItems.some((candidate) => buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId === entry.entityId));
+  const nextPart = currentIndex >= 0 ? catalog[currentIndex + 1] || null : null;
+  const candidateLinks = (store.candidates || []).filter((entry) => entry.sourceKey === getItemStorageKey(item) || entry.targetKey === getItemStorageKey(item));
+  const confirmedLinks = (store.links || []).filter((entry) => entry.sourceKey === getItemStorageKey(item) || entry.targetKey === getItemStorageKey(item));
+  const adaptationCount = [...candidateLinks, ...confirmedLinks].filter((entry) => ["adaptation", "spin_off", "related_work"].includes(normalizeRelationType(entry.relationType))).length;
+
+  return {
+    primaryUniverse,
+    totalParts: catalog.length,
+    currentIndex: currentIndex >= 0 ? currentIndex + 1 : 0,
+    libraryCount: libraryCatalogEntries.length,
+    missingCount: missingEntries.length,
+    nextPart,
+    missingEntries,
+    catalog,
+    candidateLinks,
+    confirmedLinks,
+    adaptationCount
+  };
+}
+
+function renderSeriesInsightCard(item, insight){
+  if(!insight.primaryUniverse && !insight.totalParts && !insight.candidateLinks.length){
+    return "";
+  }
+  const missingPreview = insight.missingEntries.slice(0, 3).map((entry) => `<span class="meta-chip">${escapeHtml(entry.label)}</span>`).join("");
+  return `
+    <article class="series-insight-card">
+      <div class="series-insight-heading">
+        <div>
+          <div class="series-insight-label">${escapeHtml(currentLanguage === "ru" ? "Серия / франшиза" : "Series / franchise")}</div>
+          <div class="series-insight-title">${escapeHtml(insight.primaryUniverse?.name || t().labels.wikidata)}</div>
+        </div>
+        ${insight.totalParts ? `<span class="meta-chip">${escapeHtml(`${insight.currentIndex || "?"} / ${insight.totalParts}`)}</span>` : ""}
+      </div>
+      <div class="series-insight-stats">
+        ${insight.totalParts ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.totalParts))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "частей в серии" : "parts in series")}</span></div>` : ""}
+        ${insight.libraryCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.libraryCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "у вас в библиотеке" : "in your library")}</span></div>` : ""}
+        ${insight.missingCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.missingCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "не хватает" : "missing")}</span></div>` : ""}
+        ${insight.adaptationCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.adaptationCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "связанных адаптаций" : "related adaptations")}</span></div>` : ""}
+      </div>
+      ${insight.nextPart ? `<div class="series-insight-next">${escapeHtml(currentLanguage === "ru" ? "Следующая часть" : "Next part")}: <strong>${escapeHtml(insight.nextPart.label)}</strong></div>` : ""}
+      ${missingPreview ? `<div class="series-insight-missing">${missingPreview}</div>` : ""}
+      <div class="series-insight-actions">
+        ${insight.catalog.length ? `<button class="button button-secondary" type="button" onclick="openSeriesInsightModalByCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Показать все части" : "Show all parts")}</button>` : ""}
+        ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
+        ${insight.candidateLinks.length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions()">${escapeHtml(currentLanguage === "ru" ? "Подтвердить связи" : "Confirm links")}</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
 function formatConfidence(value){
   const score = Math.round(Number(value || 0) * 100);
   return `${score}%`;
@@ -7782,6 +7916,7 @@ async function renderUniverseDetailsForCurrentItem(){
   const store = await getUniverseStore();
   const items = getAllLibraryItems();
   const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
+  const insight = buildSeriesInsight(item, store);
 
   if(retryButton){
     retryButton.classList.toggle("hidden", isPublicView);
@@ -7807,6 +7942,7 @@ async function renderUniverseDetailsForCurrentItem(){
         ${enrichment.sitelinkUrl ? `<a href="${escapeHtml(enrichment.sitelinkUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t().labels.wikidata)}</a>` : ""}
       </div>
     </article>
+    ${renderSeriesInsightCard(item, insight)}
   `;
 
   const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
@@ -7825,6 +7961,73 @@ async function retryCurrentItemWikidataEnrichment(){
   await enrichItemFromWikidata(item, { force: true });
   await renderUniverseDetailsForCurrentItem();
   await renderUniversesScreen();
+}
+
+function renderSeriesInsightModal(item){
+  const modal = document.getElementById("series-insight-modal");
+  const body = document.getElementById("series-insight-body");
+  if(!modal || !body || !item) return;
+  const storePromise = getUniverseStore();
+  storePromise.then((store) => {
+    const insight = buildSeriesInsight(item, store);
+    body.innerHTML = `
+      <div class="series-insight-modal-summary">${renderSeriesInsightCard(item, insight)}</div>
+      ${insight.catalog.length ? `<div class="series-insight-list">${insight.catalog.map((entry, index) => `<article class="series-insight-row ${entry.entityId === buildEnrichmentState(item.enrichment || {}).wikidataEntityId ? "is-current" : ""}"><div><strong>${escapeHtml(entry.label)}</strong><div class="small">${escapeHtml(entry.releaseDate ? entry.releaseDate.slice(0, 10) : "—")}</div></div><span class="meta-chip">${escapeHtml(String(index + 1))}</span></article>`).join("")}</div>` : ""}
+    `;
+    modal.classList.remove("hidden");
+  });
+}
+
+function openSeriesInsightModalByCurrentItem(){
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  renderSeriesInsightModal(item);
+}
+
+function closeSeriesInsightModal(){
+  document.getElementById("series-insight-modal")?.classList.add("hidden");
+}
+
+async function confirmAllCurrentItemSuggestions(){
+  const store = await getUniverseStore();
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  const itemKey = getItemStorageKey(item);
+  const candidateIds = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).map((entry) => entry.id);
+  for(const candidateId of candidateIds){
+    const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
+    if(index < 0) continue;
+    const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
+    store.candidates.splice(index, 1);
+    upsertGraphLink(store, candidate, false);
+  }
+  store.memberships = (store.memberships || []).map((entry) => entry.itemKey === itemKey && entry.status === "suggested" ? { ...entry, status: "confirmed", confidence: Math.max(0.8, Number(entry.confidence || 0.7)) } : entry);
+  await setUniverseStore(store);
+  await renderUniverseDetailsForCurrentItem();
+  await renderUniversesScreen();
+}
+
+async function addMissingSeriesPartsForCurrentItem(limit = 3){
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  const store = await getUniverseStore();
+  const insight = buildSeriesInsight(item, store);
+  const candidates = insight.missingEntries.slice(0, limit);
+  if(!candidates.length) return;
+  for(const entry of candidates){
+    try {
+      const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
+      const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
+      if(best){
+        await addSearchResultToLibrary(best, { suppressAssist: true });
+      }
+    } catch (error) {
+      console.error("Series quick-add error:", error);
+    }
+  }
+  await loadCategoryFromSupabase(currentCategory);
+  await renderUniverseDetailsForCurrentItem();
+  renderSeriesInsightModal(item);
 }
 
 async function confirmRelationCandidate(candidateId){
@@ -8123,8 +8326,9 @@ applyTranslations = function applyTranslationsProductArchitecture(){
     ["details-universe-title", "Связи и вселенные"],
     ["details-universe-note", "Франшизы, циклы и связанные работы"],
     ["retry-wikidata-btn", t().labels.enrichmentRetry],
-    ["open-universe-modal-btn", "Связать"],
+    ["open-universe-modal-btn", "Связать вручную"],
     ["details-suggested-relations-summary", t().labels.enrichmentSuggested],
+    ["details-relation-advanced-summary", "Расширенное редактирование"],
     ["tracker-modal-title", "Трекер"],
     ["tracker-status-label", "Статус"],
     ["tracker-started-label", "Дата начала"],
@@ -8152,7 +8356,10 @@ applyTranslations = function applyTranslationsProductArchitecture(){
     ["nav-universes-btn", "Вселенные"],
     ["add-universe-btn", "+ Вселенная"],
     ["stats-activity-title", "История активности"],
-    ["stats-activity-note", "Что вы меняли в библиотеке недавно"]
+    ["stats-activity-note", "Что вы меняли в библиотеке недавно"],
+    ["series-insight-modal-title", "Серия и подсказки"],
+    ["series-insight-modal-note", "Система сама нашла серию, связанные части и быстрые действия."],
+    ["series-insight-close-btn", t().buttons.close || "Закрыть"]
   ].forEach(([id, value]) => setTextIfPresent(id, value));
   rebuildStatusFilterOptions();
   refreshProductArchitectureViews();
