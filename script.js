@@ -10051,7 +10051,7 @@ restoreAppRouteState = async function restoreAppRouteStateStable(){
 
 updateBottomNavState = function updateBottomNavStateStable(section){
   const map = {
-    dashboard: "nav-home-btn",
+    dashboard: "nav-add-btn",
     library: "nav-library-btn",
     collections: "nav-collections-btn",
     universes: "nav-universes-btn",
@@ -10195,10 +10195,20 @@ async function renderSettingsScreen(){
       </div>
       <div class="settings-card-actions">
         <button class="button button-primary" type="button" onclick="openShareModal()">${escapeHtml(t().topbar.shareLibrary)}</button>
+        <button class="button button-secondary" type="button" onclick="openCurrentPublicCard()">${escapeHtml(currentLanguage === 'ru' ? 'Публичная библиотека' : 'Public library')}</button>
         <button class="button button-secondary" type="button" onclick="openNfcSettingsModal()">NFC</button>
       </div>
     </article>
   `;
+}
+
+function openPrimaryAddFromNav(){
+  if(getActiveProductView() === "dashboard"){
+    toggleHomeAddPanel();
+  } else {
+    handlePrimaryAddAction();
+  }
+  updateBottomNavState("dashboard");
 }
 
 function showCollectionsScreen(){
@@ -10397,11 +10407,11 @@ applyTranslations = function applyTranslationsStable(){
     ["settings-screen-title", currentLanguage === "ru" ? "Настройки" : "Settings"],
     ["settings-section-title", currentLanguage === "ru" ? "Настройки" : "Settings"],
     ["settings-section-note", currentLanguage === "ru" ? "Сессия, интерфейс, шэринг и профиль." : "Session, interface, sharing and profile."],
-    ["nav-home-btn", currentLanguage === "ru" ? "Главная" : "Home"],
     ["nav-library-btn", currentLanguage === "ru" ? "Библиотека" : "Library"],
-    ["nav-collections-btn", currentLanguage === "ru" ? "Коллекции" : "Collections"],
+    ["nav-collections-btn", currentLanguage === "ru" ? "Папки" : "Folders"],
+    ["nav-add-btn", currentLanguage === "ru" ? "Добавить" : "Add"],
     ["nav-universes-btn", currentLanguage === "ru" ? "Связи" : "Relations"],
-    ["nav-settings-btn", currentLanguage === "ru" ? "Настройки" : "Settings"],
+    ["nav-settings-btn", currentLanguage === "ru" ? "Профиль" : "Profile"],
     ["back-collections-btn", "←"],
     ["back-profile-screen-btn", "←"],
     ["back-settings-btn", "←"],
