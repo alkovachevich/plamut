@@ -528,6 +528,7 @@
     let currentNfcContext = null;
     let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
     let currentSavedLibraryState = { saved: false, source: "none" };
+    const relationAutomationMemo = new Map();
 
     const demoData = {
       Books: [],
@@ -3378,7 +3379,6 @@
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
-      await loadCategoryFromSupabase(currentCategory);
     }
 
     async function addSearchResultToLibrary(item, options = {}){
@@ -3438,7 +3438,11 @@
         description_en: finalDescriptionEn || ""
       }));
 
-      await renderAndSyncCategory(targetCategory);
+      if(options.skipCategorySync){
+        requestProductRefresh({ forceFull: false });
+      } else {
+        await renderAndSyncCategory(targetCategory);
+      }
       if(!options.suppressAssist){
         await handlePostAddRelationshipAssist({
           category: targetCategory,
@@ -8618,6 +8622,28 @@ function getCurrentItemUniverseGraphSnapshot(item, store){
   return { itemKey, memberships, confirmedLinks, candidateLinks };
 }
 
+function hasStoredRelationsForItem(item, store){
+  const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
+  return Boolean(snapshot.memberships.length || snapshot.confirmedLinks.length || snapshot.candidateLinks.length);
+}
+
+function scheduleBackgroundRelationRefresh(item){
+  if(!item) return;
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  if(wikidataEnrichmentJobs.has(itemKey) || !shouldEnrichItem(item, false)) return;
+  const run = () => enrichItemFromWikidata(item, { force: false }).then(async () => {
+    relationAutomationMemo.delete(itemKey);
+    await requestProductRefresh({ forceFull: false, detailsOnly: currentOpenItemId === item.id });
+  }).catch((error) => {
+    console.error("Deferred relation refresh error:", error);
+  });
+  if(window.requestIdleCallback){
+    window.requestIdleCallback(run, { timeout: 900 });
+  } else {
+    window.setTimeout(run, 120);
+  }
+}
+
 function renderUniverseMembershipCards(memberships = [], universes = []){
   return memberships.map((membership) => {
     const universe = universes.find((entry) => entry.id === membership.universeId);
@@ -8716,9 +8742,21 @@ async function promoteHighConfidenceRelationsForItem(item, store = null){
   return changed;
 }
 
-async function ensureAutomatedRelationsForItem(item){
+async function ensureAutomatedRelationsForItem(item, options = {}){
   if(!item) return { store: await getUniverseStore(), insight: createEmptySeriesInsight() };
   await ensureItemEnrichmentHydrated(item);
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  const memoEntry = relationAutomationMemo.get(itemKey);
+  const memoIsFresh = memoEntry && memoEntry.libraryStateVersion === libraryStateVersion && (Date.now() - memoEntry.timestamp) < 30000;
+
+  if(!options.force && memoIsFresh){
+    const store = await getUniverseStore();
+    if(!hasStoredRelationsForItem(item, store)){
+      scheduleBackgroundRelationRefresh(item);
+    }
+    return { store, insight: buildSeriesInsight(item, store) };
+  }
+
   await ensureLocalUniverseInferenceForItem(item);
   let store = await getUniverseStore();
   if(await promoteHighConfidenceRelationsForItem(item, store)){
@@ -8726,6 +8764,14 @@ async function ensureAutomatedRelationsForItem(item){
   }
   const insight = buildSeriesInsight(item, store);
   await persistRelationSummarySnapshot(item, store, insight);
+  relationAutomationMemo.set(itemKey, {
+    timestamp: Date.now(),
+    libraryStateVersion,
+    lastEnrichedAt: buildEnrichmentState(item.enrichment || {}).lastEnrichedAt || ""
+  });
+  if(!hasStoredRelationsForItem(item, store)){
+    scheduleBackgroundRelationRefresh(item);
+  }
   return { store, insight };
 }
 
@@ -8975,7 +9021,7 @@ async function addMissingSeriesPartsForCurrentItem(limit = 3, button = null){
         const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
         const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
         if(best){
-          await addSearchResultToLibrary(best, { suppressAssist: true });
+          await addSearchResultToLibrary(best, { suppressAssist: true, skipCategorySync: true });
         }
       } catch (error) {
         console.error("Series quick-add error:", error);
@@ -9173,7 +9219,13 @@ function requestProductRefresh(options = {}){
     const view = getActiveProductView();
     try {
       if(forceFull || view === "dashboard"){
-        await Promise.all([renderHomeNowSection(), renderHomeStatsSection(), renderActivityLists()]);
+        const homeTasks = [];
+        if(document.getElementById("home-now-grid")) homeTasks.push(renderHomeNowSection());
+        if(document.getElementById("home-stats-grid")) homeTasks.push(renderHomeStatsSection());
+        if(document.getElementById("home-activity-list")) homeTasks.push(renderActivityLists());
+        if(homeTasks.length){
+          await Promise.all(homeTasks);
+        }
       }
       if(forceFull || view === "library") {
         await renderLibraryRootScreen();
