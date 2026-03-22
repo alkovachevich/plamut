@@ -884,11 +884,13 @@
       currentFilterStatus = value || "All";
       localStorage.setItem("plamut_status_filter", currentFilterStatus);
       renderShelf();
+      persistAppRouteState();
     }
 
     function setShelfSearchQuery(value){
       currentShelfSearchQuery = normalizeSpaces(value);
       renderShelf();
+      persistAppRouteState();
     }
 
     function syncShelfSearchInput(){
@@ -5814,13 +5816,18 @@ function backToCategory(){
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   updatePrimaryActionVisibility();
+  persistAppRouteState();
 }
 
-async function openCategory(name){
+async function openCategory(name, options = {}){
   closePreferencesPanel();
   isPublicView = false;
   currentCategory = name;
-  resetShelfSearchQuery();
+  if(!options.preserveSearch){
+    resetShelfSearchQuery();
+  } else {
+    syncShelfSearchInput();
+  }
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
@@ -5840,6 +5847,9 @@ async function openCategory(name){
 
   await loadCategoryFromSupabase(name);
   updatePrimaryActionVisibility();
+  if(!options.skipRoutePersist){
+    persistAppRouteState();
+  }
 }
 
 async function openCardById(id){
@@ -6333,6 +6343,7 @@ function setFolderFilter(value){
   localStorage.setItem("plamut_folder_filter", currentFilterFolder);
   renderFolderRail();
   renderShelf();
+  persistAppRouteState();
 }
 
 async function renderFolderRail(){
@@ -6726,7 +6737,7 @@ const PRODUCT_TRACKER_STATUSES = [
   "Rereading"
 ];
 const PRODUCT_NOW_STATUSES = ["Watching", "Reading", "Playing", "On hold", "Rewatching", "Rereading"];
-const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spin_off", "adaptation", "based_on", "related_work", "original_work", "derived_from"];
+const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spin_off", "adaptation", "based_on", "related_work", "original_work", "derived_from", "franchise_member"];
 const WIKIDATA_MATCH_HIGH_CONFIDENCE = 0.82;
 const WIKIDATA_MATCH_MEDIUM_CONFIDENCE = 0.62;
 const WIKIDATA_ENRICHMENT_TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -6747,6 +6758,11 @@ const WIKIDATA_UNIVERSE_PROPERTY_MAP = {
 let currentNowSort = "updated";
 let currentUniverseContextItemId = null;
 const wikidataEnrichmentJobs = new Map();
+const wikidataResourceCache = new Map();
+let productRefreshScheduled = false;
+let productRefreshNeedsFull = false;
+let hasRestoredAppRouteState = false;
+let isRestoringAppRouteState = false;
 
 Object.assign(translations.en.statuses, {
   Watching: "Watching",
@@ -6793,7 +6809,8 @@ Object.assign(translations.en.labels, {
   enrichmentSecondary: "Secondary enrichment layer",
   enrichmentNoRelations: "No linked works yet",
   enrichmentLastUpdated: "Last enriched",
-  enrichmentExternal: "External graph link"
+  enrichmentExternal: "External graph link",
+  franchiseMember: "Franchise member"
 });
 Object.assign(translations.ru.labels, {
   progress: "Прогресс",
@@ -6824,7 +6841,8 @@ Object.assign(translations.ru.labels, {
   enrichmentSecondary: "Вторичный слой enrichment",
   enrichmentNoRelations: "Пока нет связанных объектов",
   enrichmentLastUpdated: "Последнее enrichment",
-  enrichmentExternal: "Внешняя связь графа"
+  enrichmentExternal: "Внешняя связь графа",
+  franchiseMember: "Часть франшизы"
 });
 
 function buildTrackerStorageKey(item, category = currentCategory){
@@ -6935,7 +6953,8 @@ function formatRelationType(type){
     based_on: currentLanguage === "ru" ? "Основано на" : "Based on",
     related_work: currentLanguage === "ru" ? "Связанное произведение" : "Related work",
     original_work: currentLanguage === "ru" ? "Оригинальное произведение" : "Original work",
-    derived_from: currentLanguage === "ru" ? "Производно от" : "Derived from"
+    derived_from: currentLanguage === "ru" ? "Производно от" : "Derived from",
+    franchise_member: currentLanguage === "ru" ? "Часть франшизы" : "Franchise member"
   };
   return labels[relation] || relation;
 }
@@ -7017,9 +7036,27 @@ async function fetchJsonWithRetry(url, options = {}, retries = 2){
   throw lastError;
 }
 
+async function getCachedWikidataResource(cacheKey, loader, ttlMs = 1000 * 60 * 60 * 6){
+  const cached = wikidataResourceCache.get(cacheKey);
+  if(cached){
+    if(cached.promise) return await cached.promise;
+    if(Date.now() - cached.timestamp < ttlMs) return cached.value;
+  }
+  const promise = Promise.resolve().then(loader);
+  wikidataResourceCache.set(cacheKey, { promise, timestamp: Date.now() });
+  try {
+    const value = await promise;
+    wikidataResourceCache.set(cacheKey, { value, timestamp: Date.now() });
+    return value;
+  } catch (error) {
+    wikidataResourceCache.delete(cacheKey);
+    throw error;
+  }
+}
+
 async function searchWikidataEntities(query, language = currentLanguage){
   const url = `${WIKIDATA_ENTITY_API_URL}?action=wbsearchentities&format=json&origin=*&language=${encodeURIComponent(language || "en")}&uselang=${encodeURIComponent(language || "en")}&type=item&limit=8&search=${encodeURIComponent(query)}`;
-  const data = await fetchJsonWithRetry(url);
+  const data = await getCachedWikidataResource(`search:${language}:${query}`, () => fetchJsonWithRetry(url), 1000 * 60 * 60 * 24);
   return Array.isArray(data?.search) ? data.search : [];
 }
 
@@ -7027,7 +7064,7 @@ async function fetchWikidataEntitiesByIds(ids = []){
   const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
   if(!uniqueIds.length) return {};
   const url = `${WIKIDATA_ENTITY_API_URL}?action=wbgetentities&format=json&origin=*&languages=${encodeURIComponent(currentLanguage === "ru" ? "ru|en" : "en|ru")}&props=labels|descriptions|aliases|claims|sitelinks&ids=${encodeURIComponent(uniqueIds.join("|"))}`;
-  const data = await fetchJsonWithRetry(url);
+  const data = await getCachedWikidataResource(`entities:${currentLanguage}:${uniqueIds.join("|")}`, () => fetchJsonWithRetry(url), WIKIDATA_ENRICHMENT_TTL_MS);
   return data?.entities || {};
 }
 
@@ -7069,11 +7106,11 @@ async function fetchWikidataGraphForEntity(entityId){
     LIMIT 30
   `;
   const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(relationQuery)}`;
-  const data = await fetchJsonWithRetry(url, {
+  const data = await getCachedWikidataResource(`graph:${entityId}:${currentLanguage}`, () => fetchJsonWithRetry(url, {
     headers: {
       Accept: "application/sparql-results+json"
     }
-  });
+  }), WIKIDATA_ENRICHMENT_TTL_MS);
   return Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
 }
 
@@ -7105,11 +7142,11 @@ async function fetchWikidataUniverseCatalog(universeHint, category){
     LIMIT 30
   `;
   const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(query)}`;
-  const data = await fetchJsonWithRetry(url, {
+  const data = await getCachedWikidataResource(`catalog:${universeHint.propertyId}:${universeHint.wikidataEntityId}:${category}:${currentLanguage}`, () => fetchJsonWithRetry(url, {
     headers: {
       Accept: "application/sparql-results+json"
     }
-  });
+  }), WIKIDATA_ENRICHMENT_TTL_MS);
   const bindings = Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
   return bindings
     .map((entry) => ({
@@ -7356,6 +7393,9 @@ async function applyWikidataGraphToUniverseStore(item){
 
       const relation = enrichment.externalRelations.find((entry) => entry.relatedEntityId === candidateEnrichment.wikidataEntityId);
       const sharedUniverse = candidateEnrichment.universeHints?.find((hint) => currentUniverseIds.has(hint.wikidataEntityId));
+      const inferredCrossMedia = !relation && normalizeComparisonText(candidate.title || "") === normalizeComparisonText(item.title || "") && candidate.category !== item.category
+        ? inferCrossMediaRelationType(item, candidate)
+        : "";
 
       if(relation){
         upsertGraphLink(store, {
@@ -7364,16 +7404,28 @@ async function applyWikidataGraphToUniverseStore(item){
           relationType: relation.relationType,
           source: relation.source,
           confidence: relation.confidence,
-          wikidataEntityId: currentEntityId
+          wikidataEntityId: currentEntityId,
+          layer: getRelationLayerInfo(relation, item, candidate).key
         }, relation.confidence < WIKIDATA_MATCH_HIGH_CONFIDENCE);
+      } else if(inferredCrossMedia){
+        upsertGraphLink(store, {
+          sourceKey: itemKey,
+          targetKey: getItemStorageKey(candidate),
+          relationType: inferredCrossMedia,
+          source: "inferred",
+          confidence: 0.66,
+          wikidataEntityId: currentEntityId,
+          layer: getRelationLayerInfo({ relationType: inferredCrossMedia }, item, candidate).key
+        }, true);
       } else if(sharedUniverse){
         upsertGraphLink(store, {
           sourceKey: itemKey,
           targetKey: getItemStorageKey(candidate),
-          relationType: "same_universe",
+          relationType: candidate.category !== item.category ? "franchise_member" : "same_universe",
           source: "inferred",
           confidence: 0.68,
-          wikidataEntityId: sharedUniverse.wikidataEntityId
+          wikidataEntityId: sharedUniverse.wikidataEntityId,
+          layer: candidate.category !== item.category ? "franchise" : "series"
         }, true);
       }
     });
@@ -7824,6 +7876,37 @@ function renderSeriesInsightCard(item, insight){
   `;
 }
 
+function inferCrossMediaRelationType(sourceItem, targetItem){
+  if(!sourceItem || !targetItem || sourceItem.category === targetItem.category) return "";
+  const sourceCategory = sourceItem.category;
+  const targetCategory = targetItem.category;
+  const sourceIsOriginal = ["Books", "Manga"].includes(sourceCategory);
+  const targetIsAdaptation = ["Movies", "Series", "Anime"].includes(targetCategory);
+  if(sourceIsOriginal && targetIsAdaptation) return "adaptation";
+  if(targetIsAdaptation && ["Movies", "Series", "Anime"].includes(sourceCategory) && ["Books", "Manga"].includes(targetCategory)) return "based_on";
+  return "franchise_member";
+}
+
+function getRelationLayerInfo(relation, item, targetItem){
+  const relationType = normalizeRelationType(relation?.relationType || "");
+  if(["adaptation", "based_on", "original_work", "derived_from"].includes(relationType) || (item?.category && targetItem?.category && item.category !== targetItem.category && !["part_of_series", "same_universe", "franchise_member"].includes(relationType))){
+    return {
+      key: "adaptation",
+      title: currentLanguage === "ru" ? "Адаптации и кросс-медиа" : "Adaptations & cross-media"
+    };
+  }
+  if(["franchise_member", "same_universe"].includes(relationType)){
+    return {
+      key: "franchise",
+      title: currentLanguage === "ru" ? "Франшиза / вселенная" : "Franchise / universe"
+    };
+  }
+  return {
+    key: "series",
+    title: currentLanguage === "ru" ? "Серия и порядок" : "Series & order"
+  };
+}
+
 function formatConfidence(value){
   const score = Math.round(Number(value || 0) * 100);
   return `${score}%`;
@@ -7895,6 +7978,31 @@ function renderRelationCards(relations = [], items = [], itemKey = ""){
   }).join("");
 }
 
+function renderGroupedRelationSections(relations = [], items = [], item, itemKey, emptyLabel){
+  if(!relations.length){
+    return `<div class="small">${escapeHtml(emptyLabel)}</div>`;
+  }
+  const grouped = new Map();
+  relations.forEach((relation) => {
+    const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
+    const target = items.find((candidate) => getItemStorageKey(candidate, candidate.category) === targetKey);
+    const layer = relation.layer || getRelationLayerInfo(relation, item, target).key;
+    if(!grouped.has(layer)){
+      grouped.set(layer, {
+        title: getRelationLayerInfo(relation, item, target).title,
+        entries: []
+      });
+    }
+    grouped.get(layer).entries.push(relation);
+  });
+  return Array.from(grouped.values()).map((group) => `
+    <section class="relation-layer-group">
+      <div class="relation-layer-title">${escapeHtml(group.title)}</div>
+      <div class="relation-group">${renderRelationCards(group.entries, items, itemKey)}</div>
+    </section>
+  `).join("");
+}
+
 async function renderUniverseDetailsForCurrentItem(){
   const container = document.getElementById("details-universe-list");
   const meta = document.getElementById("details-enrichment-meta");
@@ -7946,12 +8054,12 @@ async function renderUniverseDetailsForCurrentItem(){
   `;
 
   const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
-  const relationHtml = renderRelationCards(snapshot.confirmedLinks, items, snapshot.itemKey);
-  container.innerHTML = membershipHtml || relationHtml
-    ? `<div class="relation-group">${membershipHtml}</div><div class="relation-group">${relationHtml}</div>`
+  const relationHtml = renderGroupedRelationSections(snapshot.confirmedLinks, items, item, snapshot.itemKey, t().labels.enrichmentNoRelations);
+  container.innerHTML = membershipHtml || snapshot.confirmedLinks.length
+    ? `${membershipHtml ? `<div class="relation-group">${membershipHtml}</div>` : ""}${relationHtml}`
     : `<div class="small">${escapeHtml(t().labels.enrichmentNoRelations)}</div>`;
 
-  suggested.innerHTML = renderRelationCards(snapshot.candidateLinks, items, snapshot.itemKey) || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+  suggested.innerHTML = renderGroupedRelationSections(snapshot.candidateLinks, items, item, snapshot.itemKey, t().labels.noResults);
   suggestedWrap.classList.toggle("hidden", snapshot.candidateLinks.length === 0);
 }
 
@@ -8068,6 +8176,161 @@ async function detachUniverseMembership(universeId){
   await renderUniversesScreen();
 }
 
+function getActiveProductView(){
+  if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
+  if(!document.getElementById("category-screen")?.classList.contains("hidden")) return "category";
+  if(!document.getElementById("now-screen")?.classList.contains("hidden")) return "now";
+  if(!document.getElementById("stats-screen")?.classList.contains("hidden")) return "stats";
+  if(!document.getElementById("universes-screen")?.classList.contains("hidden")) return "universes";
+  if(!document.getElementById("auth-screen")?.classList.contains("hidden")) return "auth";
+  return "dashboard";
+}
+
+function buildAppRouteState(){
+  return {
+    view: getActiveProductView(),
+    category: currentCategory || "",
+    itemId: currentOpenItemId || "",
+    filterStatus: currentFilterStatus || "All",
+    filterFolder: currentFilterFolder || "All",
+    searchQuery: currentShelfSearchQuery || "",
+    nowSort: currentNowSort || "updated"
+  };
+}
+
+function buildAppRouteHash(state = {}){
+  const params = new URLSearchParams();
+  if(state.filterStatus && state.filterStatus !== "All") params.set("status", state.filterStatus);
+  if(state.filterFolder && state.filterFolder !== "All") params.set("folder", state.filterFolder);
+  if(state.searchQuery) params.set("q", state.searchQuery);
+  if(state.nowSort && state.nowSort !== "updated") params.set("sort", state.nowSort);
+  const query = params.toString();
+  if(state.view === "details" && state.category && state.itemId) return `#details/${encodeURIComponent(state.category)}/${encodeURIComponent(state.itemId)}${query ? `?${query}` : ""}`;
+  if(state.view === "category" && state.category) return `#category/${encodeURIComponent(state.category)}${query ? `?${query}` : ""}`;
+  if(state.view === "now") return `#now${query ? `?${query}` : ""}`;
+  if(state.view === "stats") return `#stats${query ? `?${query}` : ""}`;
+  if(state.view === "universes") return `#universes${query ? `?${query}` : ""}`;
+  if(state.view === "auth") return "#auth";
+  return query ? `#dashboard?${query}` : "#dashboard";
+}
+
+function parseAppRouteState(){
+  const rawHash = window.location.hash || "";
+  if(rawHash.startsWith("#details/") || rawHash.startsWith("#category/") || rawHash.startsWith("#now") || rawHash.startsWith("#stats") || rawHash.startsWith("#universes") || rawHash.startsWith("#dashboard") || rawHash.startsWith("#auth")){
+    const [pathPart, queryPart = ""] = rawHash.slice(1).split("?");
+    const params = new URLSearchParams(queryPart);
+    const segments = pathPart.split("/").filter(Boolean);
+    const view = segments[0] || "dashboard";
+    return {
+      view,
+      category: segments[1] ? decodeURIComponent(segments[1]) : "",
+      itemId: segments[2] ? decodeURIComponent(segments[2]) : "",
+      filterStatus: params.get("status") || "All",
+      filterFolder: params.get("folder") || "All",
+      searchQuery: params.get("q") || "",
+      nowSort: params.get("sort") || "updated"
+    };
+  }
+  try {
+    return JSON.parse(localStorage.getItem("plamut_app_route_state") || "null");
+  } catch (_error) {
+    return null;
+  }
+}
+
+function persistAppRouteState(){
+  if(isPublicShareRoute() || isPublicView || isRestoringAppRouteState) return;
+  const state = buildAppRouteState();
+  localStorage.setItem("plamut_app_route_state", JSON.stringify(state));
+  const nextHash = buildAppRouteHash(state);
+  if(window.location.hash !== nextHash){
+    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash}`;
+    window.history.replaceState(window.history.state || {}, "", nextUrl);
+  }
+}
+
+async function restoreAppRouteState(){
+  if(hasRestoredAppRouteState || isPublicShareRoute()) return false;
+  const state = parseAppRouteState();
+  hasRestoredAppRouteState = true;
+  if(!state?.view) return false;
+  isRestoringAppRouteState = true;
+  currentFilterStatus = state.filterStatus || "All";
+  currentFilterFolder = state.filterFolder || "All";
+  currentShelfSearchQuery = normalizeSpaces(state.searchQuery || "");
+  currentNowSort = state.nowSort || "updated";
+  try {
+    switch(state.view){
+      case "details":
+        if(state.category){
+          await openCategory(state.category, { preserveSearch: true, skipRoutePersist: true });
+          if(state.itemId){
+            await openCardById(Number(state.itemId));
+            return true;
+          }
+        }
+        break;
+      case "category":
+        if(state.category){
+          await openCategory(state.category, { preserveSearch: true, skipRoutePersist: true });
+          return true;
+        }
+        break;
+      case "now":
+        showNowScreen();
+        return true;
+      case "stats":
+        showStatsScreen();
+        return true;
+      case "universes":
+        showUniversesScreen();
+        return true;
+      case "auth":
+        showAuthScreen();
+        return true;
+      default:
+        showDashboardScreen();
+        return true;
+    }
+  } finally {
+    isRestoringAppRouteState = false;
+    syncShelfSearchInput();
+    persistAppRouteState();
+  }
+  return false;
+}
+
+function requestProductRefresh(options = {}){
+  productRefreshNeedsFull = productRefreshNeedsFull || Boolean(options.forceFull);
+  if(productRefreshScheduled) return;
+  productRefreshScheduled = true;
+  requestAnimationFrame(async () => {
+    const forceFull = productRefreshNeedsFull;
+    productRefreshScheduled = false;
+    productRefreshNeedsFull = false;
+    const view = getActiveProductView();
+    try {
+      if(forceFull || view === "dashboard"){
+        await Promise.all([renderHomeNowSection(), renderHomeStatsSection(), renderActivityLists()]);
+      }
+      if(forceFull || view === "now"){
+        await renderNowScreen();
+      }
+      if(forceFull || view === "stats"){
+        await Promise.all([renderStatsScreen(), renderActivityLists()]);
+      }
+      if(forceFull || view === "universes"){
+        await renderUniversesScreen();
+      }
+      if(forceFull || view === "details" || options.detailsOnly){
+        await Promise.all([renderTrackerSummaryForCurrentItem(), renderUniverseDetailsForCurrentItem()]);
+      }
+    } catch (error) {
+      console.error("Product refresh error:", error);
+    }
+  });
+}
+
 function updateBottomNavState(section){
   const map = {
     dashboard: "nav-home-btn",
@@ -8090,7 +8353,8 @@ function showDashboardScreen(){
   hideAllScreens();
   document.getElementById("home-screen")?.classList.remove("hidden");
   updateBottomNavState("dashboard");
-  refreshProductArchitectureViews();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function showNowScreen(){
@@ -8098,7 +8362,8 @@ function showNowScreen(){
   hideAllScreens();
   document.getElementById("now-screen")?.classList.remove("hidden");
   updateBottomNavState("now");
-  renderNowScreen();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function showStatsScreen(){
@@ -8106,8 +8371,8 @@ function showStatsScreen(){
   hideAllScreens();
   document.getElementById("stats-screen")?.classList.remove("hidden");
   updateBottomNavState("stats");
-  renderStatsScreen();
-  renderActivityLists();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function showUniversesScreen(){
@@ -8115,7 +8380,8 @@ function showUniversesScreen(){
   hideAllScreens();
   document.getElementById("universes-screen")?.classList.remove("hidden");
   updateBottomNavState("universes");
-  renderUniversesScreen();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function showLibraryRoot(){
@@ -8124,7 +8390,8 @@ function showLibraryRoot(){
   document.getElementById("home-screen")?.classList.remove("hidden");
   updateBottomNavState("library");
   document.getElementById("library-section-title")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  refreshProductArchitectureViews();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function goHome(){
@@ -8143,7 +8410,8 @@ function changeStatusByCategory(id, category){
 
 function setNowSort(value){
   currentNowSort = value || "updated";
-  renderNowScreen();
+  requestProductRefresh({ forceFull: false });
+  persistAppRouteState();
 }
 
 function openTrackerModalByCurrentItem(){
@@ -8295,14 +8563,7 @@ async function saveUniverseFromModal(){
 }
 
 function refreshProductArchitectureViews(){
-  renderHomeNowSection();
-  renderHomeStatsSection();
-  renderActivityLists();
-  renderNowScreen();
-  renderStatsScreen();
-  renderUniversesScreen();
-  renderTrackerSummaryForCurrentItem();
-  renderUniverseDetailsForCurrentItem();
+  requestProductRefresh({ forceFull: false });
 }
 
 const productArchitectureApplyTranslations = applyTranslations;
@@ -8372,19 +8633,29 @@ openCardById = async function openCardByIdWithArchitecture(id){
   if(item){
     await ensureItemEnrichmentHydrated(item);
     if(shouldEnrichItem(item, false)){
-      await enrichItemFromWikidata(item, { force: false });
+      enrichItemFromWikidata(item, { force: false }).then(() => {
+        requestProductRefresh({ forceFull: false, detailsOnly: true });
+      }).catch((error) => {
+        console.error("Deferred card enrichment error:", error);
+      });
     }
   }
-  await renderTrackerSummaryForCurrentItem();
-  await renderUniverseDetailsForCurrentItem();
+  await Promise.all([
+    renderTrackerSummaryForCurrentItem(),
+    renderUniverseDetailsForCurrentItem()
+  ]);
+  persistAppRouteState();
 };
 
 const productArchitectureShowAuthorizedUI = showAuthorizedUI;
 showAuthorizedUI = async function showAuthorizedUIWithArchitecture(){
   await updateAllProductData();
   await productArchitectureShowAuthorizedUI();
-  updateBottomNavState("dashboard");
-  refreshProductArchitectureViews();
+  if(!(await restoreAppRouteState())){
+    updateBottomNavState("dashboard");
+    requestProductRefresh({ forceFull: false });
+    persistAppRouteState();
+  }
 };
 
 const productArchitectureLoadCategory = loadCategoryFromSupabase;
@@ -8444,8 +8715,8 @@ async function init(){
     return;
   }
   await initApp();
-  updateBottomNavState("dashboard");
-  refreshProductArchitectureViews();
+  updateBottomNavState(getActiveProductView() === "category" || getActiveProductView() === "details" ? "library" : getActiveProductView());
+  requestProductRefresh({ forceFull: false });
   updatePrimaryActionVisibility();
 }
 
