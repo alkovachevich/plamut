@@ -187,8 +187,8 @@
           <div class="section" id="details-folder-section">
             <h3 id="details-folder-title">Folder</h3>
             <div class="folder-assignment-row">
-              <select id="details-folder-select" class="select"></select>
-              <button class="button button-secondary" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+              <button class="button button-secondary" type="button" onclick="openFolderModalByCurrentItem()" id="open-folder-modal-btn">Add to folder</button>
+              <div class="small" id="details-folder-current">No folder</div>
             </div>
           </div>
 
@@ -202,6 +202,20 @@
             <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
             <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="folder-modal" class="modal hidden" onclick="closeFolderModalOnBackdrop(event)">
+      <div class="modal-box folder-modal-box">
+        <div class="folder-modal-header">
+          <h3 id="folder-modal-title">Add to folder</h3>
+          <p class="small" id="folder-modal-subtitle">Folder</p>
+        </div>
+        <div id="folder-modal-list" class="folder-modal-list"></div>
+        <div class="modal-actions">
+          <button class="button button-ghost" type="button" onclick="closeFolderModal()" id="folder-modal-cancel-btn">Cancel</button>
+          <button class="button button-primary" type="button" onclick="saveItemFolderFromModal()" id="folder-modal-save-btn">Save folder</button>
         </div>
       </div>
     </div>
