@@ -528,7 +528,6 @@
     let currentNfcContext = null;
     let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
     let currentSavedLibraryState = { saved: false, source: "none" };
-    const relationAutomationMemo = new Map();
 
     const demoData = {
       Books: [],
@@ -3379,6 +3378,7 @@
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
+      await loadCategoryFromSupabase(currentCategory);
     }
 
     async function addSearchResultToLibrary(item, options = {}){
@@ -3438,11 +3438,7 @@
         description_en: finalDescriptionEn || ""
       }));
 
-      if(options.skipCategorySync){
-        requestProductRefresh({ forceFull: false });
-      } else {
-        await renderAndSyncCategory(targetCategory);
-      }
+      await renderAndSyncCategory(targetCategory);
       if(!options.suppressAssist){
         await handlePostAddRelationshipAssist({
           category: targetCategory,
@@ -5889,14 +5885,13 @@ function updatePrimaryActionVisibility(){
   const categoryVisible = !document.getElementById("category-screen")?.classList.contains("hidden");
   const detailsVisible = !document.getElementById("details-screen")?.classList.contains("hidden");
   const authVisible = !document.getElementById("auth-screen")?.classList.contains("hidden");
-  const canShow = isAuthorized && !isPublicView && !homeVisible && !detailsVisible && !authVisible && categoryVisible && currentCategory !== "Blacklist";
+  const canShow = isAuthorized && !isPublicView && !detailsVisible && !authVisible && (homeVisible || (categoryVisible && currentCategory !== "Blacklist"));
   fab.classList.toggle("hidden", !canShow);
 }
 
 function setAuthorizedButtons(isAuthorized){
   const loginBtn = document.getElementById("login-top-btn");
   const profileWrap = document.getElementById("header-profile-menu-wrap");
-  const homeAddBtn = document.getElementById("home-add-btn");
 
   if(loginBtn){
     loginBtn.classList.toggle("hidden", isAuthorized);
@@ -5904,12 +5899,6 @@ function setAuthorizedButtons(isAuthorized){
 
   if(profileWrap){
     profileWrap.classList.toggle("hidden", !isAuthorized);
-  }
-
-  if(homeAddBtn){
-    homeAddBtn.classList.toggle("hidden", !isAuthorized || isPublicView);
-    homeAddBtn.setAttribute("aria-hidden", String(!isAuthorized || isPublicView));
-    homeAddBtn.tabIndex = !isAuthorized || isPublicView ? -1 : 0;
   }
 
   if(!isAuthorized){
@@ -8629,28 +8618,6 @@ function getCurrentItemUniverseGraphSnapshot(item, store){
   return { itemKey, memberships, confirmedLinks, candidateLinks };
 }
 
-function hasStoredRelationsForItem(item, store){
-  const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
-  return Boolean(snapshot.memberships.length || snapshot.confirmedLinks.length || snapshot.candidateLinks.length);
-}
-
-function scheduleBackgroundRelationRefresh(item){
-  if(!item) return;
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  if(wikidataEnrichmentJobs.has(itemKey) || !shouldEnrichItem(item, false)) return;
-  const run = () => enrichItemFromWikidata(item, { force: false }).then(async () => {
-    relationAutomationMemo.delete(itemKey);
-    await requestProductRefresh({ forceFull: false, detailsOnly: currentOpenItemId === item.id });
-  }).catch((error) => {
-    console.error("Deferred relation refresh error:", error);
-  });
-  if(window.requestIdleCallback){
-    window.requestIdleCallback(run, { timeout: 900 });
-  } else {
-    window.setTimeout(run, 120);
-  }
-}
-
 function renderUniverseMembershipCards(memberships = [], universes = []){
   return memberships.map((membership) => {
     const universe = universes.find((entry) => entry.id === membership.universeId);
@@ -8749,21 +8716,9 @@ async function promoteHighConfidenceRelationsForItem(item, store = null){
   return changed;
 }
 
-async function ensureAutomatedRelationsForItem(item, options = {}){
+async function ensureAutomatedRelationsForItem(item){
   if(!item) return { store: await getUniverseStore(), insight: createEmptySeriesInsight() };
   await ensureItemEnrichmentHydrated(item);
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const memoEntry = relationAutomationMemo.get(itemKey);
-  const memoIsFresh = memoEntry && memoEntry.libraryStateVersion === libraryStateVersion && (Date.now() - memoEntry.timestamp) < 30000;
-
-  if(!options.force && memoIsFresh){
-    const store = await getUniverseStore();
-    if(!hasStoredRelationsForItem(item, store)){
-      scheduleBackgroundRelationRefresh(item);
-    }
-    return { store, insight: buildSeriesInsight(item, store) };
-  }
-
   await ensureLocalUniverseInferenceForItem(item);
   let store = await getUniverseStore();
   if(await promoteHighConfidenceRelationsForItem(item, store)){
@@ -8771,14 +8726,6 @@ async function ensureAutomatedRelationsForItem(item, options = {}){
   }
   const insight = buildSeriesInsight(item, store);
   await persistRelationSummarySnapshot(item, store, insight);
-  relationAutomationMemo.set(itemKey, {
-    timestamp: Date.now(),
-    libraryStateVersion,
-    lastEnrichedAt: buildEnrichmentState(item.enrichment || {}).lastEnrichedAt || ""
-  });
-  if(!hasStoredRelationsForItem(item, store)){
-    scheduleBackgroundRelationRefresh(item);
-  }
   return { store, insight };
 }
 
@@ -9028,7 +8975,7 @@ async function addMissingSeriesPartsForCurrentItem(limit = 3, button = null){
         const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
         const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
         if(best){
-          await addSearchResultToLibrary(best, { suppressAssist: true, skipCategorySync: true });
+          await addSearchResultToLibrary(best, { suppressAssist: true });
         }
       } catch (error) {
         console.error("Series quick-add error:", error);
@@ -9226,13 +9173,7 @@ function requestProductRefresh(options = {}){
     const view = getActiveProductView();
     try {
       if(forceFull || view === "dashboard"){
-        const homeTasks = [];
-        if(document.getElementById("home-now-grid")) homeTasks.push(renderHomeNowSection());
-        if(document.getElementById("home-stats-grid")) homeTasks.push(renderHomeStatsSection());
-        if(document.getElementById("home-activity-list")) homeTasks.push(renderActivityLists());
-        if(homeTasks.length){
-          await Promise.all(homeTasks);
-        }
+        await Promise.all([renderHomeNowSection(), renderHomeStatsSection(), renderActivityLists()]);
       }
       if(forceFull || view === "library") {
         await renderLibraryRootScreen();
@@ -9547,9 +9488,6 @@ applyTranslations = function applyTranslationsProductArchitecture(){
     ["home-shortcut-library", currentLanguage === "ru" ? "Библиотека" : "Library"],
     ["home-shortcut-universes", currentLanguage === "ru" ? "Связи" : "Relations"],
     ["home-shortcut-stats", currentLanguage === "ru" ? "Статистика" : "Stats"],
-    ["home-library-link", currentLanguage === "ru" ? "Библиотека" : "Library"],
-    ["home-now-link", currentLanguage === "ru" ? "Сейчас" : "Now"],
-    ["home-stats-link", currentLanguage === "ru" ? "Статистика" : "Stats"],
     ["home-summary-title", currentLanguage === "ru" ? "Краткая сводка" : "Snapshot"],
     ["home-summary-note", currentLanguage === "ru" ? "Только ключевые цифры по библиотеке." : "Only the key numbers from your library."],
     ["library-screen-title", currentLanguage === "ru" ? "Библиотека" : "Library"],
