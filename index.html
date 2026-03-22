@@ -103,7 +103,7 @@
         </div>
 
         <div class="home-minimal-actions">
-          <button id="home-add-btn" class="button button-primary home-minimal-button" type="button">Добавить</button>
+          <button id="home-add-btn" class="button button-primary home-minimal-button" type="button" onclick="handlePrimaryAddAction()">Добавить</button>
           <div class="header-panel-wrap share-menu-wrap home-share-wrap">
             <button id="share-library-btn" class="button button-secondary share-library-btn home-minimal-button" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
@@ -927,12 +927,27 @@
       </div>
     </div>
 
-  <nav class="bottom-nav" id="bottom-nav">
-    <button class="bottom-nav-btn is-active" type="button" onclick="showDashboardScreen()" id="nav-home-btn">Главная</button>
-    <button class="bottom-nav-btn" type="button" onclick="showLibraryRoot()" id="nav-library-btn">Библиотека</button>
-    <button class="bottom-nav-btn" type="button" onclick="showCollectionsScreen()" id="nav-collections-btn">Коллекции</button>
-    <button class="bottom-nav-btn" type="button" onclick="showUniversesScreen()" id="nav-universes-btn">Связи</button>
-    <button class="bottom-nav-btn" type="button" onclick="showSettingsScreen()" id="nav-settings-btn">Настройки</button>
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Primary navigation">
+    <button class="bottom-nav-btn" type="button" onclick="showLibraryRoot()" id="nav-library-btn">
+      <span class="bottom-nav-icon" aria-hidden="true">📚</span>
+      <span class="bottom-nav-label">Библиотека</span>
+    </button>
+    <button class="bottom-nav-btn" type="button" onclick="showCollectionsScreen()" id="nav-collections-btn">
+      <span class="bottom-nav-icon" aria-hidden="true">🗂️</span>
+      <span class="bottom-nav-label">Папки</span>
+    </button>
+    <button class="bottom-nav-btn bottom-nav-btn-add is-active" type="button" onclick="openPrimaryAddFromNav()" id="nav-add-btn" aria-label="Добавить">
+      <span class="bottom-nav-icon" aria-hidden="true">＋</span>
+      <span class="bottom-nav-label">Добавить</span>
+    </button>
+    <button class="bottom-nav-btn" type="button" onclick="showUniversesScreen()" id="nav-universes-btn">
+      <span class="bottom-nav-icon" aria-hidden="true">🪐</span>
+      <span class="bottom-nav-label">Связи</span>
+    </button>
+    <button class="bottom-nav-btn" type="button" onclick="showSettingsScreen()" id="nav-settings-btn">
+      <span class="bottom-nav-icon" aria-hidden="true">⚙️</span>
+      <span class="bottom-nav-label">Профиль</span>
+    </button>
   </nav>
 
   <script src="/script.js"></script>
