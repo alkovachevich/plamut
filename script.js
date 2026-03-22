@@ -1,4 +1,4 @@
-    const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
+  const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
     const TMDB_API_KEY = "fc8eab333882a74fe8c8a633e4676d98";
@@ -2754,6 +2754,7 @@
 
       demoData[category] = [];
       const seen = new Set();
+      const cache = await getWikidataCache();
 
       data.forEach(item => {
         const dedupeKey =
@@ -2767,7 +2768,7 @@
 
         seen.add(dedupeKey);
 
-        demoData[category].push({
+        const mappedItem = {
           id: item.id,
           title: item.title,
           status: item.status || "Planned",
@@ -2787,12 +2788,19 @@
           enrichment_status: item.enrichment_status || "idle",
           enrichment_confidence: Number(item.enrichment_confidence || 0),
           enrichment_source: item.enrichment_source || ""
+        };
+        mappedItem.enrichment = buildEnrichmentState({
+          wikidataEntityId: mappedItem.wikidata_entity_id || "",
+          wikidataLabel: mappedItem.wikidata_label || "",
+          wikidataDescription: mappedItem.wikidata_description || "",
+          lastEnrichedAt: mappedItem.wikidata_last_enriched_at || "",
+          status: mappedItem.enrichment_status || "idle",
+          confidence: Number(mappedItem.enrichment_confidence || 0),
+          matchedBy: mappedItem.enrichment_source || "",
+          ...(cache[getItemStorageKey({ ...mappedItem, category })] || {})
         });
+        demoData[category].push(mappedItem);
       });
-
-      for(const item of demoData[category]){
-        await ensureItemEnrichmentHydrated(item);
-      }
 
       await applyFolderAssignmentsToItems(category);
       renderShelf();
@@ -5906,9 +5914,11 @@ async function openCardById(id){
   }
 
   const statusBtn = document.getElementById("change-status-details-btn");
+  const detailsMoreBtn = document.getElementById("details-more-actions-btn");
   const deleteBtn = document.getElementById("delete-details-btn");
   if(statusBtn) statusBtn.classList.toggle("hidden", isPublicView);
-  if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
+  if(detailsMoreBtn) detailsMoreBtn.classList.toggle("hidden", isPublicView);
+  if(deleteBtn) deleteBtn.classList.add("hidden");
 
   updatePrimaryActionVisibility();
 }
@@ -6037,13 +6047,15 @@ Object.assign(translations.en.buttons, {
   cancelShort: "Cancel",
   removeFromFolder: "Remove from folder",
   moveToFolder: "Move to folder",
-  manageFolders: "Manage folders"
+  manageFolders: "Manage folders",
+  detailsMoreActions: "More actions"
 });
 Object.assign(translations.ru.buttons, {
   cancelShort: "Отмена",
   removeFromFolder: "Убрать из папки",
   moveToFolder: "Переместить в папку",
-  manageFolders: "Папки"
+  manageFolders: "Папки",
+  detailsMoreActions: "Ещё действия"
 });
 Object.assign(translations.en.labels, {
   foldersEmpty: "No folders yet",
@@ -6191,6 +6203,33 @@ function buildItemActions(item){
       }
     }
   ];
+}
+
+async function runWithActionButton(button, action, pendingLabel = ""){
+  if(!button){
+    return await action();
+  }
+  if(button.dataset.busy === "true") return;
+  const previousLabel = button.textContent;
+  button.dataset.busy = "true";
+  button.disabled = true;
+  if(pendingLabel){
+    button.textContent = pendingLabel;
+  }
+  try {
+    return await action();
+  } finally {
+    button.dataset.busy = "false";
+    button.disabled = false;
+    if(button.isConnected){
+      button.textContent = previousLabel;
+    }
+  }
+}
+
+function openCurrentItemActionsSheet(){
+  if(!currentOpenItemId) return;
+  openItemActionsSheet(currentOpenItemId);
 }
 
 function openItemActionsSheet(id){
@@ -6701,6 +6740,7 @@ async function init(){
     const shareMenu = document.getElementById("share-library-menu");
     const shareButton = document.getElementById("share-library-btn");
     if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
+    if(currentOpenMenuItemId != null && !event.target?.closest?.('.media-menu-wrap')) closeCardMenu();
   });
   document.addEventListener("keydown", (event) => {
     if(event.key === "Escape"){
@@ -7816,19 +7856,236 @@ async function renderTrackerSummaryForCurrentItem(){
   container.innerHTML = cards.map(([value,label]) => `<article class="tracker-stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
 }
 
+function parseSequenceToken(value = ""){
+  const normalized = normalizeComparisonText(value).trim();
+  if(!normalized) return 0;
+  if(/^\d+$/.test(normalized)) return Number(normalized);
+  const romans = { i: 1, v: 5, x: 10, l: 50, c: 100 };
+  let total = 0;
+  let previous = 0;
+  for(const char of normalized.split("").reverse()){
+    const current = romans[char] || 0;
+    if(!current) return 0;
+    if(current < previous){
+      total -= current;
+    } else {
+      total += current;
+      previous = current;
+    }
+  }
+  return total;
+}
+
+function extractSeriesFingerprint(title = ""){
+  const source = normalizeSpaces(title || "");
+  if(!source) return { baseKey: "", baseLabel: "", sequenceNumber: 0 };
+  const patterns = [
+    /(.*?)(?:\s*[#№]\s*|\s+(?:book|volume|vol\.?|part|chapter|season|episode|том|книга|часть|глава|сезон|эпизод)\s+)(\d+|[ivxlcdm]+)$/i,
+    /(.*?)(?:\s*[\(\[])(\d+|[ivxlcdm]+)(?:[\)\]])$/i,
+    /(.*?)(?:\s+)(\d+|[ivxlcdm]+)$/i
+  ];
+  let baseLabel = source;
+  let sequenceNumber = 0;
+  for(const pattern of patterns){
+    const match = source.match(pattern);
+    if(match){
+      const parsed = parseSequenceToken(match[2]);
+      if(parsed){
+        baseLabel = normalizeSpaces(match[1] || source);
+        sequenceNumber = parsed;
+        break;
+      }
+    }
+  }
+  baseLabel = normalizeSpaces(baseLabel.split(/[:–—]/)[0] || baseLabel);
+  const baseKey = normalizeComparisonText(baseLabel)
+    .replace(/\b(the|a|an|book|volume|part|chapter|season|episode|том|книга|часть|глава|сезон|эпизод)\b/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return {
+    baseKey: baseKey.length >= 4 ? baseKey : "",
+    baseLabel: normalizeSpaces(baseLabel || source),
+    sequenceNumber
+  };
+}
+
+function buildLocalRelationInference(item, allItems = getAllLibraryItems()){
+  const fingerprint = extractSeriesFingerprint(item?.title || item?.original_title || "");
+  if(!fingerprint.baseKey){
+    return {
+      fingerprint,
+      seriesEntries: [],
+      sameCategory: [],
+      crossMedia: [],
+      candidateLinks: [],
+      primaryLabel: ""
+    };
+  }
+  const peers = allItems
+    .filter((candidate) => getItemStorageKey(candidate, candidate.category) !== getItemStorageKey(item, item?.category || currentCategory))
+    .map((candidate) => ({ item: candidate, fingerprint: extractSeriesFingerprint(candidate.title || candidate.original_title || "") }))
+    .filter((entry) => entry.fingerprint.baseKey && entry.fingerprint.baseKey === fingerprint.baseKey);
+  const sameCategory = peers.filter((entry) => entry.item.category === item.category);
+  const crossMedia = peers.filter((entry) => entry.item.category !== item.category);
+  const orderedSeries = [{ item, fingerprint }, ...sameCategory]
+    .sort((left, right) => {
+      const leftOrder = left.fingerprint.sequenceNumber || getItemReleaseYear(left.item) || Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.fingerprint.sequenceNumber || getItemReleaseYear(right.item) || Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || String(left.item.title || "").localeCompare(String(right.item.title || ""));
+    })
+    .map((entry) => ({
+      entityId: getItemStorageKey(entry.item, entry.item.category),
+      label: entry.item.title || entry.fingerprint.baseLabel,
+      releaseDate: entry.item.release_date || entry.item.first_air_date || entry.item.published_at || String(getItemReleaseYear(entry.item) || ""),
+      sequenceNumber: entry.fingerprint.sequenceNumber || 0,
+      category: entry.item.category,
+      item: entry.item
+    }));
+
+  const candidateLinks = [];
+  sameCategory.forEach((entry) => {
+    const currentSeq = fingerprint.sequenceNumber || 0;
+    const targetSeq = entry.fingerprint.sequenceNumber || 0;
+    let relationType = "part_of_series";
+    if(currentSeq && targetSeq){
+      relationType = targetSeq > currentSeq ? "sequel" : targetSeq < currentSeq ? "prequel" : "part_of_series";
+    }
+    candidateLinks.push({ item: entry.item, relationType, confidence: currentSeq && targetSeq ? 0.82 : 0.68, layer: "series" });
+  });
+  crossMedia.forEach((entry) => {
+    const relationType = inferCrossMediaRelationType(item, entry.item) || "franchise_member";
+    const exactTitle = normalizeComparisonText(entry.item.title || "") === normalizeComparisonText(item.title || "");
+    candidateLinks.push({ item: entry.item, relationType, confidence: exactTitle ? 0.86 : 0.72, layer: relationType === "franchise_member" ? "franchise" : "adaptation" });
+  });
+
+  return {
+    fingerprint,
+    primaryLabel: fingerprint.baseLabel,
+    seriesEntries: orderedSeries,
+    sameCategory,
+    crossMedia,
+    candidateLinks
+  };
+}
+
+function catalogEntryMatchesItem(entry, candidate){
+  if(!entry || !candidate) return false;
+  const entryId = entry.entityId || "";
+  return entryId === buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId || entryId === getItemStorageKey(candidate, candidate.category);
+}
+
+async function ensureLocalUniverseInferenceForItem(item){
+  if(!item) return null;
+  const allItems = getAllLibraryItems();
+  const inference = buildLocalRelationInference(item, allItems);
+  if(!inference.fingerprint.baseKey || (!inference.seriesEntries.length && !inference.candidateLinks.length)) return inference;
+  const store = await getUniverseStore();
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  const seriesUniverseId = `local_series_${buildUniverseSlug(inference.primaryLabel || inference.fingerprint.baseKey)}`;
+  const franchiseUniverseId = `local_franchise_${buildUniverseSlug(inference.primaryLabel || inference.fingerprint.baseKey)}`;
+
+  if(inference.seriesEntries.length > 1){
+    if(!(store.universes || []).some((entry) => entry.id === seriesUniverseId)){
+      store.universes = [{
+        id: seriesUniverseId,
+        name: inference.primaryLabel,
+        slug: buildUniverseSlug(inference.primaryLabel),
+        description: currentLanguage === "ru" ? "Локально распознанная серия" : "Locally inferred series",
+        kind: "series",
+        source: "local-inference",
+        confidence: 0.74,
+        status: "suggested",
+        wikidataEntityId: ""
+      }, ...(store.universes || [])];
+    }
+    inference.seriesEntries.forEach((entry) => {
+      upsertUniverseMembership(store, {
+        universeId: seriesUniverseId,
+        itemKey: getItemStorageKey(entry.item, entry.item.category),
+        relationType: "part_of_series",
+        source: "local-inference",
+        confidence: entry.sequenceNumber ? 0.82 : 0.68,
+        status: "suggested"
+      });
+    });
+  }
+
+  if(inference.crossMedia.length){
+    if(!(store.universes || []).some((entry) => entry.id === franchiseUniverseId)){
+      store.universes = [{
+        id: franchiseUniverseId,
+        name: inference.primaryLabel,
+        slug: buildUniverseSlug(inference.primaryLabel),
+        description: currentLanguage === "ru" ? "Локально распознанная франшиза" : "Locally inferred franchise",
+        kind: "franchise",
+        source: "local-inference",
+        confidence: 0.72,
+        status: "suggested",
+        wikidataEntityId: ""
+      }, ...(store.universes || [])];
+    }
+    upsertUniverseMembership(store, {
+      universeId: franchiseUniverseId,
+      itemKey,
+      relationType: "same_universe",
+      source: "local-inference",
+      confidence: 0.72,
+      status: "suggested"
+    });
+    inference.crossMedia.forEach((entry) => {
+      upsertUniverseMembership(store, {
+        universeId: franchiseUniverseId,
+        itemKey: getItemStorageKey(entry.item, entry.item.category),
+        relationType: "same_universe",
+        source: "local-inference",
+        confidence: 0.72,
+        status: "suggested"
+      });
+    });
+  }
+
+  inference.candidateLinks.forEach((entry) => {
+    upsertGraphLink(store, {
+      sourceKey: itemKey,
+      targetKey: getItemStorageKey(entry.item, entry.item.category),
+      relationType: entry.relationType,
+      source: "local-inference",
+      confidence: entry.confidence,
+      layer: entry.layer
+    }, entry.confidence < WIKIDATA_MATCH_HIGH_CONFIDENCE);
+  });
+
+  await setUniverseStore(store);
+  return inference;
+}
+
 function buildSeriesInsight(item, store){
   const enrichment = buildEnrichmentState(item?.enrichment || {});
-  const catalog = Array.isArray(enrichment.seriesCatalog) ? enrichment.seriesCatalog : [];
-  const primaryUniverse = enrichment.universeHints.find((hint) => hint.kind === "series") || enrichment.universeHints[0] || null;
-  const currentEntityId = enrichment.wikidataEntityId || "";
-  const currentIndex = catalog.findIndex((entry) => entry.entityId === currentEntityId);
   const allItems = getAllLibraryItems();
-  const libraryCatalogEntries = catalog.filter((entry) => allItems.some((candidate) => buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId === entry.entityId));
-  const missingEntries = catalog.filter((entry) => !allItems.some((candidate) => buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId === entry.entityId));
-  const nextPart = currentIndex >= 0 ? catalog[currentIndex + 1] || null : null;
-  const candidateLinks = (store.candidates || []).filter((entry) => entry.sourceKey === getItemStorageKey(item) || entry.targetKey === getItemStorageKey(item));
-  const confirmedLinks = (store.links || []).filter((entry) => entry.sourceKey === getItemStorageKey(item) || entry.targetKey === getItemStorageKey(item));
-  const adaptationCount = [...candidateLinks, ...confirmedLinks].filter((entry) => ["adaptation", "spin_off", "related_work"].includes(normalizeRelationType(entry.relationType))).length;
+  const localInference = buildLocalRelationInference(item, allItems);
+  const fallbackCatalog = localInference.seriesEntries.map((entry) => ({
+    entityId: entry.entityId,
+    label: entry.label,
+    releaseDate: entry.releaseDate,
+    source: "local-inference"
+  }));
+  const catalog = mergeUniqueBy([
+    ...(Array.isArray(enrichment.seriesCatalog) ? enrichment.seriesCatalog : []),
+    ...fallbackCatalog
+  ], (entry) => entry.entityId || entry.label);
+  const primaryUniverse = enrichment.universeHints.find((hint) => hint.kind === "series")
+    || enrichment.universeHints[0]
+    || (localInference.primaryLabel ? { name: localInference.primaryLabel, kind: localInference.crossMedia.length ? "franchise" : "series", confidence: 0.72 } : null);
+  const currentEntityId = enrichment.wikidataEntityId || getItemStorageKey(item, item?.category || currentCategory);
+  const currentIndex = catalog.findIndex((entry) => entry.entityId === currentEntityId);
+  const libraryCatalogEntries = catalog.filter((entry) => allItems.some((candidate) => catalogEntryMatchesItem(entry, candidate)));
+  const missingEntries = catalog.filter((entry) => !allItems.some((candidate) => catalogEntryMatchesItem(entry, candidate)));
+  const nextPart = currentIndex >= 0 ? catalog[currentIndex + 1] || null : missingEntries[0] || null;
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  const candidateLinks = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey);
+  const confirmedLinks = (store.links || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey);
+  const adaptationCount = [...candidateLinks, ...confirmedLinks].filter((entry) => ["adaptation", "based_on", "spin_off", "related_work", "franchise_member"].includes(normalizeRelationType(entry.relationType))).length;
 
   return {
     primaryUniverse,
@@ -7841,7 +8098,8 @@ function buildSeriesInsight(item, store){
     catalog,
     candidateLinks,
     confirmedLinks,
-    adaptationCount
+    adaptationCount,
+    localInference
   };
 }
 
@@ -7869,8 +8127,8 @@ function renderSeriesInsightCard(item, insight){
       ${missingPreview ? `<div class="series-insight-missing">${missingPreview}</div>` : ""}
       <div class="series-insight-actions">
         ${insight.catalog.length ? `<button class="button button-secondary" type="button" onclick="openSeriesInsightModalByCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Показать все части" : "Show all parts")}</button>` : ""}
-        ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
-        ${insight.candidateLinks.length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions()">${escapeHtml(currentLanguage === "ru" ? "Подтвердить связи" : "Confirm links")}</button>` : ""}
+        ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem(this)">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
+        ${insight.candidateLinks.length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions(this)">${escapeHtml(currentLanguage === "ru" ? "Подтвердить связи" : "Confirm links")}</button>` : ""}
       </div>
     </article>
   `;
@@ -7943,7 +8201,7 @@ function renderUniverseMembershipCards(memberships = [], universes = []){
           <div class="relation-card-submeta">${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(membership.source || universe.source || "user")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(membership.confidence || universe.confidence || 0.7))}</div>
         </div>
         ${isPublicView ? "" : `<div class="relation-card-actions">
-          <button class="button button-ghost" type="button" onclick="detachUniverseMembership('${escapeHtml(membership.universeId)}')">${escapeHtml(t().labels.enrichmentDetach)}</button>
+          <button class="button button-ghost" type="button" onclick="detachUniverseMembership('${escapeHtml(membership.universeId)}', this)">${escapeHtml(t().labels.enrichmentDetach)}</button>
         </div>`}
       </article>
     `;
@@ -7960,10 +8218,10 @@ function renderRelationCards(relations = [], items = [], itemKey = ""){
       ? ""
       : relation.status === "suggested"
       ? `
-        <button class="button button-secondary" type="button" onclick="confirmRelationCandidate('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentConfirm)}</button>
-        <button class="button button-ghost" type="button" onclick="rejectRelationCandidate('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentReject)}</button>
+        <button class="button button-secondary" type="button" onclick="confirmRelationCandidate('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentConfirm)}</button>
+        <button class="button button-ghost" type="button" onclick="rejectRelationCandidate('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentReject)}</button>
       `
-      : `<button class="button button-ghost" type="button" onclick="detachConfirmedRelation('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentDetach)}</button>`;
+      : `<button class="button button-ghost" type="button" onclick="detachConfirmedRelation('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentDetach)}</button>`;
 
     return `
       <article class="relation-card ${relation.status === "suggested" ? "is-suggested" : ""}">
@@ -8003,72 +8261,157 @@ function renderGroupedRelationSections(relations = [], items = [], item, itemKey
   `).join("");
 }
 
+function renderRelationSummaryLoadingState(item){
+  const container = document.getElementById("details-relations-summary");
+  if(!container) return;
+  container.innerHTML = `
+    <article class="relation-summary-card is-loading">
+      <div class="relation-summary-head">
+        <div>
+          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
+          <div class="relation-summary-title">${escapeHtml(item?.title || (currentLanguage === "ru" ? "Связи" : "Relations"))}</div>
+        </div>
+        <span class="meta-chip">${escapeHtml(currentLanguage === "ru" ? "Загрузка" : "Loading")}</span>
+      </div>
+      <div class="relation-summary-note">${escapeHtml(currentLanguage === "ru" ? "Сначала показываем краткую сводку, затем догружаем серию, адаптации и подсказки." : "Showing a lightweight summary first, then loading series, adaptation and suggestion details.")}</div>
+    </article>`;
+}
+
+function renderRelationSummaryCard(item, insight, snapshot, enrichment){
+  const metrics = [
+    insight.totalParts ? [insight.currentIndex ? `${insight.currentIndex}/${insight.totalParts}` : String(insight.totalParts), currentLanguage === "ru" ? "позиция / серия" : "position / series"] : null,
+    [String(insight.libraryCount || 0), currentLanguage === "ru" ? "в библиотеке" : "in library"],
+    [String(insight.missingCount || 0), currentLanguage === "ru" ? "ещё добавить" : "still missing"],
+    [String((snapshot.candidateLinks || []).length), currentLanguage === "ru" ? "ожидают подтверждения" : "pending confirmations"]
+  ].filter(Boolean);
+  const chips = [
+    insight.primaryUniverse?.name,
+    insight.localInference?.crossMedia?.length ? (currentLanguage === "ru" ? `адаптации: ${insight.localInference.crossMedia.length}` : `adaptations: ${insight.localInference.crossMedia.length}`) : "",
+    enrichment.status === "pending" ? (currentLanguage === "ru" ? "связи догружаются" : "relations loading") : "",
+    enrichment.status === "failed" ? (currentLanguage === "ru" ? "fallback активен" : "fallback active") : ""
+  ].filter(Boolean);
+  const noteParts = [];
+  if(insight.nextPart?.label) noteParts.push(currentLanguage === "ru" ? `Следующая часть: ${insight.nextPart.label}` : `Next part: ${insight.nextPart.label}`);
+  if(insight.localInference?.crossMedia?.length) noteParts.push(currentLanguage === "ru" ? `Найдены кросс-медиа связи: ${insight.localInference.crossMedia.length}` : `Cross-media matches found: ${insight.localInference.crossMedia.length}`);
+  if(!noteParts.length) noteParts.push(currentLanguage === "ru" ? "Показываем только ключевые связи, всё остальное спрятано ниже." : "Only essential relation signals are shown here; everything else is tucked below.");
+  return `
+    <article class="relation-summary-card">
+      <div class="relation-summary-top">
+        <div>
+          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
+          <div class="relation-summary-title">${escapeHtml(insight.primaryUniverse?.name || insight.localInference?.primaryLabel || (currentLanguage === "ru" ? "Серия и связи" : "Series & relations"))}</div>
+        </div>
+        <span class="meta-chip">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</span>
+      </div>
+      <div class="relation-summary-metrics">
+        ${metrics.map(([value, label]) => `<div class="relation-summary-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("")}
+      </div>
+      <div class="relation-summary-note">${escapeHtml(noteParts.join(" · "))}</div>
+      ${chips.length ? `<div class="relation-summary-chips">${chips.map((chip) => `<span class="meta-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+      <div class="relation-summary-actions">
+        <div class="relation-summary-helper">${escapeHtml(currentLanguage === "ru" ? "Основной экран показывает только то, что нужно прямо сейчас." : "The main screen now shows only what matters for the current step.")}</div>
+        <div class="section-heading-actions">
+          ${insight.catalog.length ? `<button class="button button-secondary" type="button" onclick="openSeriesInsightModalByCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Все части" : "All parts")}</button>` : ""}
+          ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem(this)">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
+          ${(snapshot.candidateLinks || []).length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions(this)">${escapeHtml(currentLanguage === "ru" ? "Подтвердить подсказки" : "Confirm suggestions")}</button>` : ""}
+        </div>
+      </div>
+    </article>`;
+}
+
+function renderRelationSummaryFallback(error){
+  const container = document.getElementById("details-relations-summary");
+  if(!container) return;
+  container.innerHTML = `
+    <article class="relation-summary-card">
+      <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
+      <div class="relation-summary-empty">${escapeHtml(currentLanguage === "ru" ? "Не удалось загрузить полный граф связей, но карточка продолжает работать." : "The full relation graph could not be loaded, but the card still works.")}</div>
+      <div class="relation-summary-note">${escapeHtml(error?.message || "")}</div>
+    </article>`;
+}
+
 async function renderUniverseDetailsForCurrentItem(){
   const container = document.getElementById("details-universe-list");
   const meta = document.getElementById("details-enrichment-meta");
+  const summary = document.getElementById("details-relations-summary");
   const suggested = document.getElementById("details-suggested-relations");
   const suggestedWrap = document.getElementById("details-suggested-relations-wrap");
+  const browser = document.getElementById("details-relations-browser");
   const retryButton = document.getElementById("retry-wikidata-btn");
   const manualLinkButton = document.getElementById("open-universe-modal-btn");
-  if(!container || !meta || !suggested || !suggestedWrap) return;
+  if(!container || !meta || !summary || !suggested || !suggestedWrap || !browser) return;
   const item = getItemById(currentCategory, currentOpenItemId);
   if(!item){
     container.innerHTML = "";
     meta.innerHTML = "";
+    summary.innerHTML = "";
     suggested.innerHTML = "";
     return;
   }
 
-  await ensureItemEnrichmentHydrated(item);
-  const enrichment = buildEnrichmentState(item.enrichment || {});
-  const store = await getUniverseStore();
-  const items = getAllLibraryItems();
-  const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
-  const insight = buildSeriesInsight(item, store);
+  try {
+    await ensureItemEnrichmentHydrated(item);
+    await ensureLocalUniverseInferenceForItem(item);
+    const enrichment = buildEnrichmentState(item.enrichment || {});
+    const store = await getUniverseStore();
+    const items = getAllLibraryItems();
+    const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
+    const insight = buildSeriesInsight(item, store);
 
-  if(retryButton){
-    retryButton.classList.toggle("hidden", isPublicView);
-    retryButton.disabled = enrichment.status === "pending";
-    retryButton.textContent = enrichment.status === "pending" ? t().labels.enrichmentPending : t().labels.enrichmentRetry;
-  }
-  if(manualLinkButton){
-    manualLinkButton.classList.toggle("hidden", isPublicView);
-  }
+    if(retryButton){
+      retryButton.classList.toggle("hidden", isPublicView);
+      retryButton.disabled = enrichment.status === "pending";
+      retryButton.textContent = enrichment.status === "pending" ? t().labels.enrichmentPending : t().labels.enrichmentRetry;
+    }
+    if(manualLinkButton){
+      manualLinkButton.classList.toggle("hidden", isPublicView);
+    }
 
-  meta.innerHTML = `
-    <article class="enrichment-state-card ${enrichment.status === "ready" ? "is-ready" : enrichment.status === "failed" ? "is-error" : ""}">
-      <div class="enrichment-state-header">
-        <div>
-          <div class="enrichment-state-title">${escapeHtml(enrichment.wikidataLabel || enrichment.wikidataEntityId || t().labels.wikidata)}</div>
-          <div class="enrichment-state-meta">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</div>
+    meta.innerHTML = `
+      <article class="enrichment-state-card ${enrichment.status === "ready" ? "is-ready" : enrichment.status === "failed" ? "is-error" : ""}">
+        <div class="enrichment-state-header">
+          <div>
+            <div class="enrichment-state-title">${escapeHtml(enrichment.wikidataLabel || insight.primaryUniverse?.name || enrichment.wikidataEntityId || t().labels.wikidata)}</div>
+            <div class="enrichment-state-meta">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</div>
+          </div>
+          <span class="meta-chip">${escapeHtml(formatConfidence(enrichment.confidence || 0))}</span>
         </div>
-        <span class="meta-chip">${escapeHtml(formatConfidence(enrichment.confidence || 0))}</span>
-      </div>
-      <div class="enrichment-state-copy">${escapeHtml(enrichment.wikidataDescription || enrichment.error || t().labels.enrichmentSecondary)}</div>
-      <div class="enrichment-state-footer">
-        <span>${escapeHtml(t().labels.enrichmentLastUpdated)}: ${escapeHtml(enrichment.lastEnrichedAt ? enrichment.lastEnrichedAt.slice(0, 10) : "—")}</span>
-        ${enrichment.sitelinkUrl ? `<a href="${escapeHtml(enrichment.sitelinkUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t().labels.wikidata)}</a>` : ""}
-      </div>
-    </article>
-    ${renderSeriesInsightCard(item, insight)}
-  `;
+        <div class="enrichment-state-copy">${escapeHtml(enrichment.wikidataDescription || enrichment.error || (currentLanguage === "ru" ? "Если внешний граф недоступен, продолжаем со связями из локальной библиотеки." : "If the external graph is unavailable, local library inference stays active."))}</div>
+        <div class="enrichment-state-footer">
+          <span>${escapeHtml(t().labels.enrichmentLastUpdated)}: ${escapeHtml(enrichment.lastEnrichedAt ? enrichment.lastEnrichedAt.slice(0, 10) : "—")}</span>
+          ${enrichment.sitelinkUrl ? `<a href="${escapeHtml(enrichment.sitelinkUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t().labels.wikidata)}</a>` : ""}
+        </div>
+      </article>`;
 
-  const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
-  const relationHtml = renderGroupedRelationSections(snapshot.confirmedLinks, items, item, snapshot.itemKey, t().labels.enrichmentNoRelations);
-  container.innerHTML = membershipHtml || snapshot.confirmedLinks.length
-    ? `${membershipHtml ? `<div class="relation-group">${membershipHtml}</div>` : ""}${relationHtml}`
-    : `<div class="small">${escapeHtml(t().labels.enrichmentNoRelations)}</div>`;
+    summary.innerHTML = renderRelationSummaryCard(item, insight, snapshot, enrichment);
 
-  suggested.innerHTML = renderGroupedRelationSections(snapshot.candidateLinks, items, item, snapshot.itemKey, t().labels.noResults);
-  suggestedWrap.classList.toggle("hidden", snapshot.candidateLinks.length === 0);
+    const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
+    const relationHtml = renderGroupedRelationSections(snapshot.confirmedLinks, items, item, snapshot.itemKey, t().labels.enrichmentNoRelations);
+    container.innerHTML = membershipHtml || snapshot.confirmedLinks.length
+      ? `${membershipHtml ? `<div class="relation-group">${membershipHtml}</div>` : ""}${relationHtml}`
+      : `<div class="small">${escapeHtml(currentLanguage === "ru" ? "Подтверждённых связей пока нет. Используйте подсказки ниже или дождитесь фонового enrichment." : "No confirmed links yet. Use the suggestions below or wait for background enrichment." )}</div>`;
+
+    suggested.innerHTML = renderGroupedRelationSections(snapshot.candidateLinks, items, item, snapshot.itemKey, t().labels.noResults);
+    suggestedWrap.classList.toggle("hidden", snapshot.candidateLinks.length === 0);
+    browser.open = snapshot.candidateLinks.length > 0 || snapshot.confirmedLinks.length > 0;
+  } catch (error) {
+    console.error("Universe details render error:", error);
+    meta.innerHTML = "";
+    container.innerHTML = `<div class="small">${escapeHtml(currentLanguage === "ru" ? "Связи временно недоступны." : "Relations are temporarily unavailable.")}</div>`;
+    suggested.innerHTML = "";
+    suggestedWrap.classList.add("hidden");
+    renderRelationSummaryFallback(error);
+  }
 }
 
-async function retryCurrentItemWikidataEnrichment(){
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  await enrichItemFromWikidata(item, { force: true });
-  await renderUniverseDetailsForCurrentItem();
-  await renderUniversesScreen();
+async function retryCurrentItemWikidataEnrichment(button = null){
+  return await runWithActionButton(button, async () => {
+    const item = getItemById(currentCategory, currentOpenItemId);
+    if(!item) return;
+    await enrichItemFromWikidata(item, { force: true });
+    await renderUniverseDetailsForCurrentItem();
+    await renderUniversesScreen();
+  }, currentLanguage === "ru" ? "Обновляем…" : "Refreshing…");
 }
 
 function renderSeriesInsightModal(item){
@@ -8096,84 +8439,100 @@ function closeSeriesInsightModal(){
   document.getElementById("series-insight-modal")?.classList.add("hidden");
 }
 
-async function confirmAllCurrentItemSuggestions(){
-  const store = await getUniverseStore();
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  const itemKey = getItemStorageKey(item);
-  const candidateIds = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).map((entry) => entry.id);
-  for(const candidateId of candidateIds){
+async function confirmAllCurrentItemSuggestions(button = null){
+  return await runWithActionButton(button, async () => {
+    const store = await getUniverseStore();
+    const item = getItemById(currentCategory, currentOpenItemId);
+    if(!item) return;
+    const itemKey = getItemStorageKey(item);
+    const candidateIds = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).map((entry) => entry.id);
+    for(const candidateId of candidateIds){
+      const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
+      if(index < 0) continue;
+      const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
+      store.candidates.splice(index, 1);
+      upsertGraphLink(store, candidate, false);
+    }
+    store.memberships = (store.memberships || []).map((entry) => entry.itemKey === itemKey && entry.status === "suggested" ? { ...entry, status: "confirmed", confidence: Math.max(0.8, Number(entry.confidence || 0.7)) } : entry);
+    await setUniverseStore(store);
+    await renderUniverseDetailsForCurrentItem();
+    await renderUniversesScreen();
+  }, currentLanguage === "ru" ? "Подтверждаем…" : "Confirming…");
+}
+
+async function addMissingSeriesPartsForCurrentItem(limit = 3, button = null){
+  if(limit instanceof HTMLElement){
+    button = limit;
+    limit = 3;
+  }
+  return await runWithActionButton(button, async () => {
+    const item = getItemById(currentCategory, currentOpenItemId);
+    if(!item) return;
+    const store = await getUniverseStore();
+    const insight = buildSeriesInsight(item, store);
+    const candidates = insight.missingEntries.slice(0, limit);
+    if(!candidates.length) return;
+    for(const entry of candidates){
+      try {
+        const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
+        const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
+        if(best){
+          await addSearchResultToLibrary(best, { suppressAssist: true });
+        }
+      } catch (error) {
+        console.error("Series quick-add error:", error);
+      }
+    }
+    await loadCategoryFromSupabase(currentCategory);
+    await renderUniverseDetailsForCurrentItem();
+    renderSeriesInsightModal(item);
+  }, currentLanguage === "ru" ? "Добавляем…" : "Adding…");
+}
+
+async function confirmRelationCandidate(candidateId, button = null){
+  return await runWithActionButton(button, async () => {
+    const store = await getUniverseStore();
     const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
-    if(index < 0) continue;
+    if(index < 0) return;
     const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
     store.candidates.splice(index, 1);
     upsertGraphLink(store, candidate, false);
-  }
-  store.memberships = (store.memberships || []).map((entry) => entry.itemKey === itemKey && entry.status === "suggested" ? { ...entry, status: "confirmed", confidence: Math.max(0.8, Number(entry.confidence || 0.7)) } : entry);
-  await setUniverseStore(store);
-  await renderUniverseDetailsForCurrentItem();
-  await renderUniversesScreen();
+    await setUniverseStore(store);
+    await renderUniverseDetailsForCurrentItem();
+    await renderUniversesScreen();
+  }, currentLanguage === "ru" ? "Сохраняем…" : "Saving…");
 }
 
-async function addMissingSeriesPartsForCurrentItem(limit = 3){
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  const store = await getUniverseStore();
-  const insight = buildSeriesInsight(item, store);
-  const candidates = insight.missingEntries.slice(0, limit);
-  if(!candidates.length) return;
-  for(const entry of candidates){
-    try {
-      const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
-      const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
-      if(best){
-        await addSearchResultToLibrary(best, { suppressAssist: true });
-      }
-    } catch (error) {
-      console.error("Series quick-add error:", error);
-    }
-  }
-  await loadCategoryFromSupabase(currentCategory);
-  await renderUniverseDetailsForCurrentItem();
-  renderSeriesInsightModal(item);
+async function rejectRelationCandidate(candidateId, button = null){
+  return await runWithActionButton(button, async () => {
+    const store = await getUniverseStore();
+    store.candidates = (store.candidates || []).map((entry) => entry.id === candidateId ? { ...entry, status: "rejected" } : entry);
+    await setUniverseStore(store);
+    await renderUniverseDetailsForCurrentItem();
+  }, currentLanguage === "ru" ? "Отклоняем…" : "Rejecting…");
 }
 
-async function confirmRelationCandidate(candidateId){
-  const store = await getUniverseStore();
-  const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
-  if(index < 0) return;
-  const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
-  store.candidates.splice(index, 1);
-  upsertGraphLink(store, candidate, false);
-  await setUniverseStore(store);
-  await renderUniverseDetailsForCurrentItem();
-  await renderUniversesScreen();
+async function detachConfirmedRelation(relationId, button = null){
+  return await runWithActionButton(button, async () => {
+    const store = await getUniverseStore();
+    store.links = (store.links || []).filter((entry) => entry.id !== relationId);
+    await setUniverseStore(store);
+    await renderUniverseDetailsForCurrentItem();
+    await renderUniversesScreen();
+  }, currentLanguage === "ru" ? "Обновляем…" : "Updating…");
 }
 
-async function rejectRelationCandidate(candidateId){
-  const store = await getUniverseStore();
-  store.candidates = (store.candidates || []).map((entry) => entry.id === candidateId ? { ...entry, status: "rejected" } : entry);
-  await setUniverseStore(store);
-  await renderUniverseDetailsForCurrentItem();
-}
-
-async function detachConfirmedRelation(relationId){
-  const store = await getUniverseStore();
-  store.links = (store.links || []).filter((entry) => entry.id !== relationId);
-  await setUniverseStore(store);
-  await renderUniverseDetailsForCurrentItem();
-  await renderUniversesScreen();
-}
-
-async function detachUniverseMembership(universeId){
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  const store = await getUniverseStore();
-  const itemKey = getItemStorageKey(item, currentCategory);
-  store.memberships = (store.memberships || []).filter((entry) => !(entry.universeId === universeId && entry.itemKey === itemKey));
-  await setUniverseStore(store);
-  await renderUniverseDetailsForCurrentItem();
-  await renderUniversesScreen();
+async function detachUniverseMembership(universeId, button = null){
+  return await runWithActionButton(button, async () => {
+    const item = getItemById(currentCategory, currentOpenItemId);
+    if(!item) return;
+    const store = await getUniverseStore();
+    const itemKey = getItemStorageKey(item, currentCategory);
+    store.memberships = (store.memberships || []).filter((entry) => !(entry.universeId === universeId && entry.itemKey === itemKey));
+    await setUniverseStore(store);
+    await renderUniverseDetailsForCurrentItem();
+    await renderUniversesScreen();
+  }, currentLanguage === "ru" ? "Обновляем…" : "Updating…");
 }
 
 function getActiveProductView(){
@@ -8620,7 +8979,9 @@ applyTranslations = function applyTranslationsProductArchitecture(){
     ["stats-activity-note", "Что вы меняли в библиотеке недавно"],
     ["series-insight-modal-title", "Серия и подсказки"],
     ["series-insight-modal-note", "Система сама нашла серию, связанные части и быстрые действия."],
-    ["series-insight-close-btn", t().buttons.close || "Закрыть"]
+    ["series-insight-close-btn", t().buttons.close || "Закрыть"],
+    ["details-more-actions-btn", t().buttons.detailsMoreActions || "Ещё действия"],
+    ["details-relations-browser-summary", currentLanguage === "ru" ? "Подробнее о связях" : "Relation details"]
   ].forEach(([id, value]) => setTextIfPresent(id, value));
   rebuildStatusFilterOptions();
   refreshProductArchitectureViews();
@@ -8631,6 +8992,7 @@ openCardById = async function openCardByIdWithArchitecture(id){
   await productArchitectureOpenCardById(id);
   const item = getItemById(currentCategory, id);
   if(item){
+    renderRelationSummaryLoadingState(item);
     await ensureItemEnrichmentHydrated(item);
     if(shouldEnrichItem(item, false)){
       enrichItemFromWikidata(item, { force: false }).then(() => {
@@ -8640,10 +9002,11 @@ openCardById = async function openCardByIdWithArchitecture(id){
       });
     }
   }
-  await Promise.all([
-    renderTrackerSummaryForCurrentItem(),
-    renderUniverseDetailsForCurrentItem()
-  ]);
+  await renderTrackerSummaryForCurrentItem();
+  const scheduledRender = window.requestIdleCallback
+    ? () => window.requestIdleCallback(() => renderUniverseDetailsForCurrentItem().catch((error) => console.error("Deferred relation render error:", error)), { timeout: 250 })
+    : () => window.setTimeout(() => renderUniverseDetailsForCurrentItem().catch((error) => console.error("Deferred relation render error:", error)), 16);
+  scheduledRender();
   persistAppRouteState();
 };
 
