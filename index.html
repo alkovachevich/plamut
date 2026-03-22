@@ -319,10 +319,14 @@
               </div>
             </div>
             <div id="details-enrichment-meta" class="enrichment-meta"></div>
-            <div id="details-universe-list" class="linked-list relation-stack"></div>
-            <details id="details-suggested-relations-wrap" class="relation-suggestions hidden">
-              <summary id="details-suggested-relations-summary">Suggested relations</summary>
-              <div id="details-suggested-relations" class="linked-list relation-stack"></div>
+            <div id="details-relations-summary" class="relation-summary-stack"></div>
+            <details id="details-relations-browser" class="relation-browser">
+              <summary id="details-relations-browser-summary">Подробнее о связях</summary>
+              <div id="details-universe-list" class="linked-list relation-stack"></div>
+              <details id="details-suggested-relations-wrap" class="relation-suggestions hidden">
+                <summary id="details-suggested-relations-summary">Suggested relations</summary>
+                <div id="details-suggested-relations" class="linked-list relation-stack"></div>
+              </details>
             </details>
             <details id="details-relation-advanced" class="relation-advanced">
               <summary id="details-relation-advanced-summary">Advanced editing</summary>
@@ -354,7 +358,8 @@
 
           <div class="section details-actions">
             <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
-            <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+            <button class="button button-secondary" type="button" onclick="openCurrentItemActionsSheet()" id="details-more-actions-btn">More actions</button>
+            <button class="button button-danger hidden" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
           </div>
         </div>
       </div>
