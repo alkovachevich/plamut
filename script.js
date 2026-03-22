@@ -537,6 +537,9 @@
       Manga: [],
       Blacklist: []
     };
+    let libraryStateVersion = 0;
+    let cachedStatsSnapshot = null;
+    let cachedStatsSnapshotVersion = -1;
 
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -548,6 +551,12 @@
       if(mode === "light") return t().topbar.themeLight;
       if(mode === "dark") return t().topbar.themeDark;
       return t().topbar.themeSystem;
+    }
+
+    function markLibraryStateDirty(){
+      libraryStateVersion += 1;
+      cachedStatsSnapshot = null;
+      cachedStatsSnapshotVersion = -1;
     }
 
     function resolveThemeMode(mode = currentThemeMode){
@@ -855,10 +864,138 @@
       };
     }
 
+    function extractExternalIdentityTokens(itemOrParts = {}){
+      const values = [
+        itemOrParts.canonical_key,
+        itemOrParts.canonicalKey,
+        itemOrParts.work_key,
+        itemOrParts.workKey
+      ].filter(Boolean);
+      const identities = [];
+      values.forEach((value) => {
+        const normalized = String(value || "").trim();
+        if(!normalized) return;
+        const parts = normalized.split(":").map((entry) => entry.trim()).filter(Boolean);
+        if(parts.length < 2) return;
+        const source = parts[0].toLowerCase();
+        const externalId = parts.slice(1).join(":").toLowerCase();
+        if(!source || !externalId) return;
+        identities.push(`${source}:${externalId}`);
+        if(source === "tmdb" && parts.length >= 3){
+          identities.push(`${source}:${parts[parts.length - 1].toLowerCase()}`);
+        }
+      });
+      const wikidataEntityId = itemOrParts.wikidata_entity_id || itemOrParts.wikidataEntityId || itemOrParts?.enrichment?.wikidataEntityId || "";
+      if(wikidataEntityId){
+        identities.push(`wikidata:${String(wikidataEntityId).toLowerCase()}`);
+      }
+      const isbn = detectISBN(itemOrParts.isbn || "");
+      if(isbn){
+        identities.push(`isbn:${isbn}`);
+      }
+      return Array.from(new Set(identities));
+    }
+
+    function hasSequenceConflict(left, right){
+      const leftSequence = extractSeriesFingerprint(left?.title || "").sequenceNumber || 0;
+      const rightSequence = extractSeriesFingerprint(right?.title || "").sequenceNumber || 0;
+      return Boolean(leftSequence && rightSequence && leftSequence !== rightSequence);
+    }
+
+    function findBestMediaEntityMatch(collection = [], candidate, options = {}){
+      if(!candidate) return null;
+      const targetSnapshot = buildMediaIdentitySnapshot(candidate, options);
+      const targetExternal = new Set(extractExternalIdentityTokens(candidate));
+      let bestMatch = null;
+      let bestScore = 0;
+
+      collection.filter(Boolean).forEach((entry) => {
+        const entrySnapshot = buildMediaIdentitySnapshot(entry, options);
+        const entryExternal = extractExternalIdentityTokens(entry);
+        const hasExternalMatch = entryExternal.some((token) => targetExternal.has(token));
+        if(hasExternalMatch){
+          const exactMatch = { entry, score: 1 };
+          if(!bestMatch || exactMatch.score > bestScore){
+            bestMatch = exactMatch;
+            bestScore = exactMatch.score;
+          }
+          return;
+        }
+
+        if(hasSequenceConflict(entry, candidate)) return;
+
+        let score = getItemIdentityConfidence(entry, candidate, options);
+        const exactTitle = entrySnapshot.titleKey && targetSnapshot.titleKey && entrySnapshot.titleKey === targetSnapshot.titleKey;
+        const sameCategory = entrySnapshot.categoryKey && targetSnapshot.categoryKey && entrySnapshot.categoryKey === targetSnapshot.categoryKey;
+        const yearsAligned = entrySnapshot.year && targetSnapshot.year && Math.abs(entrySnapshot.year - targetSnapshot.year) <= 1;
+        const creatorsAligned = entrySnapshot.creatorKey && targetSnapshot.creatorKey && entrySnapshot.creatorKey === targetSnapshot.creatorKey;
+
+        if(exactTitle && sameCategory && yearsAligned){
+          score = Math.max(score, 0.93);
+        } else if(exactTitle && sameCategory && creatorsAligned){
+          score = Math.max(score, 0.9);
+        } else if(exactTitle && sameCategory && (!entrySnapshot.year || !targetSnapshot.year) && (!entrySnapshot.creatorKey || !targetSnapshot.creatorKey || creatorsAligned)){
+          score = Math.max(score, 0.89);
+        }
+
+        if(score >= (typeof options.threshold === "number" ? options.threshold : 0.88) && score > bestScore){
+          bestMatch = { entry, score };
+          bestScore = score;
+        }
+      });
+
+      return bestMatch?.entry || null;
+    }
+
+    function mergeMediaEntityRecords(existing = {}, incoming = {}){
+      const existingIdentityStrength = extractExternalIdentityTokens(existing).length;
+      const incomingIdentityStrength = extractExternalIdentityTokens(incoming).length;
+      const preferredCanonicalKey = incomingIdentityStrength > existingIdentityStrength
+        ? (incoming.canonical_key || incoming.work_key || existing.canonical_key || existing.work_key || "")
+        : (existing.canonical_key || existing.work_key || incoming.canonical_key || incoming.work_key || "");
+      const preferredWorkKey = incomingIdentityStrength > existingIdentityStrength
+        ? (incoming.work_key || existing.work_key || "")
+        : (existing.work_key || incoming.work_key || "");
+      const existingEnrichment = buildEnrichmentState(existing.enrichment || {});
+      const incomingEnrichment = buildEnrichmentState(incoming.enrichment || {});
+      const mergedEnrichment = {
+        ...existingEnrichment,
+        ...incomingEnrichment,
+        wikidataEntityId: existingEnrichment.wikidataEntityId || incomingEnrichment.wikidataEntityId || "",
+        wikidataLabel: existingEnrichment.wikidataLabel || incomingEnrichment.wikidataLabel || "",
+        wikidataDescription: existingEnrichment.wikidataDescription || incomingEnrichment.wikidataDescription || "",
+        sitelinkUrl: existingEnrichment.sitelinkUrl || incomingEnrichment.sitelinkUrl || "",
+        matchedBy: existingEnrichment.matchedBy || incomingEnrichment.matchedBy || "",
+        status: incomingEnrichment.status && incomingEnrichment.status !== "idle" ? incomingEnrichment.status : (existingEnrichment.status || incomingEnrichment.status || "idle"),
+        confidence: Math.max(Number(existingEnrichment.confidence || 0), Number(incomingEnrichment.confidence || 0)),
+        lastEnrichedAt: existingEnrichment.lastEnrichedAt || incomingEnrichment.lastEnrichedAt || ""
+      };
+      return {
+        ...existing,
+        ...incoming,
+        id: existing.id || incoming.id,
+        title: existing.title || incoming.title || "",
+        category: existing.category || incoming.category || "",
+        status: incoming.status || existing.status || "Planned",
+        cover: existing.cover || incoming.cover || "",
+        description: existing.description || incoming.description || "",
+        description_ru: existing.description_ru || incoming.description_ru || "",
+        description_original: existing.description_original || incoming.description_original || incoming.description_en || existing.description_en || "",
+        description_en: existing.description_en || incoming.description_en || incoming.description_original || existing.description_original || "",
+        creator: existing.creator || incoming.creator || "",
+        isbn: existing.isbn || incoming.isbn || "",
+        work_key: preferredWorkKey,
+        canonical_key: preferredCanonicalKey,
+        folder: existing.folder || incoming.folder || "",
+        enrichment: mergedEnrichment
+      };
+    }
+
     function getItemIdentityConfidence(left, right, options = {}){
       const source = buildMediaIdentitySnapshot(left, options);
       const target = buildMediaIdentitySnapshot(right, options);
       let score = 0;
+      if(hasSequenceConflict(left, right)) return 0;
       if(source.strictKey && target.strictKey && source.strictKey === target.strictKey) return 1;
       if(source.wikidataEntityId && target.wikidataEntityId && source.wikidataEntityId === target.wikidataEntityId) return 0.99;
       if(source.isbn && target.isbn && source.isbn === target.isbn) return 0.99;
@@ -2414,7 +2551,7 @@
         work_key: candidate.work_key || workKey,
         canonical_key: candidate.canonical_key || ""
       };
-      return items.some((item) => areItemsSameEntity({ ...item, category }, target, { threshold: 0.88 }));
+      return Boolean(findBestMediaEntityMatch(items.map((item) => ({ ...item, category })), target, { threshold: 0.88 }));
     }
 
     async function existsInSupabase(category, title, workKey = "", canonicalKey = "", candidate = {}){
@@ -2440,7 +2577,7 @@
         canonical_key: candidate.canonical_key || canonicalKey,
         creator: candidate.creator || ""
       };
-      return Array.isArray(data) && data.some((row) => areItemsSameEntity(row, target, { threshold: 0.88 }));
+      return Boolean(Array.isArray(data) && findBestMediaEntityMatch(data, target, { threshold: 0.88 }));
     }
 
     async function saveItemToSupabase(
@@ -2471,7 +2608,7 @@
       const autoLang = splitDescriptionFields(description);
       const originalDescription = description_original || description_en || autoLang.description_original || "";
 
-      const insertData = {
+      const incomingRecord = {
         user_id: user.id,
         title: title,
         category: category,
@@ -2492,20 +2629,131 @@
         enrichment_source: null
       };
 
-      const { error } = await supabaseClient
+      const { data: existingRows, error: existingError } = await supabaseClient
         .from("user_media")
-        .insert([insertData]);
+        .select("id, title, category, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, wikidata_entity_id, wikidata_label, wikidata_description, wikidata_last_enriched_at, enrichment_status, enrichment_confidence, enrichment_source")
+        .eq("user_id", user.id)
+        .eq("category", category);
+
+      if(existingError){
+        console.error("Supabase upsert precheck error:", existingError);
+        alert(t().labels.dbSaveError + ": " + existingError.message);
+        return { ok: false, id: null, mode: "error" };
+      }
+
+      const existingMatch = findBestMediaEntityMatch((existingRows || []).map((row) => ({
+        ...row,
+        cover: row.cover_url || "",
+        enrichment: buildEnrichmentState({
+          wikidataEntityId: row.wikidata_entity_id || "",
+          wikidataLabel: row.wikidata_label || "",
+          wikidataDescription: row.wikidata_description || "",
+          lastEnrichedAt: row.wikidata_last_enriched_at || "",
+          status: row.enrichment_status || "idle",
+          confidence: Number(row.enrichment_confidence || 0),
+          matchedBy: row.enrichment_source || ""
+        })
+      })), {
+        title,
+        category,
+        status,
+        cover,
+        description,
+        description_ru,
+        description_en,
+        description_original,
+        creator,
+        work_key: workKey,
+        canonical_key: finalCanonicalKey
+      }, { threshold: 0.88 });
+
+      if(existingMatch){
+        const mergedRecord = mergeMediaEntityRecords({
+          id: existingMatch.id,
+          title: existingMatch.title,
+          category: existingMatch.category,
+          status: existingMatch.status,
+          cover: existingMatch.cover_url || "",
+          description: existingMatch.description || "",
+          description_ru: existingMatch.description_ru || "",
+          description_original: existingMatch.description_original || existingMatch.description_en || "",
+          description_en: existingMatch.description_en || "",
+          creator: existingMatch.creator || "",
+          work_key: existingMatch.work_key || "",
+          canonical_key: existingMatch.canonical_key || "",
+          enrichment: buildEnrichmentState({
+            wikidataEntityId: existingMatch.wikidata_entity_id || "",
+            wikidataLabel: existingMatch.wikidata_label || "",
+            wikidataDescription: existingMatch.wikidata_description || "",
+            lastEnrichedAt: existingMatch.wikidata_last_enriched_at || "",
+            status: existingMatch.enrichment_status || "idle",
+            confidence: Number(existingMatch.enrichment_confidence || 0),
+            matchedBy: existingMatch.enrichment_source || ""
+          })
+        }, {
+          title,
+          category,
+          status,
+          cover,
+          description,
+          description_ru,
+          description_original,
+          description_en,
+          creator,
+          work_key: workKey,
+          canonical_key: finalCanonicalKey
+        });
+        const updatePayload = {
+          title: mergedRecord.title,
+          category: mergedRecord.category,
+          status: mergedRecord.status,
+          cover_url: mergedRecord.cover || "",
+          description: mergedRecord.description || "",
+          description_ru: mergedRecord.description_ru || "",
+          description_en: mergedRecord.description_en || "",
+          description_original: mergedRecord.description_original || mergedRecord.description_en || "",
+          creator: mergedRecord.creator || "",
+          work_key: mergedRecord.work_key || "",
+          canonical_key: mergedRecord.canonical_key || "",
+          wikidata_entity_id: existingMatch.wikidata_entity_id || null,
+          wikidata_label: existingMatch.wikidata_label || null,
+          wikidata_description: existingMatch.wikidata_description || null,
+          wikidata_last_enriched_at: existingMatch.wikidata_last_enriched_at || null,
+          enrichment_status: existingMatch.enrichment_status || "idle",
+          enrichment_confidence: Number(existingMatch.enrichment_confidence || 0),
+          enrichment_source: existingMatch.enrichment_source || null
+        };
+        const { error: updateError } = await supabaseClient
+          .from("user_media")
+          .update(updatePayload)
+          .eq("user_id", user.id)
+          .eq("id", existingMatch.id);
+
+        if(updateError){
+          console.error("Supabase update error:", updateError);
+          alert(t().labels.dbUpdateError + ": " + updateError.message);
+          return { ok: false, id: null, mode: "error" };
+        }
+        return { ok: true, id: existingMatch.id, mode: "updated", canonicalKey: mergedRecord.canonical_key || finalCanonicalKey };
+      }
+
+      const { data: insertedRow, error } = await supabaseClient
+        .from("user_media")
+        .insert([incomingRecord])
+        .select("id")
+        .single();
 
       if(error){
         console.error("Supabase insert error:", error);
         alert(t().labels.dbSaveError + ": " + error.message);
-        return false;
+        return { ok: false, id: null, mode: "error" };
       }
 
-      return true;
+      return { ok: true, id: insertedRow?.id || null, mode: "inserted", canonicalKey: finalCanonicalKey };
     }
 
     function buildLocalShelfItem({
+      id = null,
       title,
       category,
       status = "Planned",
@@ -2522,7 +2770,7 @@
       enrichment = undefined
     }){
       return {
-        id: -Date.now() - Math.floor(Math.random() * 1000),
+        id: id || -Date.now() - Math.floor(Math.random() * 1000),
         title: title || "",
         category: category || "",
         status: status || "Planned",
@@ -2549,17 +2797,16 @@
         demoData[category] = [];
       }
 
-      const existingIndex = demoData[category].findIndex((row) => areItemsSameEntity({ ...row, category }, { ...item, category }, { threshold: 0.88 }));
-      if(existingIndex >= 0){
-        demoData[category][existingIndex] = {
-          ...demoData[category][existingIndex],
-          ...item,
-          id: demoData[category][existingIndex].id || item.id
-        };
+      const existingMatch = findBestMediaEntityMatch(demoData[category].map((row) => ({ ...row, category })), { ...item, category }, { threshold: 0.88 });
+      if(existingMatch){
+        const existingIndex = demoData[category].findIndex((row) => row.id === existingMatch.id || getItemStorageKey({ ...row, category }) === getItemStorageKey({ ...existingMatch, category }));
+        demoData[category][existingIndex] = mergeMediaEntityRecords(demoData[category][existingIndex], item);
+        markLibraryStateDirty();
         return;
       }
 
       demoData[category].unshift(item);
+      markLibraryStateDirty();
     }
 
     async function applyFolderAssignmentsToItems(category){
@@ -2835,18 +3082,16 @@
           matchedBy: mappedItem.enrichment_source || "",
           ...(cache[getItemStorageKey({ ...mappedItem, category })] || {})
         });
-        const existingIndex = uniqueItems.findIndex((entry) => areItemsSameEntity({ ...entry, category }, { ...mappedItem, category }, { threshold: 0.88 }));
-        if(existingIndex >= 0){
-          uniqueItems[existingIndex] = {
-            ...uniqueItems[existingIndex],
-            ...mappedItem,
-            id: uniqueItems[existingIndex].id || mappedItem.id
-          };
+        const existingMatch = findBestMediaEntityMatch(uniqueItems.map((entry) => ({ ...entry, category })), { ...mappedItem, category }, { threshold: 0.88 });
+        if(existingMatch){
+          const existingIndex = uniqueItems.findIndex((entry) => entry.id === existingMatch.id || getItemStorageKey({ ...entry, category }) === getItemStorageKey({ ...existingMatch, category }));
+          uniqueItems[existingIndex] = mergeMediaEntityRecords(uniqueItems[existingIndex], mappedItem);
         } else {
           uniqueItems.push(mappedItem);
         }
       });
       demoData[category] = uniqueItems;
+      markLibraryStateDirty();
 
       await applyFolderAssignmentsToItems(category);
       renderShelf();
@@ -3142,24 +3387,6 @@
 
       const targetCategory = item.category;
 
-      if(isDuplicateItem(targetCategory, item.title, item.work_key || "", item)){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
-      const existsInDb = await existsInSupabase(
-        targetCategory,
-        item.title,
-        item.work_key || "",
-        item.canonical_key || "",
-        item
-      );
-
-      if(existsInDb){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
       let finalDescription = item.description || "";
       let finalDescriptionRu = item.description_ru || "";
       let finalDescriptionOriginal = item.description_original || item.description_en || "";
@@ -3193,9 +3420,10 @@
         finalDescriptionOriginal || ""
       );
 
-      if(!saved) return;
+      if(!saved?.ok) return;
 
       insertLocalShelfItem(targetCategory, buildLocalShelfItem({
+        id: saved.id || undefined,
         title: item.title,
         category: targetCategory,
         status: "Planned",
@@ -3204,7 +3432,7 @@
         creator: item.creator || "",
         isbn: item.isbn || "",
         work_key: item.work_key || "",
-        canonical_key: item.canonical_key || "",
+        canonical_key: saved.canonicalKey || item.canonical_key || "",
         description_ru: finalDescriptionRu || "",
         description_original: finalDescriptionOriginal || finalDescriptionEn || "",
         description_en: finalDescriptionEn || ""
@@ -3215,31 +3443,36 @@
         await handlePostAddRelationshipAssist({
           category: targetCategory,
           title: item.title,
-          canonical_key: item.canonical_key || "",
+          canonical_key: saved.canonicalKey || item.canonical_key || "",
           work_key: item.work_key || ""
         });
       }
     }
 
     function findLibraryItemByIdentity({ category, title = "", canonical_key = "", work_key = "" } = {}){
-      return (demoData[category] || []).find((entry) =>
-        (canonical_key && entry.canonical_key === canonical_key) ||
-        (work_key && entry.work_key === work_key) ||
-        normalizeComparisonText(entry.title || "") === normalizeComparisonText(title || "")
-      ) || null;
+      return findBestMediaEntityMatch((demoData[category] || []).map((entry) => ({ ...entry, category })), {
+        category,
+        title,
+        canonical_key,
+        work_key
+      }, { threshold: 0.88 }) || null;
     }
 
     async function handlePostAddRelationshipAssist(identity){
       const item = findLibraryItemByIdentity(identity);
       if(!item) return;
       currentCategory = identity.category || currentCategory;
-      await ensureItemEnrichmentHydrated(item);
-      await enrichItemFromWikidata(item, { force: false });
-      const store = await getUniverseStore();
-      const insight = buildSeriesInsight(item, store);
+      const { insight } = await ensureAutomatedRelationsForItem(item);
       const shouldOpenAssist = insight.totalParts > 1 || insight.missingCount > 0 || insight.candidateLinks.length > 0 || insight.primaryUniverse;
       if(shouldOpenAssist){
         renderSeriesInsightModal(item);
+      }
+      if(shouldEnrichItem(item, false)){
+        enrichItemFromWikidata(item, { force: false }).then(() => {
+          requestProductRefresh({ forceFull: false, detailsOnly: currentOpenItemId === item.id });
+        }).catch((error) => {
+          console.error("Deferred relationship assist enrichment error:", error);
+        });
       }
     }
 
@@ -3257,18 +3490,6 @@
 
       const canonicalKey = buildCanonicalKey(currentCategory, "manual", "", title);
 
-      if(isDuplicateItem(currentCategory, title, "", { title, creator, category: currentCategory })){
-        alert(t().labels.alreadyExists);
-        return;
-      }
-
-      const existsInDb = await existsInSupabase(currentCategory, title, "", canonicalKey, { title, creator, category: currentCategory });
-      if(existsInDb){
-        alert(t().labels.alreadyExists);
-        await loadCategoryFromSupabase(currentCategory);
-        return;
-      }
-
       const translated = await translateDescriptionFields(description);
 
       const saved = await saveItemToSupabase(
@@ -3285,9 +3506,10 @@
         translated.description_original
       );
 
-      if(!saved) return;
+      if(!saved?.ok) return;
 
       insertLocalShelfItem(currentCategory, buildLocalShelfItem({
+        id: saved.id || undefined,
         title: title,
         category: currentCategory,
         status: "Planned",
@@ -3295,7 +3517,7 @@
         description: description,
         creator: creator,
         isbn: "",
-        canonical_key: canonicalKey,
+        canonical_key: saved.canonicalKey || canonicalKey,
         description_ru: translated.description_ru,
         description_original: translated.description_original || translated.description_en,
         description_en: translated.description_en
@@ -3307,7 +3529,7 @@
       await handlePostAddRelationshipAssist({
         category: currentCategory,
         title,
-        canonical_key: canonicalKey,
+        canonical_key: saved.canonicalKey || canonicalKey,
         work_key: ""
       });
     }
@@ -3342,6 +3564,7 @@
 
       const oldStatus = item.status;
       item.status = status;
+      markLibraryStateDirty();
       renderShelf();
       closeStatusModal();
 
@@ -3349,6 +3572,7 @@
 
       if(!updated){
         item.status = oldStatus;
+        markLibraryStateDirty();
         renderShelf();
         alert(t().labels.dbStatusNotSaved);
         return;
@@ -3384,6 +3608,7 @@
       if(!alreadyThere){
         demoData.Blacklist.unshift(movedItem);
       }
+      markLibraryStateDirty();
 
       closeStatusModal();
       renderShelf();
@@ -3395,6 +3620,7 @@
           demoData[oldCategory].splice(oldIndex, 0, item);
         }
         demoData.Blacklist = demoData.Blacklist.filter(x => x.id !== item.id);
+        markLibraryStateDirty();
         renderShelf();
         alert(t().labels.moveError);
         return;
@@ -3600,6 +3826,7 @@
 
       if(index !== -1){
         demoData[currentCategory].splice(index, 1);
+        markLibraryStateDirty();
       }
       renderShelf();
 
@@ -3608,6 +3835,7 @@
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, removedItem);
+          markLibraryStateDirty();
         }
         renderShelf();
         alert(t().labels.deleteError);
@@ -3649,6 +3877,7 @@
       const index = (demoData[currentCategory] || []).findIndex(x => x.id === item.id);
       if(index !== -1){
         demoData[currentCategory].splice(index, 1);
+        markLibraryStateDirty();
       }
 
       const deleted = await deleteItemFromSupabase(item, currentCategory);
@@ -3656,6 +3885,7 @@
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, item);
+          markLibraryStateDirty();
         }
         alert(t().labels.deleteError);
         return;
@@ -4483,22 +4713,7 @@ function applyPublicLibraryItems(data = []){
   const statuses = new Set();
 
   data.forEach((item) => {
-    const dedupeKey = item.canonical_key || item.work_key || (item.title || "").trim().toLowerCase();
-    const fullKey = `${item.category}:${dedupeKey}`;
-    if(seen.has(fullKey)){
-      return;
-    }
-    seen.add(fullKey);
-
-    if(!demoData[item.category]){
-      demoData[item.category] = [];
-    }
-
-    if(item.category) categories.add(translateCategory(item.category));
-    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
-    if(item.status) statuses.add(translateStatus(item.status));
-
-    demoData[item.category].push({
+    const publicItem = {
       id: item.id,
       title: item.title,
       status: item.status || "Planned",
@@ -4509,9 +4724,30 @@ function applyPublicLibraryItems(data = []){
       creator: item.creator || "",
       work_key: item.work_key || "",
       canonical_key: item.canonical_key || "",
-      folder: item.folder_name || item.folder || ""
-    });
+      folder: item.folder_name || item.folder || "",
+      category: item.category
+    };
+    const fullKey = `${item.category}:${item.id || item.canonical_key || item.work_key || normalizeComparisonText(item.title || "")}`;
+    if(seen.has(fullKey)){
+      return;
+    }
+
+    if(!demoData[item.category]){
+      demoData[item.category] = [];
+    }
+
+    if(findBestMediaEntityMatch(demoData[item.category].map((entry) => ({ ...entry, category: item.category })), publicItem, { threshold: 0.88 })){
+      return;
+    }
+    seen.add(fullKey);
+
+    if(item.category) categories.add(translateCategory(item.category));
+    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
+    if(item.status) statuses.add(translateStatus(item.status));
+
+    demoData[item.category].push(publicItem);
   });
+  markLibraryStateDirty();
 
   currentPublicLibraryMeta = {
     categories: Array.from(categories),
@@ -7050,6 +7286,66 @@ async function setWikidataCache(value){
   await setAccountStorageValue("wikidata_cache", value);
 }
 
+async function getRelationSummaryCache(){
+  return await getAccountStorageValue("relation_summary_cache", {});
+}
+
+async function setRelationSummaryCache(value){
+  await setAccountStorageValue("relation_summary_cache", value);
+}
+
+function createEmptySeriesInsight(){
+  return {
+    primaryUniverse: null,
+    totalParts: 0,
+    currentIndex: 0,
+    libraryCount: 0,
+    missingCount: 0,
+    nextPart: null,
+    missingEntries: [],
+    catalog: [],
+    candidateLinks: [],
+    confirmedLinks: [],
+    adaptationCount: 0,
+    localInference: {
+      primaryLabel: "",
+      crossMedia: []
+    }
+  };
+}
+
+function buildRelationSummarySnapshot(item, store, insight = null){
+  const resolvedInsight = insight || buildSeriesInsight(item, store);
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  const candidateCount = (store?.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).length;
+  const confirmedCount = (store?.links || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).length;
+  return {
+    primaryUniverseName: resolvedInsight.primaryUniverse?.name || resolvedInsight.localInference?.primaryLabel || "",
+    totalParts: resolvedInsight.totalParts || 0,
+    currentIndex: resolvedInsight.currentIndex || 0,
+    libraryCount: resolvedInsight.libraryCount || 0,
+    missingCount: resolvedInsight.missingCount || 0,
+    adaptationCount: resolvedInsight.adaptationCount || 0,
+    candidateCount,
+    confirmedCount,
+    nextPartLabel: resolvedInsight.nextPart?.label || "",
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function persistRelationSummarySnapshot(item, store, insight = null){
+  if(!item) return;
+  const cache = await getRelationSummaryCache();
+  cache[getItemStorageKey(item, item?.category || currentCategory)] = buildRelationSummarySnapshot(item, store, insight);
+  await setRelationSummaryCache(cache);
+}
+
+async function getCachedRelationSummarySnapshot(item){
+  if(!item) return null;
+  const cache = await getRelationSummaryCache();
+  return cache[getItemStorageKey(item, item?.category || currentCategory)] || null;
+}
+
 function getItemReleaseYear(item){
   const sources = [
     item?.release_date,
@@ -7794,12 +8090,15 @@ function getNowItems(){
   return items;
 }
 
-function getStatsSnapshot(){
-  const items = getAllLibraryItems();
-  const byCategory = {};
-  items.forEach((item) => {
-    if(!byCategory[item.category]) byCategory[item.category] = { total: 0, done: 0, inProgress: 0, planned: 0, dropped: 0, ratings: [] };
-    const bucket = byCategory[item.category];
+    function getStatsSnapshot(){
+      if(cachedStatsSnapshot && cachedStatsSnapshotVersion === libraryStateVersion){
+        return cachedStatsSnapshot;
+      }
+      const items = getAllLibraryItems();
+      const byCategory = {};
+      items.forEach((item) => {
+        if(!byCategory[item.category]) byCategory[item.category] = { total: 0, done: 0, inProgress: 0, planned: 0, dropped: 0, ratings: [] };
+        const bucket = byCategory[item.category];
     const tracker = normalizeTracker(item);
     bucket.total += 1;
     if(item.status === "Done") bucket.done += 1;
@@ -7811,16 +8110,18 @@ function getStatsSnapshot(){
   const totalCompletedThisYear = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(String(new Date().getFullYear()))).length;
   const monthKey = new Date().toISOString().slice(0, 7);
   const consumedThisMonth = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(monthKey)).length;
-  return {
-    byCategory,
-    total: items.length,
-    now: items.filter((item) => isNowStatus(item.status)).length,
-    completed: items.filter((item) => item.status === "Done").length,
-    dropped: items.filter((item) => item.status === "Dropped").length,
-    consumedThisMonth,
-    totalCompletedThisYear
-  };
-}
+      cachedStatsSnapshot = {
+        byCategory,
+        total: items.length,
+        now: items.filter((item) => isNowStatus(item.status)).length,
+        completed: items.filter((item) => item.status === "Done").length,
+        dropped: items.filter((item) => item.status === "Dropped").length,
+        consumedThisMonth,
+        totalCompletedThisYear
+      };
+      cachedStatsSnapshotVersion = libraryStateVersion;
+      return cachedStatsSnapshot;
+    }
 
 async function renderHomeNowSection(){
   const container = document.getElementById("home-now-grid");
@@ -8389,6 +8690,45 @@ function renderGroupedRelationSections(relations = [], items = [], item, itemKey
   `).join("");
 }
 
+async function promoteHighConfidenceRelationsForItem(item, store = null){
+  if(!item) return false;
+  const resolvedStore = store || await getUniverseStore();
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  let changed = false;
+
+  (resolvedStore.candidates || []).slice().forEach((entry) => {
+    const touchesItem = entry.sourceKey === itemKey || entry.targetKey === itemKey;
+    if(!touchesItem || Number(entry.confidence || 0) < 0.9) return;
+    resolvedStore.candidates = (resolvedStore.candidates || []).filter((candidate) => candidate.id !== entry.id);
+    upsertGraphLink(resolvedStore, { ...entry, status: "confirmed", confidence: Math.max(0.9, Number(entry.confidence || 0.9)) }, false);
+    changed = true;
+  });
+
+  resolvedStore.memberships = (resolvedStore.memberships || []).map((entry) => {
+    if(entry.itemKey !== itemKey || Number(entry.confidence || 0) < 0.86 || entry.status === "confirmed") return entry;
+    changed = true;
+    return { ...entry, status: "confirmed", confidence: Math.max(0.86, Number(entry.confidence || 0.86)) };
+  });
+
+  if(changed){
+    await setUniverseStore(resolvedStore);
+  }
+  return changed;
+}
+
+async function ensureAutomatedRelationsForItem(item){
+  if(!item) return { store: await getUniverseStore(), insight: createEmptySeriesInsight() };
+  await ensureItemEnrichmentHydrated(item);
+  await ensureLocalUniverseInferenceForItem(item);
+  let store = await getUniverseStore();
+  if(await promoteHighConfidenceRelationsForItem(item, store)){
+    store = await getUniverseStore();
+  }
+  const insight = buildSeriesInsight(item, store);
+  await persistRelationSummarySnapshot(item, store, insight);
+  return { store, insight };
+}
+
 function renderRelationSummaryLoadingState(item){
   const container = document.getElementById("details-relations-summary");
   if(!container) return;
@@ -8447,6 +8787,39 @@ function renderRelationSummaryCard(item, insight, snapshot, enrichment){
     </article>`;
 }
 
+function renderCachedRelationSummaryCard(item, snapshot, enrichment){
+  if(!snapshot) return "";
+  const metrics = [
+    snapshot.totalParts ? [snapshot.currentIndex ? `${snapshot.currentIndex}/${snapshot.totalParts}` : String(snapshot.totalParts), currentLanguage === "ru" ? "позиция / серия" : "position / series"] : null,
+    [String(snapshot.libraryCount || 0), currentLanguage === "ru" ? "в библиотеке" : "in library"],
+    [String(snapshot.missingCount || 0), currentLanguage === "ru" ? "ещё добавить" : "still missing"],
+    [String(snapshot.candidateCount || 0), currentLanguage === "ru" ? "ожидают подтверждения" : "pending confirmations"]
+  ].filter(Boolean);
+  const chips = [
+    snapshot.primaryUniverseName,
+    snapshot.adaptationCount ? (currentLanguage === "ru" ? `адаптации: ${snapshot.adaptationCount}` : `adaptations: ${snapshot.adaptationCount}`) : "",
+    enrichment.status === "pending" ? (currentLanguage === "ru" ? "обновляем связи" : "refreshing relations") : ""
+  ].filter(Boolean);
+  const note = snapshot.nextPartLabel
+    ? (currentLanguage === "ru" ? `Следующая часть: ${snapshot.nextPartLabel}` : `Next part: ${snapshot.nextPartLabel}`)
+    : (currentLanguage === "ru" ? "Показываем сохранённую сводку, пока обновляются подробности." : "Showing the saved summary while the detailed graph refreshes.");
+  return `
+    <article class="relation-summary-card is-cached">
+      <div class="relation-summary-top">
+        <div>
+          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
+          <div class="relation-summary-title">${escapeHtml(snapshot.primaryUniverseName || item?.title || (currentLanguage === "ru" ? "Серия и связи" : "Series & relations"))}</div>
+        </div>
+        <span class="meta-chip">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</span>
+      </div>
+      <div class="relation-summary-metrics">
+        ${metrics.map(([value, label]) => `<div class="relation-summary-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("")}
+      </div>
+      <div class="relation-summary-note">${escapeHtml(note)}</div>
+      ${chips.length ? `<div class="relation-summary-chips">${chips.map((chip) => `<span class="meta-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+    </article>`;
+}
+
 function renderRelationSummaryFallback(error){
   const container = document.getElementById("details-relations-summary");
   if(!container) return;
@@ -8478,13 +8851,10 @@ async function renderUniverseDetailsForCurrentItem(){
   }
 
   try {
-    await ensureItemEnrichmentHydrated(item);
-    await ensureLocalUniverseInferenceForItem(item);
+    const { store, insight } = await ensureAutomatedRelationsForItem(item);
     const enrichment = buildEnrichmentState(item.enrichment || {});
-    const store = await getUniverseStore();
     const items = getAllLibraryItems();
     const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
-    const insight = buildSeriesInsight(item, store);
 
     if(retryButton){
       retryButton.classList.toggle("hidden", isPublicView);
@@ -9138,7 +9508,12 @@ openCardById = async function openCardByIdWithArchitecture(id){
   const item = getItemById(currentCategory, id);
   if(item){
     renderRelationSummaryLoadingState(item);
+    const cachedSummary = await getCachedRelationSummarySnapshot(item);
     await ensureItemEnrichmentHydrated(item);
+    const summary = document.getElementById("details-relations-summary");
+    if(summary && cachedSummary){
+      summary.innerHTML = renderCachedRelationSummaryCard(item, cachedSummary, buildEnrichmentState(item.enrichment || {}));
+    }
     if(shouldEnrichItem(item, false)){
       enrichItemFromWikidata(item, { force: false }).then(() => {
         requestProductRefresh({ forceFull: false, detailsOnly: true });
