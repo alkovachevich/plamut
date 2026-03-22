@@ -1587,6 +1587,32 @@ body.header-compact .app-header {
   justify-content: flex-end;
 }
 
+.home-overview-minimal {
+  min-height: min(68vh, 620px);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.home-overview-copy-minimal {
+  max-width: 620px;
+  margin: 0 auto;
+  justify-items: center;
+}
+
+.home-overview-copy-minimal .subtitle {
+  margin-bottom: 0;
+}
+
+.home-overview-actions-minimal {
+  justify-content: center;
+  width: 100%;
+}
+
+.home-overview-actions-minimal .header-panel-wrap {
+  display: inline-flex;
+}
+
 .home-shortcuts-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
