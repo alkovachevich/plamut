@@ -95,15 +95,15 @@
     </div>
 
     <div id="home-screen" class="hidden">
-      <section class="home-overview panel-section home-overview-minimal">
-        <div class="home-overview-copy home-overview-copy-minimal hidden" aria-hidden="true">
+      <section class="home-overview panel-section">
+        <div class="home-overview-copy">
           <div class="hero-badge" id="hero-badge">Your personal universe</div>
           <h1 class="home-title">Plamut</h1>
           <div class="subtitle" id="home-subtitle"></div>
         </div>
 
-        <div class="home-overview-actions home-overview-actions-minimal">
-          <button id="home-add-btn" class="button button-primary hidden" type="button" onclick="handlePrimaryAddAction()" aria-hidden="true" tabindex="-1">Добавить</button>
+        <div class="home-overview-actions">
+          <button id="home-add-btn" class="button hidden" type="button" aria-hidden="true" tabindex="-1">Добавить</button>
           <div class="header-panel-wrap share-menu-wrap">
             <button id="share-library-btn" class="button button-secondary share-library-btn" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
@@ -115,12 +115,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <div class="home-section-links" aria-label="Разделы">
-          <button id="home-library-link" class="button button-ghost home-section-link" type="button" onclick="showLibraryRoot()">Библиотека</button>
-          <button id="home-now-link" class="button button-ghost home-section-link" type="button" onclick="showNowScreen()">Сейчас</button>
-          <button id="home-stats-link" class="button button-ghost home-section-link" type="button" onclick="showStatsScreen()">Статистика</button>
         </div>
       </section>
 
@@ -136,6 +130,53 @@
           <button class="button button-secondary" type="button" onclick="startQuickAdd('Anime')" id="quick-add-anime">🍥 Аниме</button>
           <button class="button button-secondary" type="button" onclick="startQuickAdd('Manga')" id="quick-add-manga">📖 Манга</button>
         </div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-now-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="now-section-title">Сейчас</h2>
+            <div class="section-note" id="now-section-note">Продолжайте с места, где остановились</div>
+          </div>
+          <button class="button button-ghost" type="button" onclick="showNowScreen()" id="open-now-screen-btn">Открыть</button>
+        </div>
+        <div id="home-now-grid" class="dashboard-compact-grid"></div>
+      </section>
+
+      <section class="dashboard-section panel-section home-shortcuts-section" id="home-shortcuts-section">
+        <div class="section-heading compact-heading">
+          <div>
+            <h2 class="section-title" id="home-shortcuts-title">Быстрые переходы</h2>
+            <div class="section-note" id="home-shortcuts-note">Главная отвечает только на вопрос, что делать сейчас.</div>
+          </div>
+        </div>
+        <div id="home-shortcuts-grid" class="home-shortcuts-grid">
+          <button class="button button-primary" type="button" onclick="showNowScreen()" id="home-shortcut-now">Сейчас</button>
+          <button class="button button-secondary" type="button" onclick="showLibraryRoot()" id="home-shortcut-library">Библиотека</button>
+          <button class="button button-secondary" type="button" onclick="showUniversesScreen()" id="home-shortcut-universes">Связи</button>
+          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="home-shortcut-stats">Статистика</button>
+        </div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-summary-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="home-summary-title">Краткая сводка</h2>
+            <div class="section-note" id="home-summary-note">Только ключевые цифры по библиотеке.</div>
+          </div>
+          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="open-stats-screen-btn">Открыть</button>
+        </div>
+        <div id="home-stats-grid" class="dashboard-stats-grid"></div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-activity-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="activity-section-title">Продолжить</h2>
+            <div class="section-note" id="activity-section-note">Последние изменения и то, к чему стоит вернуться.</div>
+          </div>
+        </div>
+        <div id="home-activity-list" class="activity-list"></div>
       </section>
     </div>
 
