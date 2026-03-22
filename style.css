@@ -1587,6 +1587,27 @@ body.header-compact .app-header {
   justify-content: flex-end;
 }
 
+.home-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-shortcuts-grid .button {
+  min-height: 48px;
+  justify-content: center;
+}
+
+.library-root-section {
+  display: grid;
+  gap: 16px;
+}
+
+.library-category-grid {
+  margin-top: 4px;
+}
+
+
 .share-library-btn {
   min-width: 0;
   padding-inline: 14px;
@@ -2974,6 +2995,10 @@ body.sheet-open {
   .tracker-form-grid {
     grid-template-columns: 1fr;
   }
+  .home-shortcuts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
 
   .section-screen {
     padding-bottom: 6px;
