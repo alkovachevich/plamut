@@ -1,3 +1,563 @@
+===== index.html =====
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plamut</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app-shell" class="page-shell">
+    <div id="runtime-error-banner" class="runtime-error-banner hidden"></div>
+
+    <header class="app-header">
+      <div class="brand-block">
+        <div class="brand-mark">P</div>
+        <div>
+          <div class="brand-title">Plamut</div>
+          <div class="brand-subtitle" id="brand-subtitle">Media Tracker</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="header-panel-wrap">
+          <button
+            id="preferences-btn"
+            class="button button-ghost header-control-btn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            onclick="togglePreferencesPanel()"
+          >
+            <span class="header-control-icon" aria-hidden="true">🌐</span>
+            <span id="preferences-btn-label">RU</span>
+          </button>
+
+          <div id="preferences-panel" class="preferences-panel hidden" role="dialog" aria-labelledby="preferences-title">
+            <div class="preferences-panel-header">
+              <h2 id="preferences-title" class="preferences-title">Interface</h2>
+            </div>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-language-title">Language</div>
+              <div class="option-group compact-option-group">
+                <button id="lang-option-ru" class="button option-button" type="button" onclick="setLanguage('ru')">RU</button>
+                <button id="lang-option-en" class="button option-button" type="button" onclick="setLanguage('en')">EN</button>
+              </div>
+            </section>
+
+            <section class="preferences-section">
+              <div class="preferences-section-title" id="preferences-theme-title">Theme</div>
+              <div class="option-group theme-option-group">
+                <button id="theme-option-light" class="button option-button" type="button" onclick="setThemeMode('light')">Light</button>
+                <button id="theme-option-dark" class="button option-button" type="button" onclick="setThemeMode('dark')">Dark</button>
+                <button id="theme-option-system" class="button option-button" type="button" onclick="setThemeMode('system')">System</button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="header-user-actions">
+          <button id="profile-btn" class="profile-trigger hidden" type="button" onclick="openProfileModal()" aria-label="Profile" title="Profile">
+            <span id="header-avatar-fallback" class="profile-trigger-fallback">P</span>
+            <img id="header-avatar-img" class="profile-trigger-image hidden" src="" alt="">
+          </button>
+          <button id="login-top-btn" class="button button-secondary hidden" onclick="showAuthScreen()">Login</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="auth-screen" class="auth-screen">
+      <div class="auth-card">
+        <div class="auth-badge">Plamut</div>
+        <h2 class="auth-title">Plamut Login</h2>
+        <p class="auth-text" id="auth-text">Save books, movies, series, anime and manga in one personal library.</p>
+
+        <input id="login-email" class="input" placeholder="Email">
+        <input id="login-password" class="input" type="password" placeholder="Password">
+
+        <div class="auth-actions">
+          <button class="button button-primary" onclick="login()">Login</button>
+          <button class="button button-secondary" onclick="register()">Register</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="home-screen" class="hidden">
+      <section class="hero-block">
+        <div class="hero-content">
+          <div class="hero-badge" id="hero-badge">Your personal universe</div>
+          <h1 class="hero-title">Plamut</h1>
+          <div class="subtitle" id="home-subtitle"></div>
+
+          <div class="hero-actions">
+            <button id="share-library-btn" class="button button-primary share-library-btn" onclick="shareLibrary()">Share Library</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section panel-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="library-section-title">Library</h2>
+            <div class="section-note" id="library-section-note">Choose a category</div>
+          </div>
+        </div>
+
+        <div class="grid category-grid">
+          <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
+          <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
+          <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
+          <div class="card category-card" onclick="openCategory('Anime')" id="cat-anime"></div>
+          <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
+          <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="category-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="goHome()" id="back-home-btn"></button>
+          <h2 id="category-title" class="screen-title"></h2>
+        </div>
+        <div class="toolbar-actions">
+          <button class="button button-primary" onclick="openAddModal()" id="add-new-btn"></button>
+          <button class="button button-secondary" onclick="addCustomFolder()" id="add-folder-btn"></button>
+        </div>
+      </div>
+
+      <div id="public-category-tabs" class="public-category-tabs hidden">
+        <button class="button button-ghost" onclick="openPublicCategory('Books', currentPublicProfileName)" id="public-tab-books">Books</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Movies', currentPublicProfileName)" id="public-tab-movies">Movies</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Series', currentPublicProfileName)" id="public-tab-series">Series</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Anime', currentPublicProfileName)" id="public-tab-anime">Anime</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Manga', currentPublicProfileName)" id="public-tab-manga">Manga</button>
+        <button class="button button-ghost" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
+      </div>
+
+      <div class="toolbar-row filter-toolbar" id="filter-toolbar">
+        <div class="filter-toolbar-search">
+          <input id="shelf-search-input" class="input" type="search" autocomplete="off" oninput="setShelfSearchQuery(this.value)">
+        </div>
+        <div class="filter-toolbar-status" id="status-filter-wrap">
+          <label for="status-filter" id="status-filter-label"></label>
+          <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+            <option value="All">All</option>
+            <option value="Planned">Planned</option>
+            <option value="In progress">In progress</option>
+            <option value="Done">Done</option>
+            <option value="Dropped">Dropped</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="shelf-shell">
+        <div class="shelf" id="shelf"></div>
+      </div>
+    </div>
+
+    <div id="details-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="backToCategory()" id="back-shelf-btn"></button>
+        </div>
+      </div>
+
+      <div class="details-layout">
+        <div class="details-cover">
+          <div class="details-cover-box" id="details-cover-box"></div>
+        </div>
+
+        <div class="details-panel">
+          <h2 id="details-title"></h2>
+          <div class="muted details-creator" id="details-creator"></div>
+
+          <div class="details-badges">
+            <span class="badge" id="details-category"></span>
+            <span class="badge" id="details-status"></span>
+          </div>
+
+          <div class="section">
+            <h3 id="description-label"></h3>
+            <div class="muted" id="details-description"></div>
+          </div>
+
+          <div class="section" id="details-folder-section">
+            <h3 id="details-folder-title">Folder</h3>
+            <div class="folder-assignment-row">
+              <select id="details-folder-select" class="select"></select>
+              <button class="button button-secondary" onclick="saveItemFolder()" id="save-folder-btn">Save folder</button>
+            </div>
+          </div>
+
+          <div class="section hidden" id="canonical-key-section">
+            <h3>Canonical Key</h3>
+            <input id="canonical-key-input" class="input" type="text">
+            <button class="button button-secondary" onclick="saveCanonicalKey()">Save</button>
+          </div>
+
+          <div class="section details-actions">
+            <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
+            <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="public-share-screen" class="hidden screen-panel public-share-screen">
+      <div class="public-share-shell">
+        <button class="public-share-back-link" type="button" onclick="exitPublicShareRoute()" id="public-share-back-btn">← Back</button>
+
+        <section id="public-share-loading-card" class="public-card public-card-skeleton" aria-hidden="true">
+          <div class="public-card-skeleton-avatar"></div>
+          <div class="public-card-skeleton-lines">
+            <span class="public-card-skeleton-line public-card-skeleton-line-chip"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-title"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-handle"></span>
+            <span class="public-card-skeleton-line public-card-skeleton-line-copy"></span>
+          </div>
+          <div class="public-card-skeleton-actions">
+            <span class="public-card-skeleton-button public-card-skeleton-button-main"></span>
+            <span class="public-card-skeleton-button"></span>
+            <span class="public-card-skeleton-button"></span>
+          </div>
+        </section>
+
+        <section id="public-share-main-card" class="public-card hidden">
+          <div class="public-card-orb public-card-orb-primary" aria-hidden="true"></div>
+          <div class="public-card-orb public-card-orb-secondary" aria-hidden="true"></div>
+
+          <div class="public-card-head">
+            <div class="avatar-preview public-share-avatar public-card-avatar-wrap">
+              <img id="public-share-avatar-img" src="" alt="avatar">
+              <span id="public-share-avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <div class="public-card-copy">
+              <div class="public-card-chip-row">
+                <span class="public-card-chip" id="public-share-badge">NFC card</span>
+              </div>
+              <h1 id="public-share-display-name" class="public-card-title">My Plamut</h1>
+              <div class="public-card-username" id="public-share-username">@plamut</div>
+              <p class="public-card-description" id="public-share-bio"></p>
+            </div>
+          </div>
+
+          <div class="public-card-actions">
+            <button class="button button-primary public-card-open-btn" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn" aria-label="Copy link" title="Copy link">⧉</button>
+            <button class="button button-ghost public-card-icon-btn" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn" aria-label="Show QR" title="Show QR">⌁</button>
+          </div>
+
+          <input id="public-share-link-input" class="input hidden" readonly>
+
+          <div class="public-share-qr hidden" id="public-share-qr-box">
+            <img id="public-share-qr-image" alt="QR code">
+          </div>
+        </section>
+
+        <section id="public-share-error-card" class="public-card public-share-feedback hidden">
+          <div class="public-share-state-icon">⚠️</div>
+          <h2 id="public-share-error-title">Library not found</h2>
+          <p id="public-share-error-text">Please try another Plamut share link.</p>
+        </section>
+
+        <section class="public-owner-panel hidden" id="public-share-owner-controls">
+          <div class="profile-section-heading public-owner-panel-heading">
+            <h4 id="public-share-owner-controls-title">Manage NFC card</h4>
+            <p class="small" id="public-share-owner-controls-hint">Control your public link, QR and NFC tools.</p>
+          </div>
+
+          <div class="public-owner-panel-link-row">
+            <label class="small" for="owner-share-link-input" id="public-share-link-label">Public link</label>
+            <div class="public-owner-panel-link-wrap">
+              <input id="owner-share-link-input" class="input" readonly>
+            </div>
+          </div>
+
+          <label class="profile-checkbox">
+            <input type="checkbox" id="share-public-enabled-toggle">
+            <span id="share-public-enabled-label">Public access enabled</span>
+          </label>
+
+          <label for="share-card-title" id="share-card-title-label">Card title</label>
+          <input id="share-card-title" class="input" maxlength="80">
+
+          <label for="share-card-bio" id="share-card-bio-label">Short bio</label>
+          <textarea id="share-card-bio" class="textarea" rows="4"></textarea>
+
+          <label for="share-library-mode" id="share-library-mode-label">Library mode</label>
+          <select id="share-library-mode" class="select">
+            <option value="preview" id="share-library-mode-preview">Preview</option>
+            <option value="full" id="share-library-mode-full">Full library</option>
+          </select>
+
+          <div class="public-owner-panel-actions">
+            <button class="button button-secondary" type="button" onclick="copyCurrentPublicShareLink()" id="owner-copy-link-btn">Copy link</button>
+            <button class="button button-secondary" type="button" onclick="togglePublicShareQr()" id="owner-show-qr-btn">Show QR</button>
+            <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfc()" id="owner-write-nfc-btn">Write to NFC</button>
+            <button class="button button-secondary" type="button" onclick="regeneratePublicShareToken()" id="owner-regenerate-token-btn">Regenerate token</button>
+          </div>
+
+          <div class="small hidden" id="share-nfc-support-note"></div>
+
+          <details class="iphone-help-card" id="iphone-help-card">
+            <summary id="iphone-help-summary">How to write NFC on iPhone?</summary>
+            <ol id="iphone-help-steps">
+              <li>Copy your public Plamut link.</li>
+              <li>Install an NFC writing app such as NFC Tools.</li>
+              <li>Open the app.</li>
+              <li>Choose writing a URL/link record.</li>
+              <li>Paste your public Plamut link.</li>
+              <li>Hold the NFC tag near your iPhone and write the data.</li>
+              <li>Test the tag by tapping it with your phone.</li>
+            </ol>
+          </details>
+
+          <div class="modal-actions">
+            <button class="button button-primary" type="button" onclick="savePublicShareSettings()" id="share-save-settings-btn">Save sharing settings</button>
+          </div>
+        </section>
+
+        <section id="public-share-library-section" class="public-library-section hidden">
+          <div class="profile-section-heading public-library-heading">
+            <h4 id="public-preview-title">Shared library</h4>
+            <p class="small" id="public-preview-hint">Browse this library in read-only mode.</p>
+          </div>
+          <div id="public-share-loading" class="public-share-state hidden">
+            <div class="public-share-state-skeleton public-share-state-skeleton-large"></div>
+            <div class="public-share-state-skeleton"></div>
+            <div class="public-share-state-skeleton public-share-state-skeleton-short"></div>
+            <div id="public-share-loading-text" class="public-share-loading-text">Loading shared library…</div>
+          </div>
+          <div id="public-share-empty" class="public-share-state hidden">
+            <div class="public-share-state-icon">📚</div>
+            <div id="public-share-empty-title">В этой библиотеке пока нет публичных материалов</div>
+            <div class="small" id="public-share-empty-text">Вернитесь позже — владелец может добавить новые книги, фильмы или сериалы.</div>
+          </div>
+          <div class="shelf public-preview-grid hidden" id="public-share-preview-grid"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="share-item-modal" class="modal hidden">
+      <div class="modal-box share-item-modal-box">
+        <button class="button button-ghost share-item-close" type="button" onclick="closeShareItemModal()">×</button>
+        <div class="share-item-layout">
+          <div class="share-item-cover-box" id="share-item-modal-cover"></div>
+          <div class="share-item-content">
+            <h3 id="share-item-modal-title">Title</h3>
+            <div class="muted hidden" id="share-item-modal-original"></div>
+            <div class="share-item-badges" id="share-item-modal-badges"></div>
+            <div class="share-item-meta-list" id="share-item-modal-meta"></div>
+            <div class="share-item-description hidden" id="share-item-modal-description"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="add-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="search-modal-title"></h3>
+        <div class="small" id="search-modal-subtitle"></div>
+
+        <input id="search-input" class="input" type="text" oninput="renderCategorySearchResults()">
+
+        <div id="search-results"></div>
+
+        <div class="modal-actions">
+          <button class="button button-secondary" onclick="openManualModal()" id="manual-add-btn"></button>
+          <button class="button button-ghost" onclick="closeAddModal()" id="close-search-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="manual-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3 id="manual-title"></h3>
+        <div class="small" id="manual-subtitle"></div>
+
+        <input id="manual-name" class="input" type="text">
+        <input id="manual-creator" class="input" type="text">
+        <input id="manual-cover" class="input" type="text">
+        <textarea id="manual-description" class="textarea"></textarea>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeManualModal()" id="manual-cancel-btn"></button>
+          <button class="button button-primary" onclick="saveManualItem()" id="manual-save-btn"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-box profile-box">
+        <h3 id="profile-title">Profile</h3>
+        <p class="small profile-subtitle" id="profile-subtitle">Manage your account settings, privacy, avatar and password.</p>
+
+        <div class="profile-layout">
+          <div class="profile-avatar-section">
+            <div class="profile-section-heading">
+              <h4 id="profile-avatar-title">Avatar</h4>
+              <p class="small" id="profile-avatar-hint">Upload a profile image so your account is easier to recognize.</p>
+            </div>
+
+            <div class="avatar-preview">
+              <img id="avatar-img" src="" alt="avatar">
+              <span id="avatar-fallback" class="avatar-fallback">P</span>
+            </div>
+
+            <input type="file" id="avatar-file" accept="image/*">
+
+            <button id="profile-upload-avatar-btn" class="button button-primary" onclick="uploadAvatar()">Upload avatar</button>
+            <button id="profile-remove-avatar-btn" class="button button-secondary" onclick="removeAvatar()">Remove avatar</button>
+          </div>
+
+          <div class="profile-info-section">
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-account-title">Account</h4>
+              </div>
+
+              <label id="profile-username-label" for="profile-username">Username</label>
+              <input id="profile-username" class="input">
+
+              <label id="profile-display-name-label" for="profile-display-name">Display name</label>
+              <input id="profile-display-name" class="input">
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-privacy-title">Privacy</h4>
+                <p class="small" id="profile-privacy-hint">Control whether other users can open your public library page.</p>
+              </div>
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-public">
+                <span id="profile-public-label">Public library</span>
+              </label>
+            </section>
+
+            <section class="profile-section-card">
+              <div class="profile-section-heading">
+                <h4 id="profile-security-title">Security</h4>
+                <p class="small" id="profile-security-hint">Change your password and save it securely for future sign-ins.</p>
+              </div>
+
+              <label id="profile-new-password-label" for="new-password">New password</label>
+              <input id="new-password" class="input" type="password">
+
+              <label id="profile-confirm-password-label" for="confirm-password">Confirm password</label>
+              <input id="confirm-password" class="input" type="password">
+
+              <label class="profile-checkbox">
+                <input type="checkbox" id="profile-show-password" onclick="togglePasswordVisibility()">
+                <span id="profile-show-password-label">Show password</span>
+              </label>
+
+              <button id="profile-change-password-btn" class="button button-secondary profile-password-btn" onclick="changePassword()">Change password</button>
+            </section>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="button button-ghost" onclick="closeProfileModal()" id="profile-close-btn">Close</button>
+          <button class="button button-secondary" onclick="logout()" id="profile-logout-btn">Logout</button>
+          <button class="button button-primary" onclick="saveProfile()" id="profile-save-btn">Save profile</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="share-modal" class="modal hidden">
+      <div class="modal-box share-modal-box">
+        <h3 id="share-modal-title">Share library</h3>
+        <p class="small" id="share-modal-subtitle">Create a public NFC-ready library link for your profile.</p>
+
+        <label class="profile-checkbox">
+          <input type="checkbox" id="share-modal-public-enabled">
+          <span id="share-modal-public-enabled-label">Public access enabled</span>
+        </label>
+
+        <label for="share-modal-card-title" id="share-modal-card-title-label">Card title</label>
+        <input id="share-modal-card-title" class="input" maxlength="80">
+
+        <label for="share-modal-card-bio" id="share-modal-card-bio-label">Short bio</label>
+        <textarea id="share-modal-card-bio" class="textarea" rows="4"></textarea>
+
+        <label for="share-modal-library-mode" id="share-modal-library-mode-label">Library mode</label>
+        <select id="share-modal-library-mode" class="select">
+          <option value="preview" id="share-modal-library-mode-preview">Preview</option>
+          <option value="full" id="share-modal-library-mode-full">Full library</option>
+        </select>
+
+        <label for="share-modal-link-input" id="share-modal-link-label">Public link</label>
+        <div class="public-share-link-actions">
+          <input id="share-modal-link-input" class="input" readonly>
+          <button class="button button-secondary" type="button" onclick="copyPublicShareLinkFromModal()" id="share-modal-copy-btn">Copy link</button>
+          <button class="button button-secondary" type="button" onclick="toggleShareModalQr()" id="share-modal-qr-btn">Show QR</button>
+          <button class="button button-secondary hidden" type="button" onclick="writePublicLinkToNfcFromModal()" id="share-modal-write-nfc-btn">Write to NFC</button>
+        </div>
+
+        <div class="public-share-qr hidden" id="share-modal-qr-box">
+          <img id="share-modal-qr-image" alt="QR code">
+        </div>
+
+        <div class="small hidden" id="share-modal-nfc-note"></div>
+
+        <details class="iphone-help-card" id="share-modal-iphone-help-card">
+          <summary id="share-modal-iphone-help-summary">How to write NFC on iPhone?</summary>
+          <ol id="share-modal-iphone-help-steps">
+            <li>Copy your public Plamut link.</li>
+            <li>Install an NFC writing app such as NFC Tools.</li>
+            <li>Open the app.</li>
+            <li>Choose writing a URL/link record.</li>
+            <li>Paste your public Plamut link.</li>
+            <li>Hold the NFC tag near your iPhone and write the data.</li>
+            <li>Test the tag by tapping it with your phone.</li>
+          </ol>
+        </details>
+
+        <div class="modal-actions wrap-actions">
+          <button class="button button-secondary" type="button" onclick="openCurrentPublicCard()" id="share-modal-open-btn">Open public card</button>
+          <button class="button button-secondary" type="button" onclick="regeneratePublicShareTokenFromModal()" id="share-modal-regenerate-btn">Regenerate token</button>
+          <button class="button button-ghost" type="button" onclick="closeShareModal()" id="share-modal-close-btn">Close</button>
+          <button class="button button-primary" type="button" onclick="savePublicShareSettingsFromModal()" id="share-modal-save-btn">Save sharing settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-modal" class="modal hidden">
+      <div class="modal-box status-modal-box">
+        <h3 id="status-modal-title"></h3>
+
+        <div class="modal-actions status-button-list" id="status-buttons"></div>
+
+        <div class="status-custom-box">
+          <label id="status-custom-label" for="custom-status-input">Custom status</label>
+          <div class="profile-inline-form">
+            <input id="custom-status-input" class="input" type="text">
+            <button id="status-add-custom-btn" class="button button-secondary" onclick="addCustomStatus()">Add status</button>
+          </div>
+        </div>
+
+        <div class="modal-actions status-footer-actions">
+          <button class="button button-danger" onclick="moveCurrentItemToBlacklist()" id="status-blacklist"></button>
+          <button class="button button-ghost" onclick="closeStatusModal()" id="status-cancel"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
+
+
+
+
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
@@ -352,7 +912,7 @@
     Object.assign(translations.en, {
       share: {
         modalTitle: "Share library",
-        modalSubtitle: "Create a public NFC-ready library link for your profile.",
+        modalSubtitle: "Create a public NFC business card that opens your profile and read-only library.",
         publicAccess: "Public access enabled",
         cardTitle: "Card title",
         shortBio: "Short bio",
@@ -368,11 +928,11 @@
         regenerateToken: "Regenerate token",
         openPublicCard: "Open public card",
         saveSettings: "Save sharing settings",
-        publicLibraryTitle: "Public library / NFC card",
-        publicLibraryHint: "A public read-only library page you can share with NFC, QR and direct link.",
-        ownerControlsTitle: "Manage NFC card",
-        ownerControlsHint: "Control your public link, QR and optional NFC writing tools.",
-        ownerNote: "This is your own NFC card. Visitors can only view it in read-only mode.",
+        publicLibraryTitle: "Public library / NFC business card",
+        publicLibraryHint: "A public read-only library page you can open from NFC, QR, or a direct profile link.",
+        ownerControlsTitle: "Manage NFC business card",
+        ownerControlsHint: "This NFC flow opens your public profile. If you ever need an access key, validate a server-issued token instead of trusting a URL alone.",
+        ownerNote: "This is your own NFC business card. Visitors can only browse it in read-only mode.",
         previewTitle: "Library preview",
         previewHint: "A read-only preview from this public library.",
         openLibrary: "Open library",
@@ -388,23 +948,23 @@
         settingsSaved: "Sharing settings saved.",
         nfcNotSupported: "Web NFC is not available in this browser. Use the link, QR code or iPhone instructions instead.",
         nfcReady: "Web NFC is available in this browser.",
-        nfcPrompt: "Hold your NFC tag near the device to write the public Plamut link.",
-        nfcSuccess: "Public Plamut link written to NFC tag.",
+        nfcPrompt: "Hold your NFC tag near the device to write the public Plamut profile link.",
+        nfcSuccess: "Public Plamut profile link written to the NFC tag.",
         nfcError: "Could not write the NFC tag",
         iphoneHelp: "How to write NFC on iPhone?",
         close: "Close",
         linkCopied: "Public link copied:",
         savePromptAfterLogin: "After login, return here and tap Save to mine again.",
-        qrAlt: "QR code for public Plamut card",
+        qrAlt: "QR code for public Plamut business card",
         back: "← Back",
-        ownerOnlyAction: "Only the owner can manage this NFC card."
+        ownerOnlyAction: "Only the owner can manage this NFC business card."
       }
     });
 
     Object.assign(translations.ru, {
       share: {
         modalTitle: "Поделиться библиотекой",
-        modalSubtitle: "Создайте публичную NFC-ready ссылку на свой профиль.",
+        modalSubtitle: "Создайте публичную NFC-визитку, которая открывает профиль и библиотеку только для чтения.",
         publicAccess: "Публичный доступ включён",
         cardTitle: "Заголовок карточки",
         shortBio: "Короткое описание",
@@ -420,11 +980,11 @@
         regenerateToken: "Регенерировать токен",
         openPublicCard: "Открыть публичную карточку",
         saveSettings: "Сохранить настройки шаринга",
-        publicLibraryTitle: "Публичная библиотека / NFC-карта",
-        publicLibraryHint: "Публичная read-only страница библиотеки для NFC, QR и прямой ссылки.",
-        ownerControlsTitle: "Управление NFC-картой",
-        ownerControlsHint: "Управляйте публичной ссылкой, QR и дополнительной записью на NFC.",
-        ownerNote: "Это ваша собственная NFC-карта. Для посетителей она доступна только в режиме просмотра.",
+        publicLibraryTitle: "Публичная библиотека / NFC-визитка",
+        publicLibraryHint: "Публичная read-only страница библиотеки, которую можно открыть через NFC, QR или прямую ссылку на профиль.",
+        ownerControlsTitle: "Управление NFC-визиткой",
+        ownerControlsHint: "Эта NFC-визитка открывает ваш публичный профиль. Если позже понадобится режим access key, его нужно делать через серверную проверку токена, а не доверять одному URL.",
+        ownerNote: "Это ваша собственная NFC-визитка. Для посетителей она доступна только в режиме просмотра.",
         previewTitle: "Превью библиотеки",
         previewHint: "Read-only превью этой публичной библиотеки.",
         openLibrary: "Открыть библиотеку",
@@ -440,16 +1000,16 @@
         settingsSaved: "Настройки шаринга сохранены.",
         nfcNotSupported: "Web NFC недоступен в этом браузере. Используйте ссылку, QR-код или инструкцию для iPhone.",
         nfcReady: "Web NFC доступен в этом браузере.",
-        nfcPrompt: "Поднесите NFC-метку к устройству, чтобы записать публичную ссылку Plamut.",
-        nfcSuccess: "Публичная ссылка Plamut записана на NFC-метку.",
+        nfcPrompt: "Поднесите NFC-метку к устройству, чтобы записать публичную ссылку на профиль Plamut.",
+        nfcSuccess: "Публичная ссылка на профиль Plamut записана на NFC-метку.",
         nfcError: "Не удалось записать NFC-метку",
         iphoneHelp: "Как записать NFC на iPhone?",
         close: "Закрыть",
         linkCopied: "Публичная ссылка скопирована:",
         savePromptAfterLogin: "После входа вернитесь сюда и снова нажмите «Сохранить к себе».",
-        qrAlt: "QR-код публичной карточки Plamut",
+        qrAlt: "QR-код публичной NFC-визитки Plamut",
         back: "← Назад",
-        ownerOnlyAction: "Управлять этой NFC-картой может только владелец."
+        ownerOnlyAction: "Управлять этой NFC-визиткой может только владелец."
       }
     });
 
@@ -462,7 +1022,7 @@
       notFound: "This public card is unavailable.",
       notFoundHint: "Please check the link and try again.",
       guestBadge: "Public library",
-      ownerBadge: "NFC card",
+      ownerBadge: "NFC business card",
       originalTitle: "Original title",
       rating: "Rating",
       year: "Year",
@@ -478,7 +1038,7 @@
       notFound: "Эта публичная визитка недоступна.",
       notFoundHint: "Проверьте ссылку и попробуйте ещё раз.",
       guestBadge: "Public library",
-      ownerBadge: "NFC card",
+      ownerBadge: "NFC-визитка",
       originalTitle: "Оригинальное название",
       rating: "Рейтинг",
       year: "Год",
@@ -495,6 +1055,7 @@
     let currentPublicProfileName = "Library";
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
+    let currentShelfSearchQuery = "";
     let currentOpenMenuItemId = null;
     let currentProfileData = null;
     let currentPublicProfile = null;
@@ -625,6 +1186,58 @@
 
     function normalizeSpaces(text){
       return String(text || "").replace(/\s+/g, " ").trim();
+    }
+
+    function normalizeComparisonText(text){
+      return normalizeSpaces(text)
+        .toLowerCase()
+        .replace(/ё/g, "е")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function normalizeQuery(query){
+      const text = normalizeSpaces(query);
+      return {
+        text,
+        comparison: normalizeComparisonText(text),
+        isbn: detectISBN(text),
+        hasCyrillic: hasCyrillic(text),
+        hasLatin: hasLatin(text)
+      };
+    }
+
+    function detectISBN(value){
+      const candidate = String(value || "").replace(/[^0-9Xx]/g, "").toUpperCase();
+      if(candidate.length === 10 && isValidIsbn10(candidate)) return candidate;
+      if(candidate.length === 13 && isValidIsbn13(candidate)) return candidate;
+      return "";
+    }
+
+    function isValidIsbn10(value){
+      if(!/^\d{9}[\dX]$/.test(value)) return false;
+      const sum = value.split("").reduce((acc, char, index) => {
+        const digit = char === "X" ? 10 : Number(char);
+        return acc + digit * (10 - index);
+      }, 0);
+      return sum % 11 === 0;
+    }
+
+    function isValidIsbn13(value){
+      if(!/^\d{13}$/.test(value)) return false;
+      const sum = value
+        .slice(0, 12)
+        .split("")
+        .reduce((acc, char, index) => acc + Number(char) * (index % 2 === 0 ? 1 : 3), 0);
+      const checksum = (10 - (sum % 10)) % 10;
+      return checksum === Number(value[12]);
+    }
+
+    function isOwnerControlAllowed(){
+      if(!isPublicView) return true;
+      alert(t().share.ownerOnlyAction);
+      return false;
     }
 
     function isShareEnabled(profile = {}){
@@ -784,6 +1397,23 @@
       renderShelf();
     }
 
+    function setShelfSearchQuery(value){
+      currentShelfSearchQuery = normalizeSpaces(value);
+      renderShelf();
+    }
+
+    function syncShelfSearchInput(){
+      const input = document.getElementById("shelf-search-input");
+      if(input){
+        input.value = currentShelfSearchQuery;
+      }
+    }
+
+    function resetShelfSearchQuery(){
+      currentShelfSearchQuery = "";
+      syncShelfSearchInput();
+    }
+
     async function renderStatusOptions(){
       const container = document.getElementById("status-buttons");
       if(!container) return;
@@ -859,6 +1489,7 @@
       document.getElementById("search-modal-title").textContent = t().modals.searchTitle;
       document.getElementById("search-modal-subtitle").textContent = t().modals.searchSubtitle;
       document.getElementById("search-input").placeholder = t().modals.searchPlaceholder;
+      document.getElementById("shelf-search-input").placeholder = t().modals.searchPlaceholder;
       document.getElementById("close-search-btn").textContent = t().buttons.close;
       document.getElementById("manual-add-btn").textContent = t().buttons.manualAdd;
 
@@ -1073,6 +1704,7 @@
 
     function goHome(){
       closePreferencesPanel();
+      resetShelfSearchQuery();
       if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
         showPublicLibraryCategoryView(currentPublicProfile);
         return;
@@ -1084,11 +1716,13 @@
 
     function backToCategory(){
       closePreferencesPanel();
+      syncShelfSearchInput();
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
     }
 
     function openAddModal(){
+      if(!isOwnerControlAllowed()) return;
       closePreferencesPanel();
       document.getElementById("add-modal").classList.remove("hidden");
       document.getElementById("search-input").value = "";
@@ -1102,6 +1736,7 @@
     }
 
     function openManualModal(){
+      if(!isOwnerControlAllowed()) return;
       document.getElementById("manual-modal").classList.remove("hidden");
       document.getElementById("manual-name").value = document.getElementById("search-input").value.trim();
       document.getElementById("manual-creator").value = "";
@@ -1194,6 +1829,7 @@
     }
 
     async function addCustomFolder(){
+      if(!isOwnerControlAllowed()) return;
       const value = normalizeSpaces(prompt(t().profile.customFolderLabel, ""));
       if(!value){
         return;
@@ -1248,9 +1884,12 @@
 
     function getFilteredItems(){
       const items = demoData[currentCategory] || [];
+      const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
       return items.filter((item) => {
         const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
-        return statusMatches;
+        const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
+        const searchMatches = !searchComparison || haystack.includes(searchComparison);
+        return statusMatches && searchMatches;
       });
     }
 
@@ -1308,15 +1947,20 @@
     }
 
     async function buildSearchQueries(query){
-      const clean = normalizeSpaces(query);
+      const meta = typeof query === "string" ? normalizeQuery(query) : (query || normalizeQuery(""));
+      const clean = meta.text || normalizeSpaces(query);
       const list = [];
+      if(meta.isbn){
+        list.push(meta.isbn);
+        return list;
+      }
       if(clean) list.push(clean);
 
       try {
-        if(hasCyrillic(clean)){
+        if(meta.hasCyrillic){
           const en = await translateTextToEnglish(clean);
           if(en && !list.includes(en)) list.push(en);
-        } else if(hasLatin(clean)){
+        } else if(meta.hasLatin){
           const ru = await translateTextToRussian(clean);
           if(ru && !list.includes(ru)) list.push(ru);
         }
@@ -1346,15 +1990,17 @@
     function splitDescriptionFields(description){
       return {
         description_ru: looksLikeRussian(description) ? description : "",
-        description_en: looksLikeEnglish(description) ? description : ""
+        description_en: looksLikeEnglish(description) ? description : "",
+        description_original: !looksLikeRussian(description) ? description : ""
       };
     }
 
     function pickBestDescription(item, lang){
       if(!item) return "";
       if(lang === "ru" && item.description_ru) return item.description_ru;
+      if(lang === "en" && item.description_original) return item.description_original;
       if(lang === "en" && item.description_en) return item.description_en;
-      return item.description || "";
+      return item.description || item.description_ru || item.description_original || item.description_en || "";
     }
 
     function buildCanonicalKey(category, source, rawId, title){
@@ -1369,10 +2015,212 @@
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
+    function getBookSourcePriority(source, queryMeta = {}){
+      const normalizedSource = String(source || "").toLowerCase();
+      if(queryMeta.hasCyrillic){
+        if(normalizedSource === "fantlab") return 32;
+        if(normalizedSource === "google") return 18;
+        if(normalizedSource === "openlibrary") return 10;
+      }
+      if(normalizedSource === "google") return 24;
+      if(normalizedSource === "openlibrary") return 14;
+      if(normalizedSource === "fantlab") return 12;
+      return 0;
+    }
+
+    function buildBookIdentityKey(item = {}){
+      if(item.isbn) return `isbn:${item.isbn}`;
+      const titleKey = normalizeComparisonText(item.title || "");
+      const authorKey = normalizeComparisonText(item.creator || "");
+      return `meta:${titleKey}::${authorKey}`;
+    }
+
+    function isBookResultUsable(item = {}){
+      const title = normalizeSpaces(item.title || "");
+      const creator = normalizeSpaces(item.creator || "");
+      const hasCover = Boolean(item.cover);
+      const hasDescription = Boolean(item.description_ru || item.description_original || item.description_en || item.description);
+      return Boolean(title) && (hasCover || hasDescription || creator || item.isbn);
+    }
+
+    function buildBookResultScore(item = {}, queryMeta = {}){
+      const titleKey = normalizeComparisonText(item.title || "");
+      const authorKey = normalizeComparisonText(item.creator || "");
+      const queryKey = queryMeta.comparison || "";
+      let score = getBookSourcePriority(item.source, queryMeta);
+
+      if(item.isbn && queryMeta.isbn && item.isbn === queryMeta.isbn) score += 240;
+      if(queryKey && titleKey === queryKey) score += 160;
+      else if(queryKey && titleKey.startsWith(queryKey)) score += 90;
+      else if(queryKey && titleKey.includes(queryKey)) score += 50;
+
+      if(queryKey && authorKey === queryKey) score += 120;
+      else if(queryKey && authorKey.includes(queryKey)) score += 70;
+
+      if(item.cover) score += 20;
+      if(item.description_ru) score += 18;
+      if(item.description_original || item.description_en) score += 14;
+      if(item.isbn) score += 12;
+
+      const filledFields = ["title", "creator", "cover", "description_ru", "description_original", "isbn"].filter((field) => Boolean(item[field])).length;
+      score += filledFields * 4;
+
+      if(!isBookResultUsable(item)) score -= 120;
+      return score;
+    }
+
+    function mergeBookResultPair(left = {}, right = {}, queryMeta = {}){
+      const candidates = [left, right].filter(Boolean);
+      const primary = candidates
+        .slice()
+        .sort((a, b) => buildBookResultScore(b, queryMeta) - buildBookResultScore(a, queryMeta))[0] || {};
+      const secondary = primary === left ? right : left;
+
+      const merged = {
+        ...secondary,
+        ...primary,
+        title: primary.title || secondary?.title || "",
+        creator: primary.creator || secondary?.creator || "",
+        cover: primary.cover || secondary?.cover || "",
+        isbn: primary.isbn || secondary?.isbn || "",
+        description_ru: primary.description_ru || secondary?.description_ru || "",
+        description_original: primary.description_original || secondary?.description_original || primary.description_en || secondary?.description_en || "",
+        description_en: primary.description_en || secondary?.description_en || primary.description_original || secondary?.description_original || "",
+        source_priority: Math.max(primary.source_priority || 0, secondary?.source_priority || 0)
+      };
+
+      merged.description = merged.description_ru || merged.description_original || merged.description_en || primary.description || secondary?.description || "";
+      merged.canonical_key = merged.canonical_key || buildCanonicalKey("Books", merged.source || "merged", merged.isbn || merged.work_key || buildBookIdentityKey(merged), merged.title);
+      return merged;
+    }
+
+    function mergeBookResults(results = [], queryMeta = {}){
+      const grouped = new Map();
+      results.filter(Boolean).forEach((item) => {
+        const key = buildBookIdentityKey(item);
+        if(!grouped.has(key)){
+          grouped.set(key, item);
+          return;
+        }
+        grouped.set(key, mergeBookResultPair(grouped.get(key), item, queryMeta));
+      });
+      return Array.from(grouped.values());
+    }
+
+    function dedupeBookResults(results = [], queryMeta = {}){
+      return mergeBookResults(results, queryMeta);
+    }
+
+    function rankBookResults(results = [], queryMeta = {}){
+      return results
+        .filter((item) => isBookResultUsable(item))
+        .sort((a, b) => buildBookResultScore(b, queryMeta) - buildBookResultScore(a, queryMeta));
+    }
+
+    function createBookResult({
+      title = "",
+      creator = "",
+      cover = "",
+      isbn = "",
+      description = "",
+      description_ru = "",
+      description_original = "",
+      description_en = "",
+      work_key = "",
+      canonical_key = "",
+      source = "",
+      queryMeta = {}
+    } = {}){
+      const safeTitle = normalizeSpaces(title);
+      const safeCreator = normalizeSpaces(creator);
+      const safeIsbn = detectISBN(isbn);
+      const original = normalizeSpaces(description_original || description_en || (description_ru ? "" : description));
+      const russian = normalizeSpaces(description_ru || (looksLikeRussian(description) ? description : ""));
+      const displayDescription = russian || original || normalizeSpaces(description);
+
+      return {
+        title: safeTitle,
+        category: "Books",
+        creator: safeCreator,
+        cover: cover || "",
+        isbn: safeIsbn,
+        description: displayDescription || "",
+        description_ru: russian || "",
+        description_original: original || "",
+        description_en: description_en || original || "",
+        work_key: work_key || "",
+        source: source || "",
+        source_priority: getBookSourcePriority(source, queryMeta),
+        canonical_key: canonical_key || buildCanonicalKey("Books", source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
+      };
+    }
+
+    function mapGoogleBooksVolumeToBookResult(book, queryMeta = {}){
+      const info = book?.volumeInfo || {};
+      const identifiers = Array.isArray(info.industryIdentifiers) ? info.industryIdentifiers : [];
+      const isbn = detectISBN(
+        identifiers.find((item) => /ISBN/i.test(item?.type || ""))?.identifier
+        || identifiers[0]?.identifier
+        || ""
+      );
+      const description = info.description || "";
+      const language = String(info.language || "").toLowerCase();
+      return createBookResult({
+        title: info.title || "",
+        creator: Array.isArray(info.authors) ? info.authors.join(", ") : "",
+        cover: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "",
+        isbn,
+        description,
+        description_ru: language.startsWith("ru") || looksLikeRussian(description) ? description : "",
+        description_original: language.startsWith("ru") ? "" : description,
+        description_en: language.startsWith("en") || looksLikeEnglish(description) ? description : "",
+        work_key: book.id ? `google:${book.id}` : "",
+        source: "google",
+        queryMeta
+      });
+    }
+
+    function mapOpenLibraryDocToBookResult(book, queryMeta = {}){
+      const isbn = detectISBN((Array.isArray(book.isbn) ? book.isbn[0] : book.isbn) || "");
+      return createBookResult({
+        title: book.title || "",
+        creator: Array.isArray(book.author_name) ? book.author_name.join(", ") : "",
+        cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
+        isbn,
+        work_key: book.key || "",
+        source: "openlibrary",
+        queryMeta
+      });
+    }
+
+    function mapFantLabWorkToBookResult(item, queryMeta = {}){
+      const title = item?.title || item?.name || item?.work_name || item?.work_title || "";
+      const creator = item?.author_name || item?.authors?.map?.((author) => author?.name).filter(Boolean).join(", ") || "";
+      const description = item?.description || item?.annotation || item?.work_description || "";
+      const cover = item?.cover || item?.cover_url || item?.image || "";
+      const workId = item?.work_id || item?.id || item?.workid || "";
+      const isbn = detectISBN(item?.isbn || item?.isbn13 || item?.edition_isbn || "");
+      return createBookResult({
+        title,
+        creator,
+        cover,
+        isbn,
+        description,
+        description_ru: looksLikeRussian(description) ? description : "",
+        description_original: looksLikeRussian(description) ? "" : description,
+        description_en: looksLikeEnglish(description) ? description : "",
+        work_key: workId ? `fantlab:${workId}` : "",
+        source: "fantlab",
+        queryMeta
+      });
+    }
+
     function dedupeSearchResults(items){
       const seen = new Set();
       return items.filter(item => {
-        const key = item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase());
+        const key = item.category === "Books"
+          ? buildBookIdentityKey(item)
+          : (item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase()));
         if(seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -1381,9 +2229,13 @@
 
     async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
       if(!workKey) return { text: "", language: "" };
+      const normalizedWorkKey = String(workKey || "").trim();
+      if(!normalizedWorkKey.startsWith("/works/") && !/^OL\d+W$/i.test(normalizedWorkKey)){
+        return { text: "", language: "" };
+      }
 
       try {
-        const cleanKey = workKey.startsWith("/works/") ? workKey : `/works/${workKey}`;
+        const cleanKey = normalizedWorkKey.startsWith("/works/") ? normalizedWorkKey : `/works/${normalizedWorkKey}`;
         const workUrl = "https://openlibrary.org" + cleanKey + ".json";
         const workData = await fetchJson(workUrl);
 
@@ -1458,9 +2310,12 @@
     async function fetchGoogleBooksDescription(title, author = "", preferredLang = currentLanguage){
       try {
         const targetLang = preferredLang === "ru" ? "ru" : "en";
+        const isbn = detectISBN(title);
 
         let query = "";
-        if(title && author){
+        if(isbn){
+          query = `isbn:${isbn}`;
+        } else if(title && author){
           query = `intitle:${title} inauthor:${author}`;
         } else if(title){
           query = `intitle:${title}`;
@@ -1527,16 +2382,95 @@
       }
     }
 
-    async function buildBookDescriptions(title, author, workKey){
+    async function searchFantLab(queryMeta, limit = 10){
+      if(!queryMeta?.text && !queryMeta?.isbn) return [];
+      const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
+      const endpointBuilders = [
+        (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
+        (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`,
+        (query) => `https://api.fantlab.ru/search/${encodeURIComponent(query)}`
+      ];
+
+      for(const query of queries){
+        for(const buildUrl of endpointBuilders){
+          try {
+            const data = await fetchJson(buildUrl(query));
+            const collections = [
+              data?.works,
+              data?.items,
+              data?.data?.works,
+              data?.data?.items,
+              data?.result?.works
+            ].filter(Array.isArray);
+            const results = collections.flat().map((item) => mapFantLabWorkToBookResult(item, queryMeta));
+            if(results.length){
+              return results.slice(0, limit);
+            }
+          } catch (error) {
+            console.error("FantLab search fallback:", error);
+          }
+        }
+      }
+
+      return [];
+    }
+
+    async function searchGoogleBooks(queryMeta, limit = 10){
+      try {
+        const queries = queryMeta.isbn ? [`isbn:${queryMeta.isbn}`] : await buildSearchQueries(queryMeta);
+        const results = [];
+        for(const query of queries){
+          const url =
+            "https://www.googleapis.com/books/v1/volumes?q=" +
+            encodeURIComponent(query) +
+            "&maxResults=" + encodeURIComponent(limit) +
+            "&printType=books" +
+            "&key=" + encodeURIComponent(GOOGLE_BOOKS_API_KEY);
+          const data = await fetchJson(url);
+          const items = Array.isArray(data.items) ? data.items : [];
+          results.push(...items.map((item) => mapGoogleBooksVolumeToBookResult(item, queryMeta)));
+        }
+        return results.slice(0, limit * Math.max(1, queries.length));
+      } catch (error) {
+        console.error("Google Books search error:", error);
+        return [];
+      }
+    }
+
+    async function searchOpenLibrary(queryMeta, limit = 10){
+      try {
+        const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
+        const results = [];
+        for(const query of queries){
+          const url = queryMeta.isbn
+            ? "https://openlibrary.org/search.json?isbn=" + encodeURIComponent(query) + "&limit=" + limit
+            : "https://openlibrary.org/search.json?q=" + encodeURIComponent(query) + "&limit=" + limit;
+          const data = await fetchJson(url);
+          const docs = Array.isArray(data.docs) ? data.docs : [];
+          results.push(...docs.map((item) => mapOpenLibraryDocToBookResult(item, queryMeta)));
+        }
+        return results.slice(0, limit * Math.max(1, queries.length));
+      } catch (error) {
+        console.error("Open Library search error:", error);
+        return [];
+      }
+    }
+
+    async function buildBookDescriptions(title, author, workKey, isbn = ""){
       let description = "";
       let description_ru = "";
+      let description_original = "";
       let description_en = "";
+      const normalizedIsbn = detectISBN(isbn);
 
       const olCurrent = await fetchOpenLibraryDescription(workKey, currentLanguage);
       if(olCurrent.text){
         description = olCurrent.text;
         if(olCurrent.language === "ru") description_ru = olCurrent.text;
-        if(olCurrent.language === "en") description_en = olCurrent.text;
+        if(olCurrent.language === "en") {
+          description_original = olCurrent.text;
+          description_en = olCurrent.text;
+        }
       }
 
       if(!description_ru){
@@ -1550,13 +2484,14 @@
       if(!description_en){
         const olEn = await fetchOpenLibraryDescription(workKey, "en");
         if(olEn.text && looksLikeEnglish(olEn.text)){
+          description_original = description_original || olEn.text;
           description_en = olEn.text;
           if(!description) description = olEn.text;
         }
       }
 
       if(!description_ru){
-        const googleRu = await fetchGoogleBooksDescription(title, author, "ru");
+        const googleRu = await fetchGoogleBooksDescription(normalizedIsbn || title, author, "ru");
         if(googleRu.text && looksLikeRussian(googleRu.text)){
           description_ru = googleRu.text;
           if(!description) description = googleRu.text;
@@ -1564,77 +2499,65 @@
       }
 
       if(!description_en){
-        const googleEn = await fetchGoogleBooksDescription(title, author, "en");
+        const googleEn = await fetchGoogleBooksDescription(normalizedIsbn || title, author, "en");
         if(googleEn.text && looksLikeEnglish(googleEn.text)){
+          description_original = description_original || googleEn.text;
           description_en = googleEn.text;
           if(!description) description = googleEn.text;
         }
       }
 
-      if(!description_ru && description_en){
-        const translatedRu = await translateTextToRussian(description_en);
-        if(translatedRu && looksLikeRussian(translatedRu)){
-          description_ru = translatedRu;
-        }
-      }
-
-      if(!description_en && description_ru){
-        const translatedEn = await translateTextToEnglish(description_ru);
-        if(translatedEn && looksLikeEnglish(translatedEn)){
-          description_en = translatedEn;
-        }
-      }
-
       if(!description){
-        description = description_ru || description_en || "";
+        description = description_ru || description_original || description_en || "";
       }
 
       return {
         description: description || "",
         description_ru: description_ru || "",
-        description_en: description_en || ""
+        description_original: description_original || description_en || "",
+        description_en: description_en || description_original || ""
       };
     }
 
     async function translateDescriptionFields(description){
       let description_ru = "";
       let description_en = "";
+      let description_original = "";
       if(looksLikeRussian(description)){
         description_ru = description;
         description_en = await translateTextToEnglish(description);
+        description_original = description_en || "";
       } else if(looksLikeEnglish(description)){
         description_en = description;
+        description_original = description;
         description_ru = await translateTextToRussian(description);
       }
       return {
         description: description || "",
         description_ru: description_ru || "",
-        description_en: description_en || ""
+        description_original: description_original || description_en || "",
+        description_en: description_en || description_original || ""
       };
     }
 
     async function searchBooksApi(query, limit = 10){
-      try {
-        const url = "https://openlibrary.org/search.json?q=" + encodeURIComponent(query) + "&limit=" + limit;
-        const data = await fetchJson(url);
-        const docs = Array.isArray(data.docs) ? data.docs : [];
+      const queryMeta = normalizeQuery(query);
+      if(!queryMeta.text && !queryMeta.isbn){
+        return [];
+      }
 
-        return docs.map(book => {
-          const workKey = book.key || "";
-          const title = book.title || "Untitled";
-          const creator = (book.author_name || []).join(", ");
-          return {
-            title,
-            category: "Books",
-            creator,
-            cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
-            description: "",
-            description_ru: "",
-            description_en: "",
-            work_key: workKey,
-            canonical_key: buildCanonicalKey("Books", "openlibrary", workKey || title.toLowerCase(), title)
-          };
-        });
+      try {
+        const fantlab = queryMeta.hasCyrillic ? await searchFantLab(queryMeta, limit) : [];
+        const google = await searchGoogleBooks(queryMeta, limit);
+        const openLibrary = await searchOpenLibrary(queryMeta, limit);
+
+        const merged = mergeBookResults([
+          ...fantlab,
+          ...google,
+          ...openLibrary
+        ], queryMeta);
+
+        return rankBookResults(dedupeBookResults(merged, queryMeta), queryMeta).slice(0, limit);
       } catch (e) {
         console.error("Books search error:", e);
         return [];
@@ -1805,6 +2728,10 @@
     }
 
     async function searchByCategory(category, query, limit = 10){
+      if(category === "Books"){
+        return await searchBooksApi(query, limit);
+      }
+
       const searchQueries = await buildSearchQueries(query);
       let combined = [];
 
@@ -1873,7 +2800,8 @@
       workKey = "",
       canonicalKey = "",
       description_ru = "",
-      description_en = ""
+      description_en = "",
+      description_original = ""
     ){
       const user = await getCurrentUser();
 
@@ -1888,6 +2816,7 @@
         title.trim().toLowerCase();
 
       const autoLang = splitDescriptionFields(description);
+      const originalDescription = description_original || description_en || autoLang.description_original || "";
 
       const insertData = {
         user_id: user.id,
@@ -1900,7 +2829,7 @@
         work_key: workKey || "",
         canonical_key: finalCanonicalKey,
         description_ru: description_ru || autoLang.description_ru || "",
-        description_en: description_en || autoLang.description_en || ""
+        description_en: originalDescription || autoLang.description_en || ""
       };
 
       const { error } = await supabaseClient
@@ -1926,8 +2855,10 @@
       work_key = "",
       canonical_key = "",
       folder = "",
+      isbn = "",
       description_ru = "",
-      description_en = ""
+      description_en = "",
+      description_original = ""
     }){
       return {
         id: -Date.now() - Math.floor(Math.random() * 1000),
@@ -1937,8 +2868,10 @@
         cover: cover || "",
         description: description || "",
         description_ru: description_ru || "",
+        description_original: description_original || description_en || "",
         description_en: description_en || "",
         creator: creator || "",
+        isbn: isbn || "",
         work_key: work_key || "",
         canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase(),
         folder: folder || ""
@@ -1995,6 +2928,7 @@
     }
 
     async function saveItemFolder(){
+      if(!isOwnerControlAllowed()) return;
       const item = getItemById(currentCategory, currentOpenItemId);
       const select = document.getElementById("details-folder-select");
       if(!item || !select){
@@ -2172,6 +3106,7 @@
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
+          description_original: item.description_original || item.description_en || "",
           description_en: item.description_en || "",
           creator: item.creator || "",
           work_key: item.work_key || "",
@@ -2196,6 +3131,13 @@
     }
 
     function toggleCardMenu(event, id){
+      if(isPublicView){
+        if(event){
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       if(event){
         event.preventDefault();
         event.stopPropagation();
@@ -2220,6 +3162,7 @@
     }
 
     async function openFolderPickerById(id){
+      if(!isOwnerControlAllowed()) return;
       closeCardMenu();
       await openCardById(id);
       const folderSelect = document.getElementById("details-folder-select");
@@ -2234,14 +3177,19 @@
 
       closeCardMenu();
       shelf.innerHTML = "";
+      syncShelfSearchInput();
 
       const filterToolbar = document.getElementById("filter-toolbar");
+      const statusFilterWrap = document.getElementById("status-filter-wrap");
       if(filterToolbar){
-        if(currentCategory === "Blacklist" || isPublicView){
+        if(currentCategory === "Blacklist"){
           filterToolbar.classList.add("hidden");
         } else {
           filterToolbar.classList.remove("hidden");
         }
+      }
+      if(statusFilterWrap){
+        statusFilterWrap.classList.toggle("hidden", isPublicView);
       }
 
       const items = getFilteredItems();
@@ -2340,6 +3288,7 @@
       closePreferencesPanel();
       isPublicView = false;
       currentCategory = name;
+      resetShelfSearchQuery();
 
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
@@ -2440,6 +3389,7 @@
     }
 
     async function addCategorySearchResult(index){
+      if(!isOwnerControlAllowed()) return;
       const item = currentSearchResults[index];
       if(!item) return;
       await addSearchResultToLibrary(item);
@@ -2448,6 +3398,7 @@
     }
 
     async function addSearchResultToLibrary(item){
+      if(!isOwnerControlAllowed()) return;
       if(!item) return;
 
       const targetCategory = item.category;
@@ -2471,18 +3422,21 @@
 
       let finalDescription = item.description || "";
       let finalDescriptionRu = item.description_ru || "";
+      let finalDescriptionOriginal = item.description_original || item.description_en || "";
       let finalDescriptionEn = item.description_en || "";
 
       if(targetCategory === "Books"){
-        const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "");
+        const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "", item.isbn || "");
         finalDescription = built.description || "";
         finalDescriptionRu = built.description_ru || "";
-        finalDescriptionEn = built.description_en || "";
+        finalDescriptionOriginal = built.description_original || built.description_en || "";
+        finalDescriptionEn = built.description_en || built.description_original || "";
       } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
         const translated = await translateDescriptionFields(finalDescription);
         finalDescription = translated.description || finalDescription;
         finalDescriptionRu = finalDescriptionRu || translated.description_ru || "";
-        finalDescriptionEn = finalDescriptionEn || translated.description_en || "";
+        finalDescriptionOriginal = finalDescriptionOriginal || translated.description_original || translated.description_en || "";
+        finalDescriptionEn = finalDescriptionEn || translated.description_en || translated.description_original || "";
       }
 
       const saved = await saveItemToSupabase(
@@ -2495,7 +3449,8 @@
         item.work_key || "",
         item.canonical_key || "",
         finalDescriptionRu || "",
-        finalDescriptionEn || ""
+        finalDescriptionEn || "",
+        finalDescriptionOriginal || ""
       );
 
       if(!saved) return;
@@ -2507,9 +3462,11 @@
         cover: item.cover || "",
         description: finalDescription || "",
         creator: item.creator || "",
+        isbn: item.isbn || "",
         work_key: item.work_key || "",
         canonical_key: item.canonical_key || "",
         description_ru: finalDescriptionRu || "",
+        description_original: finalDescriptionOriginal || finalDescriptionEn || "",
         description_en: finalDescriptionEn || ""
       }));
 
@@ -2517,6 +3474,7 @@
     }
 
     async function saveManualItem(){
+      if(!isOwnerControlAllowed()) return;
       const title = document.getElementById("manual-name").value.trim();
       const creator = document.getElementById("manual-creator").value.trim();
       const cover = document.getElementById("manual-cover").value.trim();
@@ -2553,7 +3511,8 @@
         "",
         canonicalKey,
         translated.description_ru,
-        translated.description_en
+        translated.description_en,
+        translated.description_original
       );
 
       if(!saved) return;
@@ -2565,8 +3524,10 @@
         cover: cover,
         description: description,
         creator: creator,
+        isbn: "",
         canonical_key: canonicalKey,
         description_ru: translated.description_ru,
+        description_original: translated.description_original || translated.description_en,
         description_en: translated.description_en
       }));
 
@@ -2576,6 +3537,7 @@
     }
 
     function changeStatusById(id){
+      if(!isOwnerControlAllowed()) return;
       closeCardMenu();
       const item = getItemById(currentCategory, id);
       if(!item) return;
@@ -2586,6 +3548,7 @@
     }
 
     function changeStatusFromDetails(){
+      if(!isOwnerControlAllowed()) return;
       const item = getItemById(currentCategory, currentOpenItemId);
       if(!item){
         alert(t().labels.itemNotFound);
@@ -2597,6 +3560,7 @@
     }
 
     async function setStatus(status){
+      if(!isOwnerControlAllowed()) return;
       const item = getItemById(currentCategory, currentStatusItemId);
       if(!item) return;
 
@@ -2667,6 +3631,7 @@
     }
 
     async function saveCanonicalKey(){
+      if(!isOwnerControlAllowed()) return;
       const keyInput = document.getElementById("canonical-key-input");
       if(!keyInput) return;
 
@@ -2708,11 +3673,12 @@
       let changed = false;
 
       if(currentCategory === "Books"){
-        if(!item.description_ru || !item.description_en || !item.description){
+        if(!item.description_ru || !item.description_original || !item.description){
           const descriptions = await buildBookDescriptions(
             item.title || "",
             item.creator || "",
-            item.work_key || ""
+            item.work_key || "",
+            item.isbn || ""
           );
 
           if(descriptions.description && descriptions.description !== item.description){
@@ -2721,6 +3687,10 @@
           }
           if(descriptions.description_ru && descriptions.description_ru !== item.description_ru){
             item.description_ru = descriptions.description_ru;
+            changed = true;
+          }
+          if(descriptions.description_original && descriptions.description_original !== item.description_original){
+            item.description_original = descriptions.description_original;
             changed = true;
           }
           if(descriptions.description_en && descriptions.description_en !== item.description_en){
@@ -3580,11 +4550,12 @@ function getDefaultPublicCategory(){
   return orderedCategories.find((category) => (demoData[category] || []).length > 0) || "Books";
 }
 
-function showPublicLibraryCategoryView(profile = {}){
-  isPublicView = true;
-  currentPublicProfile = profile;
-  currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
-  currentCategory = getDefaultPublicCategory();
+    function showPublicLibraryCategoryView(profile = {}){
+      isPublicView = true;
+      currentPublicProfile = profile;
+      currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+      currentCategory = getDefaultPublicCategory();
+      resetShelfSearchQuery();
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
@@ -3867,7 +4838,7 @@ function openShareItemModal(item = {}){
   }
 
   if(description){
-    const finalDescription = item.description || item.description_ru || item.description_en || "";
+      const finalDescription = item.description || item.description_ru || item.description_original || item.description_en || "";
     description.textContent = finalDescription;
     description.classList.toggle("hidden", !finalDescription);
   }
@@ -4050,6 +5021,7 @@ async function changePassword(){
       }
 
       currentCategory = name;
+      resetShelfSearchQuery();
 
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
