@@ -188,6 +188,8 @@
         </div>
       </div>
 
+      <div id="folder-rail" class="folder-rail hidden"></div>
+
       <div class="shelf-shell">
         <div class="shelf" id="shelf"></div>
       </div>
@@ -615,6 +617,67 @@
       <span class="global-add-fab-icon">＋</span>
       <span id="global-add-fab-label">Добавить</span>
     </button>
+
+    <div id="mobile-sheet-root" class="mobile-sheet-root">
+      <div id="share-sheet" class="sheet-layer hidden" onclick="closeShareSheetOnBackdrop(event)">
+        <div class="sheet-backdrop"></div>
+        <div class="mobile-sheet share-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="share-sheet-title">
+          <div class="sheet-handle" aria-hidden="true"></div>
+          <div class="sheet-header">
+            <div>
+              <h3 id="share-sheet-title">Поделиться библиотекой</h3>
+              <p id="share-sheet-subtitle" class="small">Быстрые действия для публичной карточки.</p>
+            </div>
+            <button class="sheet-close-btn" type="button" onclick="closeShareSheet()" aria-label="Close">×</button>
+          </div>
+          <div class="sheet-actions-grid">
+            <button id="share-sheet-copy-btn" class="button button-secondary sheet-action-btn" type="button" onclick="copyPublicShareLinkFromSheet()">Скопировать ссылку</button>
+            <button id="share-sheet-qr-btn" class="button button-secondary sheet-action-btn" type="button" onclick="toggleShareSheetQr()">Показать QR</button>
+            <button id="share-sheet-open-btn" class="button button-primary sheet-action-btn" type="button" onclick="openCurrentPublicCardFromSheet()">Открыть публичную карточку</button>
+          </div>
+          <div id="share-sheet-qr-box" class="public-share-qr compact-qr-box hidden">
+            <img id="share-sheet-qr-image" alt="QR code">
+          </div>
+          <button id="share-sheet-cancel-btn" class="button button-ghost sheet-cancel-btn" type="button" onclick="closeShareSheet()">Отмена</button>
+        </div>
+      </div>
+
+      <div id="folder-manager-sheet" class="sheet-layer hidden" onclick="closeFolderManagerSheetOnBackdrop(event)">
+        <div class="sheet-backdrop"></div>
+        <div class="mobile-sheet folder-manager-panel" role="dialog" aria-modal="true" aria-labelledby="folder-manager-title">
+          <div class="sheet-handle" aria-hidden="true"></div>
+          <div class="sheet-header">
+            <div>
+              <h3 id="folder-manager-title">Папки</h3>
+              <p id="folder-manager-subtitle" class="small">Создавайте, переименовывайте и удаляйте папки внутри категории.</p>
+            </div>
+            <button class="sheet-close-btn" type="button" onclick="closeFolderManagerSheet()" aria-label="Close">×</button>
+          </div>
+          <div class="folder-create-form">
+            <input id="folder-manager-input" class="input" type="text" maxlength="60" placeholder="Новая папка">
+            <button id="folder-manager-create-btn" class="button button-primary" type="button" onclick="createFolderFromSheet()">Создать папку</button>
+          </div>
+          <div id="folder-manager-list" class="folder-manager-list"></div>
+          <button id="folder-manager-cancel-btn" class="button button-ghost sheet-cancel-btn" type="button" onclick="closeFolderManagerSheet()">Отмена</button>
+        </div>
+      </div>
+
+      <div id="item-actions-sheet" class="sheet-layer hidden" onclick="closeItemActionsSheetOnBackdrop(event)">
+        <div class="sheet-backdrop"></div>
+        <div class="mobile-sheet item-actions-panel" role="dialog" aria-modal="true" aria-labelledby="item-actions-title">
+          <div class="sheet-handle" aria-hidden="true"></div>
+          <div class="sheet-header">
+            <div>
+              <h3 id="item-actions-title">Действия</h3>
+              <p id="item-actions-subtitle" class="small"></p>
+            </div>
+            <button class="sheet-close-btn" type="button" onclick="closeItemActionsSheet()" aria-label="Close">×</button>
+          </div>
+          <div id="item-actions-list" class="sheet-action-list"></div>
+          <button id="item-actions-cancel-btn" class="button button-ghost sheet-cancel-btn" type="button" onclick="closeItemActionsSheet()">Отмена</button>
+        </div>
+      </div>
+    </div>
 
   <script src="/script.js"></script>
 </body>
