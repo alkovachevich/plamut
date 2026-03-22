@@ -1587,54 +1587,6 @@ body.header-compact .app-header {
   justify-content: flex-end;
 }
 
-.home-overview-minimal {
-  min-height: min(68vh, 620px);
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.home-overview-copy-minimal {
-  max-width: 620px;
-  margin: 0 auto;
-  justify-items: center;
-}
-
-.home-overview-copy-minimal .subtitle {
-  margin-bottom: 0;
-}
-
-.home-overview-actions-minimal {
-  justify-content: center;
-  width: 100%;
-}
-
-.home-overview-actions-minimal .header-panel-wrap {
-  display: inline-flex;
-}
-
-.home-section-links {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  width: 100%;
-  margin-top: 8px;
-}
-
-.home-section-link {
-  min-width: 138px;
-  border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
-}
-
-.home-section-link:hover,
-.home-section-link:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-strong) 66%);
-  background: color-mix(in srgb, var(--surface-hover) 82%, transparent 18%);
-}
-
 .home-shortcuts-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
