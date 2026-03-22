@@ -92,8 +92,23 @@
           <div class="subtitle" id="home-subtitle"></div>
 
           <div class="hero-actions">
+            <button id="home-add-btn" class="button button-primary home-add-btn" onclick="toggleHomeAddPanel()" type="button">Добавить</button>
             <button id="share-library-btn" class="button button-primary share-library-btn" onclick="shareLibrary()">Share Library</button>
           </div>
+        </div>
+      </section>
+
+      <section id="home-add-panel" class="home-add-panel hidden" aria-label="Quick add">
+        <div class="home-add-panel-copy">
+          <div class="section-title" id="home-add-panel-title">Быстрое добавление</div>
+          <div class="section-note" id="home-add-panel-note">Выберите категорию и сразу откройте добавление.</div>
+        </div>
+        <div class="home-add-grid">
+          <button class="button button-secondary" type="button" onclick="startQuickAdd('Books')" id="quick-add-books">📚 Книги</button>
+          <button class="button button-secondary" type="button" onclick="startQuickAdd('Movies')" id="quick-add-movies">🎬 Фильмы</button>
+          <button class="button button-secondary" type="button" onclick="startQuickAdd('Series')" id="quick-add-series">📺 Сериалы</button>
+          <button class="button button-secondary" type="button" onclick="startQuickAdd('Anime')" id="quick-add-anime">🍥 Аниме</button>
+          <button class="button button-secondary" type="button" onclick="startQuickAdd('Manga')" id="quick-add-manga">📖 Манга</button>
         </div>
       </section>
 
@@ -262,11 +277,14 @@
 
           <div class="public-card-actions">
             <button class="button button-primary public-card-open-btn" type="button" onclick="openSharedLibrary()" id="public-share-open-library-btn">Open library</button>
+            <button class="button button-secondary public-card-save-btn" type="button" onclick="saveCurrentLibraryToCollection()" id="public-share-save-btn">Save to my library</button>
             <button class="button button-ghost public-card-icon-btn" type="button" onclick="copyCurrentPublicShareLink()" id="public-share-copy-btn" aria-label="Copy link" title="Copy link">⧉</button>
             <button class="button button-ghost public-card-icon-btn" type="button" onclick="togglePublicShareQr()" id="public-share-qr-btn" aria-label="Show QR" title="Show QR">⌁</button>
           </div>
 
           <input id="public-share-link-input" class="input hidden" readonly>
+
+          <div id="public-share-library-meta" class="public-card-meta hidden"></div>
 
           <div class="public-share-qr hidden" id="public-share-qr-box">
             <img id="public-share-qr-image" alt="QR code">
