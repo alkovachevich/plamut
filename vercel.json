@@ -7,6 +7,10 @@
     {
       "source": "/share/:token",
       "destination": "/"
+    },
+    {
+      "source": "/nfc/:token",
+      "destination": "/"
     }
   ]
 }
