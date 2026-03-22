@@ -1,3 +1,2827 @@
+
+```
+
+## style.css
+
+```css
+:root {
+  color-scheme: dark;
+  --bg: #09111f;
+  --bg-elevated: rgba(11, 18, 31, 0.44);
+  --panel: rgba(18, 28, 47, 0.92);
+  --panel-strong: #15213a;
+  --panel-muted: #0f1828;
+  --surface: #1a2640;
+  --surface-hover: #223151;
+  --surface-soft: rgba(25, 38, 64, 0.76);
+  --surface-active: #2b3e68;
+  --border: rgba(141, 168, 215, 0.18);
+  --border-strong: rgba(144, 175, 231, 0.3);
+  --text: #f5f8ff;
+  --text-muted: #9fb0cf;
+  --text-soft: #7f90ae;
+  --accent: #74a7ff;
+  --accent-strong: #4a8dff;
+  --accent-contrast: #081120;
+  --danger: #ff6f7d;
+  --danger-soft: rgba(255, 111, 125, 0.18);
+  --success: #73d7a5;
+  --shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.24);
+  --shadow-medium: 0 22px 48px rgba(0, 0, 0, 0.28);
+  --shadow-strong: 0 28px 70px rgba(3, 8, 18, 0.45);
+  --header-border: rgba(163, 190, 240, 0.16);
+  --header-shadow: 0 16px 42px rgba(2, 8, 18, 0.22);
+  --header-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --header-backdrop: blur(22px) saturate(140%);
+  --header-padding-y: 12px;
+  --header-padding-x: 16px;
+  --header-gap: 18px;
+  --radius-xl: 28px;
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --transition: 180ms ease;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f5fb;
+  --bg-elevated: rgba(255, 255, 255, 0.68);
+  --panel: rgba(255, 255, 255, 0.95);
+  --panel-strong: #ffffff;
+  --panel-muted: #eef3fb;
+  --surface: #edf3ff;
+  --surface-hover: #dce9ff;
+  --surface-soft: rgba(238, 243, 251, 0.92);
+  --surface-active: #d2e2ff;
+  --border: rgba(71, 93, 137, 0.14);
+  --border-strong: rgba(74, 109, 182, 0.26);
+  --text: #132238;
+  --text-muted: #55657f;
+  --text-soft: #74839b;
+  --accent: #2e6ff3;
+  --accent-strong: #1f59cf;
+  --accent-contrast: #ffffff;
+  --danger: #cc4055;
+  --danger-soft: rgba(204, 64, 85, 0.14);
+  --success: #268a5d;
+  --shadow-soft: 0 16px 32px rgba(67, 84, 120, 0.08);
+  --shadow-medium: 0 24px 48px rgba(67, 84, 120, 0.12);
+  --shadow-strong: 0 30px 60px rgba(67, 84, 120, 0.18);
+  --header-border: rgba(77, 109, 177, 0.14);
+  --header-shadow: 0 18px 36px rgba(67, 84, 120, 0.1);
+  --header-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.54);
+}
+
+* { box-sizing: border-box; }
+html { font-size: 16px; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, Arial, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(116, 167, 255, 0.14), transparent 24%),
+    radial-gradient(circle at top right, rgba(98, 89, 208, 0.14), transparent 22%),
+    linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 92%, #000 8%) 100%);
+}
+
+button, input, select, textarea { font: inherit; }
+a { color: inherit; }
+h1, h2, h3, h4, p { margin-top: 0; }
+.hidden { display: none !important; }
+
+.page-shell {
+  width: min(1240px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 18px 0 48px;
+}
+
+.app-header,
+.panel-section,
+.screen-panel,
+.auth-card,
+.modal-box,
+.details-panel,
+.details-cover,
+.media-card,
+.card,
+.search-item,
+.profile-section-card,
+.preferences-panel,
+.shelf-shell {
+  backdrop-filter: blur(18px);
+}
+
+.app-header {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--header-gap);
+  margin-bottom: 22px;
+  padding: var(--header-padding-y) var(--header-padding-x);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 92%, transparent 8%) 0%, color-mix(in srgb, var(--panel-muted) 46%, transparent 54%) 100%);
+  border: 1px solid var(--header-border);
+  border-radius: 24px;
+  box-shadow: var(--header-highlight), var(--header-shadow);
+  backdrop-filter: var(--header-backdrop);
+  transition: padding var(--transition), gap var(--transition), border-radius var(--transition), transform var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+body.header-compact .app-header {
+  --header-padding-y: 8px;
+  --header-padding-x: 14px;
+  --header-gap: 14px;
+  border-radius: 20px;
+  box-shadow: var(--header-highlight), 0 12px 28px rgba(2, 8, 18, 0.18);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 88%, transparent 12%) 0%, color-mix(in srgb, var(--panel-muted) 34%, transparent 66%) 100%);
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #6eabff 0%, #7f61ff 100%);
+  box-shadow: 0 16px 30px rgba(70, 117, 255, 0.3);
+  transition: width var(--transition), height var(--transition), border-radius var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+body.header-compact .brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 14px;
+  box-shadow: 0 10px 20px rgba(70, 117, 255, 0.24);
+}
+
+.brand-title { font-size: 1.1rem; font-weight: 700; }
+.brand-subtitle { color: var(--text-soft); font-size: 0.82rem; }
+
+.header-actions,
+.header-user-actions,
+.topbar,
+.toolbar-row,
+.modal-actions,
+.hero-actions,
+.auth-actions,
+.profile-inline-form,
+.folder-assignment-row,
+.details-actions,
+.option-group,
+.public-category-tabs,
+.toolbar-primary,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.header-actions { justify-content: flex-end; }
+.header-panel-wrap { position: relative; }
+.header-control-btn { min-width: 90px; justify-content: center; }
+.header-control-icon { font-size: 1rem; }
+
+.preferences-panel {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(320px, calc(100vw - 32px));
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  box-shadow: var(--shadow-strong);
+}
+
+.preferences-panel-header { margin-bottom: 14px; }
+.preferences-title { margin: 0; font-size: 1rem; }
+.preferences-section + .preferences-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.preferences-section-title {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.compact-option-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.theme-option-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.option-button { justify-content: center; }
+.option-button.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface) 82%);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-strong) 58%);
+  color: var(--text);
+}
+
+.profile-trigger {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, transparent 10%) 0%, var(--panel-muted) 100%);
+  box-shadow: var(--shadow-soft);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+body.header-compact .profile-trigger {
+  width: 38px;
+  height: 38px;
+}
+
+.profile-trigger:hover,
+.profile-trigger:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-strong) 62%);
+  box-shadow: var(--shadow-medium);
+  outline: none;
+}
+
+.profile-trigger-fallback,
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-weight: 700;
+  color: var(--accent-contrast);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 78%, #fff 22%) 0%, color-mix(in srgb, var(--accent-strong) 88%, #2f3d6c 12%) 100%);
+}
+
+.profile-trigger-image,
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.button,
+.select,
+.input,
+.textarea {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  transition: border-color var(--transition), background var(--transition), transform var(--transition), box-shadow var(--transition), color var(--transition);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 16px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.button:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.button:active { transform: translateY(0); background: var(--surface-active); }
+.button:focus-visible,
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.media-cover-button:focus-visible,
+.media-menu-btn:focus-visible,
+.category-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent 74%);
+}
+.button-primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, #fff 18%) 0%, var(--accent-strong) 100%);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--accent-strong) 28%, transparent 72%);
+}
+.button-primary:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 74%, #fff 26%) 0%, color-mix(in srgb, var(--accent-strong) 92%, #000 8%) 100%); }
+.button-secondary { background: color-mix(in srgb, var(--surface) 88%, var(--panel-strong) 12%); }
+.button-ghost { background: transparent; box-shadow: none; }
+.button-danger {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border) 68%);
+  color: var(--danger);
+}
+.button-danger:hover { background: color-mix(in srgb, var(--danger-soft) 80%, var(--surface) 20%); }
+
+.select,
+.input,
+.textarea {
+  width: 100%;
+  background: color-mix(in srgb, var(--panel-muted) 88%, transparent 12%);
+  color: var(--text);
+  padding: 12px 14px;
+}
+.select { min-width: 180px; }
+.textarea { min-height: 120px; resize: vertical; }
+.input::placeholder,
+.textarea::placeholder { color: var(--text-soft); }
+.select:focus,
+.input:focus,
+.textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong) 52%);
+  background: color-mix(in srgb, var(--panel) 90%, transparent 10%);
+}
+
+.auth-screen { display: flex; justify-content: center; padding: 40px 0 0; }
+.auth-card,
+.panel-section,
+.screen-panel,
+.shelf-shell,
+.modal-box,
+.details-panel,
+.details-cover {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-medium);
+}
+.auth-card {
+  width: min(460px, 100%);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+}
+.auth-badge,
+.hero-badge,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+.auth-badge,
+.hero-badge { padding: 7px 12px; font-size: 0.82rem; }
+.auth-text,
+.small,
+.section-note,
+.subtitle,
+.muted,
+.media-meta,
+.media-status,
+.search-item-meta,
+.brand-subtitle { color: var(--text-muted); }
+.small { font-size: 0.88rem; }
+
+.hero-block { margin-bottom: 24px; }
+.hero-content {
+  padding: 36px;
+  border-radius: 32px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top right, rgba(116, 167, 255, 0.18), transparent 24%),
+    radial-gradient(circle at bottom left, rgba(127, 97, 255, 0.18), transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, #fff 4%) 0%, var(--panel-strong) 100%);
+  box-shadow: var(--shadow-medium);
+}
+.hero-title { margin-bottom: 12px; font-size: clamp(2.7rem, 8vw, 4.1rem); letter-spacing: -0.04em; }
+.subtitle { max-width: 650px; margin-bottom: 0; font-size: 1.02rem; line-height: 1.65; }
+.home-add-btn { min-width: 180px; }
+.share-library-btn { min-width: 220px; }
+.home-add-panel {
+  margin-bottom: 24px;
+  padding: 18px 20px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #fff 6%) 0%, var(--panel-muted) 100%);
+  box-shadow: var(--shadow-soft);
+}
+.home-add-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.panel-section,
+.screen-panel,
+.shelf-shell {
+  border-radius: 28px;
+  padding: 20px;
+}
+.screen-title { margin: 0; }
+.panel-toolbar { justify-content: space-between; margin-bottom: 16px; }
+.filter-toolbar {
+  justify-content: flex-start;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-soft) 76%, transparent 24%);
+  border: 1px solid var(--border);
+}
+.filter-toolbar-search {
+  flex: 1 1 280px;
+  min-width: min(100%, 280px);
+}
+.filter-toolbar-search .input,
+.filter-toolbar-status .select {
+  width: 100%;
+}
+.filter-toolbar-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.filter-toolbar-status label {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+.public-category-tabs { margin-bottom: 16px; }
+
+.grid,
+.shelf {
+  display: grid;
+  gap: 18px;
+}
+.grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.category-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.shelf { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.card,
+.media-card,
+.search-item,
+.profile-section-card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 95%, #fff 5%) 0%, var(--panel-muted) 100%);
+  box-shadow: var(--shadow-soft);
+}
+.card,
+.media-card { transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition), background var(--transition); }
+.card:hover,
+.media-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-strong) 72%);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.34);
+}
+.category-card {
+  min-height: 110px;
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 1.02rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.media-card {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.media-card-top { position: relative; padding: 14px 14px 0; }
+.media-cover,
+.details-cover-box,
+.search-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-muted) 92%, #fff 8%) 0%, color-mix(in srgb, var(--surface) 85%, transparent 15%) 100%);
+}
+.media-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 18px;
+  padding: 0;
+}
+.media-cover img,
+.details-cover-box img,
+.search-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+.media-cover-fallback { padding: 24px; text-align: center; color: var(--text-soft); }
+.media-info { padding: 16px 18px 18px; }
+.media-title { margin: 0 0 8px; font-size: 1rem; }
+.media-status { font-size: 0.88rem; }
+.media-menu-wrap { position: absolute; top: 24px; right: 24px; z-index: 2; }
+.media-menu-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 92%, transparent 8%);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+.media-menu {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  min-width: 196px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-8px) scale(0.98);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+}
+.media-card.menu-open .media-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+.media-menu-item {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.media-menu-item:hover,
+.media-menu-item:focus-visible { background: var(--surface); outline: none; }
+.media-menu-item-danger { color: var(--danger); }
+
+.search-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.search-item-left { display: flex; gap: 12px; min-width: 0; }
+.search-thumb {
+  width: 56px;
+  aspect-ratio: 2 / 3;
+  flex: 0 0 56px;
+  border-radius: 12px;
+  padding: 0;
+}
+.search-item-title { margin-bottom: 4px; font-size: 0.95rem; }
+.search-item-text { min-width: 0; }
+
+.details-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 22px;
+}
+.details-cover,
+.details-panel { border-radius: 28px; }
+.details-cover-box {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  min-height: 420px;
+  padding: 20px;
+  color: var(--text-soft);
+}
+.details-panel { padding: 26px; }
+.details-creator { margin-bottom: 12px; }
+.details-badges { margin-bottom: 8px; }
+.badge { padding: 7px 12px; font-size: 0.82rem; margin: 0 8px 8px 0; }
+.section + .section { margin-top: 22px; }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 10, 18, 0.6);
+  backdrop-filter: blur(8px);
+  animation: modal-overlay-in 150ms ease;
+}
+.modal-box {
+  width: min(720px, 100%);
+  max-height: min(88vh, 900px);
+  padding: 24px;
+  border-radius: 28px;
+  overflow: auto;
+  animation: modal-box-in 170ms ease;
+}
+.status-modal-box { width: min(520px, 100%); }
+.folder-modal-box { width: min(560px, 100%); }
+.folder-modal-header { margin-bottom: 18px; }
+.folder-modal-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.folder-option {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-muted) 84%, transparent 16%);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+.folder-option:hover,
+.folder-option:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-strong) 68%);
+  background: color-mix(in srgb, var(--surface) 86%, transparent 14%);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+  outline: none;
+}
+.folder-option.is-active {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong) 52%);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface) 84%);
+}
+.status-button-list,
+.status-footer-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+.status-button-list .button,
+.status-footer-actions .button { width: 100%; }
+.status-custom-box { margin: 16px 0; }
+
+.profile-box { width: min(760px, 100%); }
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
+  gap: 22px;
+  margin-top: 16px;
+}
+.profile-avatar-section { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.avatar-preview {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-soft);
+  background: var(--surface);
+}
+.avatar-fallback {
+  position: absolute;
+  inset: 0;
+}
+.profile-info-section { display: flex; flex-direction: column; gap: 12px; }
+.profile-section-card { padding: 18px; }
+.profile-section-heading .small { margin-bottom: 0; }
+.profile-checkbox { display: inline-flex; align-items: center; gap: 10px; }
+.profile-password-btn { align-self: flex-start; }
+#avatar-file { max-width: 100%; color: var(--text-muted); }
+
+.folder-block { margin-top: 24px; }
+.folder-block-title { margin: 0 0 14px; font-size: 1rem; }
+.runtime-error-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 120;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 48%, transparent 52%);
+  color: #fff;
+  background: color-mix(in srgb, var(--danger) 36%, #23060b 64%);
+  box-shadow: var(--shadow-strong);
+}
+
+@media (max-width: 900px) {
+  .page-shell { width: min(100% - 24px, 1240px); padding-top: 16px; }
+  .app-header { top: 8px; align-items: flex-start; }
+  .details-layout,
+  .profile-layout { grid-template-columns: 1fr; }
+  .details-cover-box { min-height: 300px; }
+}
+
+@media (max-width: 720px) {
+  .app-header,
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover { border-radius: 22px; }
+  .app-header,
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel { padding: 18px; }
+  .hero-content { padding: 24px; border-radius: 24px; }
+  .hero-title { font-size: 2.4rem; }
+  .header-actions,
+  .header-user-actions,
+  .toolbar-actions,
+  .toolbar-primary,
+  .topbar { width: 100%; }
+  .header-actions,
+  .topbar { justify-content: space-between; }
+  .preferences-panel { left: 0; right: 0; width: auto; }
+  .category-grid,
+  .shelf { grid-template-columns: 1fr; }
+  .home-add-grid { grid-template-columns: 1fr 1fr; }
+  .search-item { flex-direction: column; align-items: stretch; }
+  .filter-toolbar { align-items: stretch; }
+  .filter-toolbar label { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .page-shell { width: min(100% - 20px, 1240px); }
+  .app-header { flex-direction: column; }
+  .header-actions { width: 100%; justify-content: space-between; }
+  .toolbar-actions .button,
+  .details-actions .button,
+  .folder-assignment-row .button,
+  .folder-assignment-row .select,
+  .modal-actions .button,
+  .auth-actions .button,
+  .hero-actions .button { width: 100%; }
+  .folder-assignment-row,
+  .details-actions,
+  .modal-actions,
+  .auth-actions,
+  .hero-actions,
+  .toolbar-actions,
+  .profile-inline-form { align-items: stretch; }
+  .theme-option-group { grid-template-columns: 1fr; }
+  .home-add-grid,
+  .public-card-actions { grid-template-columns: 1fr; }
+}
+
+.public-share-screen {
+  padding: 0;
+}
+
+.public-share-shell {
+  width: min(100% - 32px, 480px);
+  margin: 40px auto 64px;
+  display: grid;
+  gap: 18px;
+  animation: public-card-fade-in 0.45s ease;
+}
+
+.public-share-back-link {
+  justify-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: rgba(15, 23, 42, 0.46);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+  backdrop-filter: blur(16px);
+}
+
+.public-share-back-link:hover,
+.public-share-back-link:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(30, 41, 59, 0.72);
+}
+
+.public-card,
+.public-owner-panel,
+.public-library-section {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(10, 15, 30, 0.9) 0%, rgba(15, 23, 42, 0.82) 100%);
+  box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+  backdrop-filter: blur(24px);
+}
+
+.public-card {
+  padding: 28px;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.public-card-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(10px);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.public-card-orb-primary {
+  inset: -64px auto auto -52px;
+  width: 190px;
+  height: 190px;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.3) 0%, rgba(96, 165, 250, 0) 72%);
+}
+
+.public-card-orb-secondary {
+  inset: auto -58px -70px auto;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.28) 0%, rgba(168, 85, 247, 0) 74%);
+}
+
+.public-card-head,
+.public-card-copy,
+.public-card-actions,
+.public-share-qr,
+.public-owner-panel > *,
+.public-library-section > * {
+  position: relative;
+  z-index: 1;
+}
+
+.public-card-head {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.public-card-avatar-wrap,
+.public-share-avatar #public-share-avatar-img,
+.public-share-avatar #public-share-avatar-fallback {
+  width: 92px;
+  height: 92px;
+}
+
+.public-card-avatar-wrap {
+  box-shadow: 0 14px 35px rgba(15, 23, 42, 0.45);
+}
+
+.public-card-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.public-card-chip-row {
+  display: flex;
+  justify-content: center;
+}
+
+.public-card-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  color: rgba(219, 234, 254, 0.96);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.public-card-title {
+  margin: 0;
+  font-size: clamp(32px, 6vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: rgba(248, 250, 252, 0.98);
+}
+
+.public-card-username {
+  color: rgba(191, 219, 254, 0.8);
+  font-weight: 600;
+}
+
+.public-card-description {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.88);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.public-card-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  gap: 10px;
+}
+
+.public-card-open-btn {
+  min-height: 52px;
+  border-radius: 16px;
+  font-size: 15px;
+  box-shadow: 0 16px 30px rgba(59, 130, 246, 0.34);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.public-card-open-btn:hover,
+.public-card-open-btn:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 40px rgba(99, 102, 241, 0.38);
+}
+
+.public-card-icon-btn {
+  width: 52px;
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 16px;
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.58);
+  color: rgba(248, 250, 252, 0.95);
+  font-size: 20px;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.public-card-icon-btn:hover,
+.public-card-icon-btn:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(30, 41, 59, 0.88);
+  border-color: rgba(96, 165, 250, 0.32);
+}
+
+.public-card-save-btn {
+  min-height: 52px;
+  border-radius: 16px;
+}
+
+.public-card-meta {
+  display: grid;
+  gap: 12px;
+}
+
+.public-card-meta-group {
+  display: grid;
+  gap: 8px;
+}
+
+.public-card-meta-label {
+  color: rgba(191, 219, 254, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.public-card-meta-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.public-card-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: rgba(241, 245, 249, 0.92);
+  font-size: 0.85rem;
+}
+
+.public-share-qr {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.public-share-qr img {
+  width: min(100%, 220px);
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 16px;
+  background: white;
+  padding: 10px;
+}
+
+.public-card-skeleton {
+  gap: 24px;
+  justify-content: flex-start;
+}
+
+.public-card-skeleton-avatar,
+.public-card-skeleton-line,
+.public-card-skeleton-button,
+.public-share-state-skeleton {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.18) 25%, rgba(226, 232, 240, 0.28) 50%, rgba(148, 163, 184, 0.18) 75%);
+  background-size: 200% 100%;
+  animation: public-card-shimmer 1.6s linear infinite;
+}
+
+.public-card-skeleton-avatar {
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  margin: 0 auto;
+}
+
+.public-card-skeleton-lines {
+  display: grid;
+  gap: 12px;
+}
+
+.public-card-skeleton-line {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+}
+
+.public-card-skeleton-line-chip {
+  width: 112px;
+  height: 28px;
+  margin: 0 auto;
+}
+
+.public-card-skeleton-line-title {
+  width: 76%;
+  height: 34px;
+  margin: 0 auto;
+}
+
+.public-card-skeleton-line-handle {
+  width: 38%;
+  margin: 0 auto;
+}
+
+.public-card-skeleton-line-copy {
+  width: 100%;
+  height: 48px;
+}
+
+.public-card-skeleton-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 52px;
+  gap: 10px;
+}
+
+.public-card-skeleton-button {
+  display: block;
+  height: 52px;
+  border-radius: 16px;
+}
+
+.public-card-skeleton-button-main {
+  width: 100%;
+}
+
+.public-share-feedback {
+  min-height: 220px;
+  align-items: center;
+  text-align: center;
+  justify-content: center;
+}
+
+.public-share-feedback h2,
+.public-share-feedback p {
+  margin: 0;
+}
+
+.public-share-feedback p {
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.public-owner-panel,
+.public-library-section {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.public-owner-panel-heading,
+.public-library-heading {
+  gap: 6px;
+}
+
+.public-owner-panel-link-row,
+.public-owner-panel-link-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.public-owner-panel-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.iphone-help-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.iphone-help-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.iphone-help-card ol {
+  margin: 12px 0 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.public-share-state {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.public-share-loading-text {
+  font-size: 14px;
+  color: rgba(191, 219, 254, 0.76);
+}
+
+.public-share-state-skeleton {
+  width: 100%;
+  max-width: 320px;
+  height: 16px;
+  border-radius: 999px;
+}
+
+.public-share-state-skeleton-large {
+  height: 120px;
+  border-radius: 18px;
+}
+
+.public-share-state-skeleton-short {
+  max-width: 220px;
+}
+
+.public-library-section {
+  min-height: 250px;
+}
+
+.public-preview-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.public-preview-grid .media-card {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.public-preview-grid .media-card:hover,
+.public-preview-grid .media-card:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.35);
+  border-color: rgba(129, 140, 248, 0.55);
+}
+
+body.public-route-active {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.22), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.18), transparent 26%),
+    linear-gradient(180deg, #040814 0%, #091224 42%, #040814 100%);
+}
+
+body.public-route-active .app-header,
+body.public-route-active #auth-screen,
+body.public-route-active #home-screen,
+body.public-route-active #category-screen,
+body.public-route-active #details-screen,
+body.public-route-active #add-modal,
+body.public-route-active #manual-modal,
+body.public-route-active #profile-modal,
+body.public-route-active #status-modal,
+body.public-route-active #share-modal {
+  display: none !important;
+}
+
+body.public-route-active #public-share-screen {
+  display: block !important;
+  width: 100%;
+  margin: 0;
+}
+
+body.public-route-active .page-shell {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+}
+
+.share-item-modal-box {
+  width: min(920px, 100%);
+  position: relative;
+}
+
+.share-item-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.share-item-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.share-item-cover-box {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  min-height: 360px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-item-cover-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.share-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.share-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-item-meta-list {
+  display: grid;
+  gap: 10px;
+}
+
+.share-item-meta-row {
+  display: grid;
+  gap: 4px;
+}
+
+.share-item-meta-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-text, rgba(255,255,255,0.56));
+}
+
+.share-item-description {
+  line-height: 1.6;
+  color: var(--muted-text, rgba(255,255,255,0.82));
+}
+
+.public-share-state-icon {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.wrap-actions {
+  flex-wrap: wrap;
+}
+
+@keyframes public-card-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes public-card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modal-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-box-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 860px) {
+  .share-item-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .share-item-cover-box {
+    min-height: 280px;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .folder-modal-box {
+    width: 100%;
+    border-radius: 24px 24px 18px 18px;
+  }
+
+  .public-share-shell {
+    width: min(100% - 20px, 480px);
+    margin: 20px auto 40px;
+  }
+
+  .public-card,
+  .public-owner-panel,
+  .public-library-section {
+    padding: 20px;
+  }
+
+  .public-card-actions,
+  .public-card-skeleton-actions {
+    grid-template-columns: minmax(0, 1fr) 48px 48px;
+  }
+
+  .public-card-open-btn,
+  .public-card-icon-btn,
+  .public-card-skeleton-button {
+    min-height: 48px;
+    height: 48px;
+  }
+
+  .public-card-icon-btn {
+    width: 48px;
+    min-width: 48px;
+  }
+
+  .public-owner-panel-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- 2026 UI refresh overrides --- */
+:root {
+  --app-width: min(1180px, calc(100% - 28px));
+  --radius-2xl: 32px;
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 12px;
+  --transition-fast: 140ms cubic-bezier(.2,.8,.2,1);
+  --transition-slow: 220ms cubic-bezier(.2,.8,.2,1);
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(116, 167, 255, 0.09), transparent 24%),
+    radial-gradient(circle at top right, rgba(98, 89, 208, 0.1), transparent 22%),
+    linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 95%, #000 5%) 100%);
+}
+
+.page-shell {
+  width: var(--app-width);
+  padding: 12px 0 112px;
+}
+
+.app-header {
+  top: 8px;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent 6%);
+  box-shadow: 0 12px 34px rgba(2, 8, 18, 0.14);
+}
+
+body.header-compact .app-header {
+  padding: 8px 10px;
+  border-radius: 18px;
+}
+
+.brand-block-compact {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.brand-block-compact:hover,
+.brand-block-compact:focus-visible {
+  transform: none;
+  background: transparent;
+}
+
+.header-context {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.brand-title {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.brand-subtitle {
+  font-size: 0.76rem;
+}
+
+.header-actions {
+  gap: 10px;
+  align-items: center;
+}
+
+.header-panel-wrap {
+  position: relative;
+}
+
+.header-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(320px, calc(100vw - 28px));
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border-radius: 22px;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--panel) 96%, transparent 4%);
+  box-shadow: 0 24px 54px rgba(2, 8, 18, 0.26);
+  backdrop-filter: blur(20px);
+  animation: modal-box-in 160ms ease;
+}
+
+.header-popover-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-preview-small,
+.avatar-preview-small img,
+.avatar-preview-small .avatar-fallback {
+  width: 44px;
+  height: 44px;
+}
+
+.header-popover-copy {
+  min-width: 0;
+}
+
+.header-popover-name {
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.header-popover-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.header-popover-button {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.profile-menu-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.preferences-section-title {
+  margin-bottom: 8px;
+}
+
+.option-group {
+  gap: 8px;
+}
+
+.option-button {
+  min-height: 40px;
+}
+
+.home-overview {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 18px 20px;
+}
+
+.home-overview-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.home-title {
+  margin: 0;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  letter-spacing: -0.04em;
+}
+
+.home-overview .subtitle {
+  margin: 0;
+  max-width: 620px;
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+.home-overview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.share-library-btn {
+  min-width: 0;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
+.share-popover {
+  width: min(260px, calc(100vw - 28px));
+}
+
+.compact-qr-box {
+  padding: 10px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent 18%);
+  border: 1px solid var(--border);
+}
+
+.compact-qr-box img {
+  width: 100%;
+  display: block;
+  border-radius: 14px;
+}
+
+.home-add-panel {
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: 84px;
+  z-index: 70;
+  width: min(520px, calc(100vw - 24px));
+  margin: 0;
+  padding: 16px;
+  transform: translateX(-50%);
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent 3%);
+  box-shadow: 0 30px 70px rgba(2, 8, 18, 0.34);
+}
+
+.home-add-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.panel-section,
+.screen-panel,
+.shelf-shell,
+.auth-card,
+.modal-box,
+.details-panel,
+.details-cover,
+.profile-section-card,
+.card,
+.media-card,
+.search-item {
+  border-radius: 24px;
+}
+
+.panel-section,
+.screen-panel,
+.shelf-shell {
+  padding: 18px;
+}
+
+.section-heading {
+  margin-bottom: 14px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.category-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.category-card {
+  min-height: 88px;
+  place-items: start;
+  padding: 18px;
+  text-align: left;
+  font-size: 0.96rem;
+  border-radius: 20px;
+}
+
+.category-card:hover,
+.category-card:focus-visible {
+  transform: translateY(-2px);
+}
+
+.panel-toolbar {
+  align-items: center;
+  gap: 12px;
+}
+
+.toolbar-primary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.screen-title {
+  font-size: clamp(1.15rem, 3vw, 1.5rem);
+  letter-spacing: -0.03em;
+}
+
+.toolbar-actions {
+  justify-content: flex-end;
+}
+
+.filter-toolbar {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 18px;
+}
+
+.shelf-shell {
+  padding: 16px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+}
+
+.shelf {
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: 14px;
+}
+
+.media-card {
+  border-radius: 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #fff 6%) 0%, color-mix(in srgb, var(--panel-muted) 96%, transparent 4%) 100%);
+}
+
+.media-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px rgba(2, 8, 18, 0.2);
+}
+
+.media-card-top {
+  padding: 12px 12px 0;
+}
+
+.media-cover-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.media-cover {
+  border-radius: 18px;
+}
+
+.media-menu-wrap {
+  top: 20px;
+  right: 20px;
+}
+
+.media-menu-btn {
+  width: 34px;
+  height: 34px;
+  backdrop-filter: blur(16px);
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.media-menu-btn:hover,
+.media-menu-btn:focus-visible {
+  transform: scale(1.04);
+}
+
+.media-menu {
+  top: 42px;
+  min-width: 180px;
+}
+
+.media-info {
+  display: grid;
+  gap: 10px;
+  padding: 14px 14px 16px;
+}
+
+.media-meta-chips,
+.details-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-chip,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  font-size: 0.74rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 72%, transparent 28%);
+  color: var(--text-muted);
+}
+
+.meta-chip.is-folder,
+#details-folder-badge {
+  background: color-mix(in srgb, var(--surface-hover) 78%, transparent 22%);
+}
+
+.meta-chip.is-status,
+#details-status {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface) 88%);
+  color: var(--text);
+}
+
+.media-title {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.media-meta {
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.media-status {
+  display: none;
+}
+
+.folder-block {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-soft) 42%, transparent 58%);
+}
+
+.folder-block-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 0.96rem;
+  letter-spacing: -0.02em;
+}
+
+.folder-block-title::before {
+  content: "📁";
+}
+
+.folder-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.folder-option::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.folder-option.is-active::after {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.08);
+}
+
+.details-layout {
+  gap: 18px;
+}
+
+.details-panel {
+  padding: 22px;
+}
+
+.details-actions {
+  margin-top: 8px;
+}
+
+.profile-layout {
+  gap: 18px;
+}
+
+.profile-section-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.profile-nfc-card {
+  background: color-mix(in srgb, var(--surface) 44%, var(--panel) 56%);
+}
+
+.global-add-fab {
+  position: fixed;
+  right: max(16px, calc((100vw - var(--app-width)) / 2));
+  bottom: 22px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 80%, #fff 20%) 0%, var(--accent-strong) 100%);
+  color: var(--accent-contrast);
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--accent-strong) 28%, transparent 72%);
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+
+.global-add-fab:hover,
+.global-add-fab:focus-visible {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 24px 48px color-mix(in srgb, var(--accent-strong) 32%, transparent 68%);
+}
+
+.global-add-fab:active {
+  transform: translateY(0);
+}
+
+.global-add-fab-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  .page-shell {
+    width: min(100% - 18px, 1180px);
+    padding-top: 10px;
+    padding-bottom: 104px;
+  }
+
+  .home-overview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-actions {
+    width: auto;
+  }
+
+  .shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    padding: 10px 12px;
+    border-radius: 20px;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 14px;
+  }
+
+  .home-overview,
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover {
+    border-radius: 20px;
+  }
+
+  .home-overview {
+    padding: 16px;
+  }
+
+  .home-overview .subtitle {
+    font-size: 0.92rem;
+  }
+
+  .category-grid,
+  .shelf {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .home-add-panel {
+    bottom: 78px;
+    border-radius: 22px;
+  }
+
+  .header-popover,
+  .share-popover {
+    width: min(280px, calc(100vw - 20px));
+  }
+}
+
+@media (max-width: 560px) {
+  .page-shell {
+    width: min(100% - 14px, 1180px);
+  }
+
+  .app-header {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .header-actions,
+  .toolbar-primary,
+  .toolbar-actions,
+  .topbar {
+    width: auto;
+  }
+
+  .brand-subtitle,
+  .hero-badge,
+  .home-overview .subtitle,
+  .section-note {
+    display: none;
+  }
+
+  .home-overview {
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+
+  .home-title {
+    font-size: 1.35rem;
+  }
+
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover {
+    padding: 14px;
+  }
+
+  .category-grid,
+  .shelf,
+  .home-add-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .category-card {
+    min-height: 74px;
+    padding: 16px;
+  }
+
+  .panel-toolbar {
+    align-items: flex-start;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+  }
+
+  .toolbar-actions .button,
+  .details-actions .button,
+  .folder-assignment-row .button,
+  .modal-actions .button,
+  .auth-actions .button,
+  .header-popover-actions {
+    width: 100%;
+  }
+
+  .header-popover-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .global-add-fab {
+    right: 14px;
+    left: 14px;
+    bottom: 14px;
+    justify-content: center;
+  }
+
+  .home-add-panel {
+    width: calc(100vw - 16px);
+    bottom: 82px;
+  }
+}
+
+/* --- mobile refinement / sheets / folder UX refresh --- */
+:root {
+  --safe-bottom: max(14px, env(safe-area-inset-bottom));
+  --safe-top: max(10px, env(safe-area-inset-top));
+}
+
+body.sheet-open {
+  overflow: hidden;
+}
+
+.mobile-sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  pointer-events: none;
+}
+
+.sheet-layer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  pointer-events: auto;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.56);
+  backdrop-filter: blur(6px);
+  animation: sheet-backdrop-in 180ms ease;
+}
+
+.mobile-sheet {
+  position: relative;
+  width: min(100%, 560px);
+  margin: auto auto 0;
+  padding: 14px 14px calc(16px + var(--safe-bottom));
+  border-radius: 28px 28px 0 0;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 90%, transparent 10%);
+  background: color-mix(in srgb, var(--panel) 98%, transparent 2%);
+  box-shadow: 0 -18px 40px rgba(2, 8, 18, 0.26);
+  animation: sheet-panel-in 220ms cubic-bezier(.2,.85,.22,1);
+}
+
+.sheet-handle {
+  width: 42px;
+  height: 5px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-soft) 55%, transparent 45%);
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sheet-header h3 {
+  margin: 0 0 4px;
+  font-size: 1.02rem;
+  letter-spacing: -0.03em;
+}
+
+.sheet-close-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 82%, transparent 18%);
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-actions-grid,
+.sheet-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sheet-action-btn,
+.sheet-action-list .button,
+.folder-manager-row .button {
+  min-height: 52px;
+  justify-content: flex-start;
+}
+
+.sheet-cancel-btn {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.folder-rail {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 10px;
+  margin-bottom: 12px;
+  scrollbar-width: none;
+}
+
+.folder-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.folder-chip,
+.folder-manage-chip {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 76%, transparent 24%);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.folder-chip:hover,
+.folder-chip:focus-visible,
+.folder-manage-chip:hover,
+.folder-manage-chip:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-strong) 70%);
+  color: var(--text);
+  outline: none;
+}
+
+.folder-chip.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface) 86%);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-strong) 56%);
+  color: var(--text);
+}
+
+.folder-manage-chip {
+  background: transparent;
+}
+
+.folder-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.folder-manager-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(48vh, 360px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.folder-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, transparent 30%);
+}
+
+.folder-manager-row-main {
+  min-width: 0;
+}
+
+.folder-manager-row-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.folder-manager-row-meta {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.item-actions-panel .sheet-action-list .button {
+  width: 100%;
+}
+
+.item-actions-panel .sheet-action-list .button-danger {
+  justify-content: center;
+}
+
+.folder-option {
+  min-height: 56px;
+  border-radius: 18px;
+}
+
+.media-card {
+  overflow: visible;
+}
+
+.media-card-top {
+  padding: 10px 10px 0;
+}
+
+.media-cover {
+  aspect-ratio: 0.72;
+}
+
+.media-menu-wrap {
+  top: 16px;
+  right: 16px;
+}
+
+.media-menu {
+  z-index: 4;
+}
+
+.filter-toolbar,
+.folder-rail,
+.shelf-shell {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes sheet-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheet-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100% - 12px, 1180px);
+    padding-top: 8px;
+    padding-bottom: calc(82px + var(--safe-bottom));
+  }
+
+  .app-header {
+    top: var(--safe-top);
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(2, 8, 18, 0.1);
+  }
+
+  .profile-trigger {
+    width: 38px;
+    height: 38px;
+    box-shadow: 0 8px 20px rgba(2, 8, 18, 0.14);
+  }
+
+  .home-overview {
+    padding: 14px;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .home-overview-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .share-library-btn {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+  }
+
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .filter-toolbar {
+    gap: 8px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: transparent;
+    border: 0;
+  }
+
+  .filter-toolbar-search,
+  .filter-toolbar-status {
+    width: 100%;
+  }
+
+  .filter-toolbar-search .input,
+  .filter-toolbar-status .select {
+    min-height: 42px;
+    border-radius: 14px;
+  }
+
+  .shelf-shell {
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .media-card {
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(2, 8, 18, 0.12);
+  }
+
+  .media-card:hover {
+    transform: none;
+  }
+
+  .media-info {
+    gap: 8px;
+    padding: 10px 10px 12px;
+  }
+
+  .media-title {
+    font-size: 0.9rem;
+    line-height: 1.3;
+  }
+
+  .media-meta {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .meta-chip,
+  .badge {
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 0.69rem;
+  }
+
+  .folder-block {
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .folder-block-title {
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+  }
+
+  .global-add-fab {
+    right: 12px;
+    left: auto;
+    bottom: calc(12px + var(--safe-bottom));
+    min-height: 50px;
+    padding: 0 16px;
+    gap: 8px;
+    box-shadow: 0 14px 30px color-mix(in srgb, var(--accent-strong) 26%, transparent 74%);
+  }
+
+  .global-add-fab-label {
+    font-size: 0.92rem;
+  }
+
+  .home-add-panel {
+    width: calc(100vw - 12px);
+    bottom: calc(72px + var(--safe-bottom));
+    padding: 14px;
+    border-radius: 22px;
+  }
+
+  .mobile-sheet {
+    width: 100%;
+    max-width: none;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 480px) {
+  .home-title {
+    font-size: 1.22rem;
+  }
+
+  .category-grid,
+  .shelf,
+  .home-add-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .category-card {
+    min-height: 68px;
+    padding: 14px;
+    font-size: 0.88rem;
+  }
+
+  .folder-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-action-btn,
+  .sheet-action-list .button,
+  .folder-manager-row .button,
+  .folder-manager-create-btn {
+    min-height: 50px;
+  }
+}
+
+@media (max-width: 720px) {
+  #folder-modal {
+    align-items: flex-end;
+    padding: 0;
+    background: rgba(6, 10, 18, 0.56);
+  }
+
+  #folder-modal .folder-modal-box {
+    width: 100%;
+    max-height: min(78vh, 640px);
+    margin: 0;
+    padding: 14px 14px calc(16px + var(--safe-bottom));
+    border-radius: 28px 28px 0 0;
+    animation: sheet-panel-in 220ms cubic-bezier(.2,.85,.22,1);
+  }
+}
+
+/* --- product architecture expansion: dashboard / now / stats / universes / tracker --- */
+.section-screen {
+  display: grid;
+  gap: 14px;
+}
+
+.dashboard-section {
+  margin-bottom: 14px;
+}
+
+.dashboard-compact-grid,
+.dashboard-stats-grid,
+.stats-category-grid,
+.universes-list,
+.now-list,
+.linked-list,
+.activity-list,
+.tracker-summary-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dashboard-stats-grid,
+.stats-category-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.dashboard-card,
+.stat-card,
+.universe-card,
+.now-card,
+.activity-card,
+.link-chip,
+.tracker-stat-card {
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, transparent 8%);
+  box-shadow: var(--shadow-soft);
+}
+
+.dashboard-card,
+.now-card,
+.activity-card,
+.tracker-stat-card,
+.universe-card {
+  padding: 14px;
+}
+
+.dashboard-card-title,
+.now-card-title,
+.universe-card-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.stat-card {
+  padding: 14px;
+}
+
+.stat-card-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.stat-card-label,
+.now-card-meta,
+.universe-card-meta,
+.activity-card-meta {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.now-card-progress {
+  margin: 10px 0;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent 26%);
+  overflow: hidden;
+}
+
+.now-card-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.now-card-actions,
+.universe-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.section-heading-actions,
+.relation-card-actions,
+.enrichment-state-footer {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.activity-card {
+  display: grid;
+  gap: 4px;
+}
+
+.link-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.enrichment-meta,
+.relation-stack,
+.relation-group {
+  display: grid;
+  gap: 10px;
+}
+
+.enrichment-state-card,
+.relation-card {
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+  box-shadow: var(--shadow-soft);
+  padding: 14px;
+}
+
+.enrichment-state-card.is-ready {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border) 55%);
+}
+
+.enrichment-state-card.is-error {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border) 52%);
+}
+
+.enrichment-state-header,
+.relation-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.relation-card-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.relation-card-title,
+.enrichment-state-title {
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.relation-card-meta,
+.relation-card-submeta,
+.enrichment-state-meta,
+.enrichment-state-copy,
+.enrichment-state-footer,
+.relation-suggestions summary {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.relation-card.is-suggested {
+  border-style: dashed;
+}
+
+.relation-suggestions {
+  margin-top: 10px;
+}
+
+.relation-suggestions summary {
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 10px;
+}
+
+.relation-suggestions[open] summary {
+  margin-bottom: 12px;
+}
+
+.tracker-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tracker-field {
+  display: grid;
+  gap: 6px;
+}
+
+.tracker-field-wide {
+  grid-column: 1 / -1;
+}
+
+.tracker-modal-box,
+.universe-modal-box {
+  width: min(780px, 100%);
+}
+
+.compact-heading {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 120;
+  display: none;
+  gap: 8px;
+  width: min(calc(100% - 16px), 580px);
+  padding: 8px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 36px rgba(2, 8, 18, 0.18);
+}
+
+.bottom-nav-btn {
+  flex: 1 1 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.bottom-nav-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface) 86%);
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .bottom-nav {
+    display: flex;
+  }
+
+  .page-shell {
+    padding-bottom: calc(112px + var(--safe-bottom));
+  }
+
+  .dashboard-compact-grid,
+  .dashboard-stats-grid,
+  .stats-category-grid,
+  .tracker-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-screen {
+    padding-bottom: 6px;
+  }
+
+  .now-card,
+  .dashboard-card,
+  .universe-card,
+  .activity-card,
+  .stat-card,
+  .tracker-stat-card,
+  .relation-card,
+  .enrichment-state-card {
+    border-radius: 18px;
+    padding: 12px;
+  }
+
+  .now-card-actions .button,
+  .universe-card-actions .button,
+  .compact-heading .button,
+  .section-heading-actions,
+  .relation-card-actions {
+    width: 100%;
+  }
+
+  .relation-card,
+  .enrichment-state-header {
+    flex-direction: column;
+  }
+}
+
+```
+
+## script.js
+
+```javascript
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
@@ -2415,7 +5239,14 @@
         work_key: workKey || "",
         canonical_key: finalCanonicalKey,
         description_ru: description_ru || autoLang.description_ru || "",
-        description_en: originalDescription || autoLang.description_en || ""
+        description_en: originalDescription || autoLang.description_en || "",
+        wikidata_entity_id: null,
+        wikidata_label: null,
+        wikidata_description: null,
+        wikidata_last_enriched_at: null,
+        enrichment_status: "pending",
+        enrichment_confidence: 0,
+        enrichment_source: null
       };
 
       const { error } = await supabaseClient
@@ -2444,7 +5275,8 @@
       isbn = "",
       description_ru = "",
       description_en = "",
-      description_original = ""
+      description_original = "",
+      enrichment = undefined
     }){
       return {
         id: -Date.now() - Math.floor(Math.random() * 1000),
@@ -2458,6 +5290,7 @@
         description_en: description_en || "",
         creator: creator || "",
         isbn: isbn || "",
+        enrichment: buildEnrichmentState(enrichment || {}),
         work_key: work_key || "",
         canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase(),
         folder: folder || ""
@@ -2768,9 +5601,20 @@
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
-          folder: item.folder_name || ""
+          folder: item.folder_name || "",
+          wikidata_entity_id: item.wikidata_entity_id || "",
+          wikidata_label: item.wikidata_label || "",
+          wikidata_description: item.wikidata_description || "",
+          wikidata_last_enriched_at: item.wikidata_last_enriched_at || "",
+          enrichment_status: item.enrichment_status || "idle",
+          enrichment_confidence: Number(item.enrichment_confidence || 0),
+          enrichment_source: item.enrichment_source || ""
         });
       });
+
+      for(const item of demoData[category]){
+        await ensureItemEnrichmentHydrated(item);
+      }
 
       await applyFolderAssignmentsToItems(category);
       renderShelf();
@@ -6670,9 +9514,27 @@ const PRODUCT_TRACKER_STATUSES = [
   "Rereading"
 ];
 const PRODUCT_NOW_STATUSES = ["Watching", "Reading", "Playing", "On hold", "Rewatching", "Rereading"];
-const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spinoff", "adaptation", "based_on", "related_work"];
+const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spin_off", "adaptation", "based_on", "related_work", "original_work", "derived_from"];
+const WIKIDATA_MATCH_HIGH_CONFIDENCE = 0.82;
+const WIKIDATA_MATCH_MEDIUM_CONFIDENCE = 0.62;
+const WIKIDATA_ENRICHMENT_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const WIKIDATA_ENTITY_API_URL = "https://www.wikidata.org/w/api.php";
+const WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql";
+const WIKIDATA_RELATION_PROPERTY_MAP = {
+  P144: "based_on",
+  P155: "sequel",
+  P156: "prequel",
+  P179: "part_of_series",
+  P941: "derived_from"
+};
+const WIKIDATA_UNIVERSE_PROPERTY_MAP = {
+  P179: "series",
+  P8345: "franchise",
+  P1080: "universe"
+};
 let currentNowSort = "updated";
 let currentUniverseContextItemId = null;
+const wikidataEnrichmentJobs = new Map();
 
 Object.assign(translations.en.statuses, {
   Watching: "Watching",
@@ -6698,7 +9560,28 @@ Object.assign(translations.en.labels, {
   completedAt: "Completed",
   inProgress: "In progress",
   relatedWorks: "Related works",
-  universes: "Universes"
+  universes: "Universes",
+  wikidata: "Wikidata",
+  enrichmentReady: "Graph enrichment ready",
+  enrichmentPending: "Searching Wikidata graph…",
+  enrichmentMissing: "No confident Wikidata match yet",
+  enrichmentFailed: "Wikidata enrichment failed",
+  enrichmentSuggested: "Suggested relations",
+  enrichmentRetry: "Retry Wikidata",
+  enrichmentSource: "Source",
+  enrichmentConfidence: "Confidence",
+  enrichmentConfirmed: "Confirmed",
+  enrichmentSuggestedStatus: "Suggested",
+  enrichmentRejected: "Rejected",
+  enrichmentDetach: "Detach",
+  enrichmentConfirm: "Confirm",
+  enrichmentReject: "Reject",
+  enrichmentUniverse: "Universe",
+  enrichmentRelated: "Relations",
+  enrichmentSecondary: "Secondary enrichment layer",
+  enrichmentNoRelations: "No linked works yet",
+  enrichmentLastUpdated: "Last enriched",
+  enrichmentExternal: "External graph link"
 });
 Object.assign(translations.ru.labels, {
   progress: "Прогресс",
@@ -6708,7 +9591,28 @@ Object.assign(translations.ru.labels, {
   completedAt: "Завершено",
   inProgress: "В процессе",
   relatedWorks: "Связанные работы",
-  universes: "Вселенные"
+  universes: "Вселенные",
+  wikidata: "Wikidata",
+  enrichmentReady: "Графовое обогащение готово",
+  enrichmentPending: "Ищем связи в графе Wikidata…",
+  enrichmentMissing: "Надёжная сущность Wikidata пока не найдена",
+  enrichmentFailed: "Не удалось обогатить через Wikidata",
+  enrichmentSuggested: "Предлагаемые связи",
+  enrichmentRetry: "Повторить Wikidata",
+  enrichmentSource: "Источник",
+  enrichmentConfidence: "Уверенность",
+  enrichmentConfirmed: "Подтверждено",
+  enrichmentSuggestedStatus: "Предложено",
+  enrichmentRejected: "Отклонено",
+  enrichmentDetach: "Отвязать",
+  enrichmentConfirm: "Подтвердить",
+  enrichmentReject: "Отклонить",
+  enrichmentUniverse: "Вселенная",
+  enrichmentRelated: "Связи",
+  enrichmentSecondary: "Вторичный слой enrichment",
+  enrichmentNoRelations: "Пока нет связанных объектов",
+  enrichmentLastUpdated: "Последнее enrichment",
+  enrichmentExternal: "Внешняя связь графа"
 });
 
 function buildTrackerStorageKey(item, category = currentCategory){
@@ -6724,11 +9628,582 @@ async function setTrackerOverrides(value){
 }
 
 async function getUniverseStore(){
-  return await getAccountStorageValue("universe_store", { universes: [], memberships: [], links: [], activity: [] });
+  return normalizeUniverseStore(await getAccountStorageValue("universe_store", { universes: [], memberships: [], links: [], candidates: [], activity: [] }));
 }
 
 async function setUniverseStore(value){
-  await setAccountStorageValue("universe_store", value);
+  await setAccountStorageValue("universe_store", normalizeUniverseStore(value));
+}
+
+function normalizeUniverseStore(store = {}){
+  return {
+    universes: Array.isArray(store.universes) ? store.universes : [],
+    memberships: Array.isArray(store.memberships) ? store.memberships : [],
+    links: Array.isArray(store.links) ? store.links : [],
+    candidates: Array.isArray(store.candidates) ? store.candidates : [],
+    activity: Array.isArray(store.activity) ? store.activity : []
+  };
+}
+
+function buildEnrichmentState(overrides = {}){
+  return {
+    wikidataEntityId: "",
+    wikidataLabel: "",
+    wikidataDescription: "",
+    wikipediaTitle: "",
+    sitelinkUrl: "",
+    aliases: [],
+    matchedBy: "",
+    matchCandidates: [],
+    externalRelations: [],
+    universeHints: [],
+    status: "idle",
+    confidence: 0,
+    error: "",
+    lastEnrichedAt: "",
+    ...overrides
+  };
+}
+
+async function getWikidataCache(){
+  return await getAccountStorageValue("wikidata_cache", {});
+}
+
+async function setWikidataCache(value){
+  await setAccountStorageValue("wikidata_cache", value);
+}
+
+function getItemReleaseYear(item){
+  const sources = [
+    item?.release_date,
+    item?.first_air_date,
+    item?.published_at,
+    item?.published_year,
+    item?.year,
+    item?.tracker?.started_at
+  ].filter(Boolean);
+  for(const source of sources){
+    const match = String(source).match(/\b(18|19|20)\d{2}\b/);
+    if(match) return Number(match[0]);
+  }
+  return 0;
+}
+
+function getItemTitleVariants(item){
+  return Array.from(new Set([
+    item?.title,
+    item?.original_title,
+    item?.title_native,
+    item?.title_english,
+    item?.title_romaji,
+    item?.wikidata_label
+  ].map((value) => normalizeSpaces(value || "")).filter(Boolean)));
+}
+
+function normalizeRelationType(type){
+  const value = normalizeComparisonText(type || "").replace(/\s+/g, "_");
+  if(value === "spinoff") return "spin_off";
+  if(value === "spin-off") return "spin_off";
+  if(value === "original") return "original_work";
+  if(value === "source_material") return "original_work";
+  if(value === "sameuniverse") return "same_universe";
+  return PRODUCT_RELATION_TYPES.includes(value) ? value : "related_work";
+}
+
+function formatRelationType(type){
+  const relation = normalizeRelationType(type);
+  const labels = {
+    same_universe: currentLanguage === "ru" ? "Общая вселенная" : "Same universe",
+    part_of_series: currentLanguage === "ru" ? "Часть серии" : "Part of series",
+    prequel: currentLanguage === "ru" ? "Приквел" : "Prequel",
+    sequel: currentLanguage === "ru" ? "Сиквел" : "Sequel",
+    spin_off: currentLanguage === "ru" ? "Спин-офф" : "Spin-off",
+    adaptation: currentLanguage === "ru" ? "Адаптация" : "Adaptation",
+    based_on: currentLanguage === "ru" ? "Основано на" : "Based on",
+    related_work: currentLanguage === "ru" ? "Связанное произведение" : "Related work",
+    original_work: currentLanguage === "ru" ? "Оригинальное произведение" : "Original work",
+    derived_from: currentLanguage === "ru" ? "Производно от" : "Derived from"
+  };
+  return labels[relation] || relation;
+}
+
+function buildUniverseSlug(name = ""){
+  return normalizeSpaces(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildUniverseEntityId(seed = ""){
+  return `universe_${buildUniverseSlug(seed) || Date.now()}`;
+}
+
+function categoryMatchesWikidataDescription(category, description = ""){
+  const text = normalizeComparisonText(description || "");
+  if(!text) return true;
+  const rules = {
+    Movies: ["film", "movie", "feature"],
+    Series: ["television series", "tv series", "television program", "miniseries"],
+    Anime: ["anime", "animated series", "manga series"],
+    Manga: ["manga", "comic"],
+    Books: ["book", "novel", "literary work"]
+  };
+  const hints = rules[category] || [];
+  return !hints.length || hints.some((hint) => text.includes(hint));
+}
+
+function buildWikidataSearchQueriesForItem(item){
+  const titles = getItemTitleVariants(item);
+  const creator = normalizeSpaces(item?.creator || "");
+  const year = getItemReleaseYear(item);
+  return titles.flatMap((title) => {
+    const variants = [title];
+    if(creator) variants.push(`${title} ${creator}`);
+    if(year) variants.push(`${title} ${year}`);
+    return variants;
+  }).slice(0, 6);
+}
+
+function scoreWikidataCandidate(item, candidate){
+  const titles = getItemTitleVariants(item).map((value) => normalizeComparisonText(value));
+  const label = normalizeComparisonText(candidate?.label || "");
+  const description = normalizeComparisonText(candidate?.description || "");
+  const aliases = Array.isArray(candidate?.aliases) ? candidate.aliases.map((value) => normalizeComparisonText(value)) : [];
+  let score = 0;
+
+  if(titles.includes(label)) score += 0.55;
+  if(titles.some((title) => label.startsWith(title) || title.startsWith(label))) score += 0.18;
+  if(titles.some((title) => aliases.includes(title))) score += 0.18;
+  if(titles.some((title) => label.includes(title) || title.includes(label))) score += 0.1;
+  if(categoryMatchesWikidataDescription(item?.category, description)) score += 0.12;
+
+  const creator = normalizeComparisonText(item?.creator || "");
+  if(creator && description.includes(creator)) score += 0.08;
+
+  const year = getItemReleaseYear(item);
+  if(year && description.includes(String(year))) score += 0.08;
+
+  if(candidate?.match?.language === currentLanguage) score += 0.04;
+  if(candidate?.displayLanguage === currentLanguage) score += 0.03;
+
+  return Math.max(0, Math.min(0.99, score));
+}
+
+async function fetchJsonWithRetry(url, options = {}, retries = 2){
+  let lastError;
+  for(let attempt = 0; attempt <= retries; attempt += 1){
+    try {
+      return await fetchJson(url, options);
+    } catch (error) {
+      lastError = error;
+      const waitForRetry = attempt < retries && /(429|5\d\d)/.test(String(error?.message || ""));
+      if(!waitForRetry) break;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+async function searchWikidataEntities(query, language = currentLanguage){
+  const url = `${WIKIDATA_ENTITY_API_URL}?action=wbsearchentities&format=json&origin=*&language=${encodeURIComponent(language || "en")}&uselang=${encodeURIComponent(language || "en")}&type=item&limit=8&search=${encodeURIComponent(query)}`;
+  const data = await fetchJsonWithRetry(url);
+  return Array.isArray(data?.search) ? data.search : [];
+}
+
+async function fetchWikidataEntitiesByIds(ids = []){
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  if(!uniqueIds.length) return {};
+  const url = `${WIKIDATA_ENTITY_API_URL}?action=wbgetentities&format=json&origin=*&languages=${encodeURIComponent(currentLanguage === "ru" ? "ru|en" : "en|ru")}&props=labels|descriptions|aliases|claims|sitelinks&ids=${encodeURIComponent(uniqueIds.join("|"))}`;
+  const data = await fetchJsonWithRetry(url);
+  return data?.entities || {};
+}
+
+function readWikidataTextValue(map = {}){
+  return map?.[currentLanguage]?.value || map?.ru?.value || map?.en?.value || Object.values(map || {})[0]?.value || "";
+}
+
+function readWikidataAliases(entity = {}){
+  return [
+    ...(entity?.aliases?.[currentLanguage] || []),
+    ...(entity?.aliases?.ru || []),
+    ...(entity?.aliases?.en || [])
+  ].map((entry) => normalizeSpaces(entry?.value || "")).filter(Boolean);
+}
+
+function getWikidataClaimEntityIds(entity = {}, propertyId){
+  return (entity?.claims?.[propertyId] || [])
+    .map((claim) => claim?.mainsnak?.datavalue?.value?.id || "")
+    .filter(Boolean);
+}
+
+async function fetchWikidataGraphForEntity(entityId){
+  const relationQuery = `
+    SELECT ?related ?relatedLabel ?relatedDescription ?property ?direction WHERE {
+      VALUES ?source { wd:${entityId} }
+      {
+        VALUES ?property { wdt:P144 wdt:P155 wdt:P156 wdt:P179 wdt:P8345 wdt:P1080 wdt:P941 }
+        ?source ?property ?related .
+        BIND("outbound" AS ?direction)
+      }
+      UNION
+      {
+        ?related wdt:P144 ?source .
+        BIND(wdt:P144 AS ?property)
+        BIND("inbound" AS ?direction)
+      }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "${currentLanguage === "ru" ? "ru,en" : "en,ru"}". }
+    }
+    LIMIT 30
+  `;
+  const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(relationQuery)}`;
+  const data = await fetchJsonWithRetry(url, {
+    headers: {
+      Accept: "application/sparql-results+json"
+    }
+  });
+  return Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
+}
+
+function buildWikidataUniverseHints(entity = {}, relatedEntities = {}){
+  return Object.entries(WIKIDATA_UNIVERSE_PROPERTY_MAP).flatMap(([propertyId, kind]) => {
+    return getWikidataClaimEntityIds(entity, propertyId).map((targetId) => {
+      const target = relatedEntities[targetId] || {};
+      return {
+        wikidataEntityId: targetId,
+        kind,
+        name: readWikidataTextValue(target.labels) || targetId,
+        description: readWikidataTextValue(target.descriptions),
+        confidence: 0.78
+      };
+    });
+  });
+}
+
+function mapWikidataBindingsToRelations(bindings = [], currentEntityId){
+  return bindings.map((entry) => {
+    const propertyUri = entry?.property?.value || "";
+    const propertyId = propertyUri.split("/").pop() || "";
+    const relatedUri = entry?.related?.value || "";
+    const relatedEntityId = relatedUri.split("/").pop() || "";
+    const direction = entry?.direction?.value || "outbound";
+    const relationType = propertyId === "P144" && direction === "inbound"
+      ? "adaptation"
+      : (WIKIDATA_RELATION_PROPERTY_MAP[propertyId] || "related_work");
+    return {
+      relatedEntityId,
+      relatedLabel: entry?.relatedLabel?.value || relatedEntityId,
+      relatedDescription: entry?.relatedDescription?.value || "",
+      relationType: normalizeRelationType(relationType),
+      source: "wikidata",
+      confidence: propertyId === "P179" || propertyId === "P8345" || propertyId === "P1080" ? 0.78 : 0.72
+    };
+  }).filter((entry) => entry.relatedEntityId && entry.relatedEntityId !== currentEntityId);
+}
+
+function getLibraryItemsByWikidataEntityId(entityId){
+  return getAllLibraryItems().filter((item) => item?.enrichment?.wikidataEntityId === entityId);
+}
+
+function mergeUniqueBy(items = [], getKey = (value) => value){
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = getKey(item);
+    if(!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function persistEnrichmentStateForItem(item){
+  if(!item) return;
+  const cache = await getWikidataCache();
+  const itemKey = getItemStorageKey(item);
+  cache[itemKey] = item.enrichment || buildEnrichmentState();
+  await setWikidataCache(cache);
+
+  if(isPublicView || !item.id) return;
+  const user = await getCurrentUser();
+  if(!user) return;
+
+  const enrichment = buildEnrichmentState(item.enrichment || {});
+  const updatePayload = {
+    wikidata_entity_id: enrichment.wikidataEntityId || null,
+    wikidata_label: enrichment.wikidataLabel || null,
+    wikidata_description: enrichment.wikidataDescription || null,
+    wikidata_last_enriched_at: enrichment.lastEnrichedAt || null,
+    enrichment_status: enrichment.status || "idle",
+    enrichment_confidence: Number(enrichment.confidence || 0),
+    enrichment_source: enrichment.matchedBy || null
+  };
+
+  const { error } = await supabaseClient
+    .from("user_media")
+    .update(updatePayload)
+    .eq("user_id", user.id)
+    .eq("id", item.id);
+
+  if(error){
+    console.error("Supabase enrichment update error:", error);
+  }
+}
+
+function resolveUniverseForHint(store, hint){
+  const existing = (store.universes || []).find((entry) =>
+    entry.wikidataEntityId === hint.wikidataEntityId ||
+    (hint.name && normalizeComparisonText(entry.name) === normalizeComparisonText(hint.name))
+  );
+
+  if(existing){
+    return existing;
+  }
+
+  const universe = {
+    id: buildUniverseEntityId(hint.wikidataEntityId || hint.name || Date.now()),
+    name: hint.name || hint.wikidataEntityId || "Universe",
+    slug: buildUniverseSlug(hint.name || hint.wikidataEntityId || ""),
+    description: hint.description || "",
+    kind: hint.kind || "universe",
+    source: "wikidata",
+    confidence: Number(hint.confidence || 0.7),
+    status: hint.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "confirmed" : "suggested",
+    wikidataEntityId: hint.wikidataEntityId || ""
+  };
+  store.universes = [universe, ...(store.universes || [])];
+  return universe;
+}
+
+function upsertUniverseMembership(store, membership){
+  const key = `${membership.universeId}:${membership.itemKey}`;
+  const existingIndex = (store.memberships || []).findIndex((entry) => `${entry.universeId}:${entry.itemKey}` === key);
+  const normalized = {
+    source: "wikidata",
+    confidence: 0.7,
+    status: "suggested",
+    relationType: "same_universe",
+    createdAt: new Date().toISOString(),
+    ...membership
+  };
+  if(existingIndex >= 0){
+    store.memberships[existingIndex] = { ...store.memberships[existingIndex], ...normalized };
+  } else {
+    store.memberships = [normalized, ...(store.memberships || [])];
+  }
+}
+
+function upsertGraphLink(store, link, asCandidate = false){
+  const collectionName = asCandidate ? "candidates" : "links";
+  const key = `${link.sourceKey}:${link.targetKey}:${normalizeRelationType(link.relationType)}`;
+  const collection = Array.isArray(store[collectionName]) ? store[collectionName] : [];
+  const index = collection.findIndex((entry) => `${entry.sourceKey}:${entry.targetKey}:${normalizeRelationType(entry.relationType)}` === key);
+  const normalized = {
+    id: link.id || `${collectionName}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    relationType: normalizeRelationType(link.relationType),
+    source: link.source || "wikidata",
+    confidence: Number(link.confidence || 0.7),
+    status: link.status || (asCandidate ? "suggested" : "confirmed"),
+    createdAt: link.createdAt || new Date().toISOString(),
+    ...link
+  };
+  if(index >= 0){
+    collection[index] = { ...collection[index], ...normalized };
+  } else {
+    collection.unshift(normalized);
+  }
+  store[collectionName] = collection;
+}
+
+async function buildWikidataEnrichmentForItem(item){
+  const queries = buildWikidataSearchQueriesForItem(item);
+  const searches = await Promise.all(queries.map(async (query) => {
+    try {
+      const response = await searchWikidataEntities(query, currentLanguage);
+      return response.map((entry) => ({
+        ...entry,
+        aliases: Array.isArray(entry.aliases) ? entry.aliases : [],
+        displayLanguage: currentLanguage
+      }));
+    } catch (error) {
+      console.error("Wikidata search error:", error);
+      return [];
+    }
+  }));
+
+  const rankedCandidates = mergeUniqueBy(searches.flat(), (entry) => entry.id)
+    .map((candidate) => ({ ...candidate, confidence: scoreWikidataCandidate(item, candidate) }))
+    .sort((left, right) => right.confidence - left.confidence);
+
+  const best = rankedCandidates[0];
+  if(!best || best.confidence < WIKIDATA_MATCH_MEDIUM_CONFIDENCE){
+    return buildEnrichmentState({
+      status: rankedCandidates.length ? "suggested" : "missing",
+      confidence: Number(best?.confidence || 0),
+      matchCandidates: rankedCandidates.slice(0, 5),
+      error: rankedCandidates.length ? "" : "No confident candidate"
+    });
+  }
+
+  const entityMap = await fetchWikidataEntitiesByIds([best.id]);
+  const entity = entityMap[best.id] || {};
+  const relatedIds = [
+    ...Object.keys(WIKIDATA_UNIVERSE_PROPERTY_MAP).flatMap((propertyId) => getWikidataClaimEntityIds(entity, propertyId)),
+    ...Object.keys(WIKIDATA_RELATION_PROPERTY_MAP).flatMap((propertyId) => getWikidataClaimEntityIds(entity, propertyId))
+  ];
+  const relatedEntities = await fetchWikidataEntitiesByIds(relatedIds);
+  const graphBindings = await fetchWikidataGraphForEntity(best.id);
+  const universeHints = buildWikidataUniverseHints(entity, relatedEntities);
+  const externalRelations = mapWikidataBindingsToRelations(graphBindings, best.id);
+
+  return buildEnrichmentState({
+    wikidataEntityId: best.id,
+    wikidataLabel: readWikidataTextValue(entity.labels) || best.label || "",
+    wikidataDescription: readWikidataTextValue(entity.descriptions) || best.description || "",
+    wikipediaTitle: entity?.sitelinks?.enwiki?.title || entity?.sitelinks?.ruwiki?.title || "",
+    sitelinkUrl: entity?.sitelinks?.enwiki?.title
+      ? `https://en.wikipedia.org/wiki/${encodeURIComponent(entity.sitelinks.enwiki.title.replace(/ /g, "_"))}`
+      : entity?.sitelinks?.ruwiki?.title
+        ? `https://ru.wikipedia.org/wiki/${encodeURIComponent(entity.sitelinks.ruwiki.title.replace(/ /g, "_"))}`
+        : "",
+    aliases: readWikidataAliases(entity),
+    matchedBy: best.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "auto" : "candidate",
+    matchCandidates: rankedCandidates.slice(0, 5),
+    externalRelations,
+    universeHints,
+    status: best.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "ready" : "suggested",
+    confidence: Number(best.confidence || 0),
+    error: "",
+    lastEnrichedAt: new Date().toISOString()
+  });
+}
+
+async function applyWikidataGraphToUniverseStore(item){
+  if(!item?.enrichment?.wikidataEntityId) return;
+  const store = await getUniverseStore();
+  const itemKey = getItemStorageKey(item);
+  const enrichment = buildEnrichmentState(item.enrichment || {});
+
+  enrichment.universeHints.forEach((hint) => {
+    const universe = resolveUniverseForHint(store, hint);
+    upsertUniverseMembership(store, {
+      universeId: universe.id,
+      itemKey,
+      relationType: hint.kind === "series" ? "part_of_series" : "same_universe",
+      source: "wikidata",
+      confidence: Number(hint.confidence || enrichment.confidence || 0.7),
+      status: hint.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "confirmed" : "suggested",
+      wikidataEntityId: hint.wikidataEntityId || ""
+    });
+  });
+
+  const allItems = getAllLibraryItems();
+  const currentEntityId = enrichment.wikidataEntityId;
+  const currentUniverseIds = new Set(enrichment.universeHints.map((entry) => entry.wikidataEntityId));
+
+  allItems
+    .filter((candidate) => getItemStorageKey(candidate) !== itemKey)
+    .forEach((candidate) => {
+      const candidateEnrichment = buildEnrichmentState(candidate.enrichment || {});
+      if(!candidateEnrichment.wikidataEntityId) return;
+
+      const relation = enrichment.externalRelations.find((entry) => entry.relatedEntityId === candidateEnrichment.wikidataEntityId);
+      const sharedUniverse = candidateEnrichment.universeHints?.find((hint) => currentUniverseIds.has(hint.wikidataEntityId));
+
+      if(relation){
+        upsertGraphLink(store, {
+          sourceKey: itemKey,
+          targetKey: getItemStorageKey(candidate),
+          relationType: relation.relationType,
+          source: relation.source,
+          confidence: relation.confidence,
+          wikidataEntityId: currentEntityId
+        }, relation.confidence < WIKIDATA_MATCH_HIGH_CONFIDENCE);
+      } else if(sharedUniverse){
+        upsertGraphLink(store, {
+          sourceKey: itemKey,
+          targetKey: getItemStorageKey(candidate),
+          relationType: "same_universe",
+          source: "inferred",
+          confidence: 0.68,
+          wikidataEntityId: sharedUniverse.wikidataEntityId
+        }, true);
+      }
+    });
+
+  await setUniverseStore(store);
+}
+
+async function ensureItemEnrichmentHydrated(item){
+  if(!item) return buildEnrichmentState();
+  const cache = await getWikidataCache();
+  const cached = cache[getItemStorageKey(item)] || {};
+  item.enrichment = buildEnrichmentState({
+    wikidataEntityId: item.wikidata_entity_id || "",
+    wikidataLabel: item.wikidata_label || "",
+    wikidataDescription: item.wikidata_description || "",
+    lastEnrichedAt: item.wikidata_last_enriched_at || "",
+    status: item.enrichment_status || "idle",
+    confidence: Number(item.enrichment_confidence || 0),
+    matchedBy: item.enrichment_source || "",
+    ...(item.enrichment || {}),
+    ...cached
+  });
+  return item.enrichment;
+}
+
+function shouldEnrichItem(item, force = false){
+  if(force) return true;
+  const enrichment = buildEnrichmentState(item?.enrichment || {});
+  if(!enrichment.lastEnrichedAt) return true;
+  const age = Date.now() - new Date(enrichment.lastEnrichedAt).getTime();
+  return !Number.isFinite(age) || age > WIKIDATA_ENRICHMENT_TTL_MS || enrichment.status === "failed" || enrichment.status === "missing";
+}
+
+async function enrichItemFromWikidata(item, options = {}){
+  if(!item) return null;
+  await ensureItemEnrichmentHydrated(item);
+  if(!shouldEnrichItem(item, options.force)) return item.enrichment;
+
+  const itemKey = getItemStorageKey(item);
+  if(wikidataEnrichmentJobs.has(itemKey)){
+    return await wikidataEnrichmentJobs.get(itemKey);
+  }
+
+  const job = (async () => {
+    item.enrichment = buildEnrichmentState({ ...(item.enrichment || {}), status: "pending", error: "" });
+    try {
+      const enrichment = await buildWikidataEnrichmentForItem(item);
+      item.enrichment = enrichment;
+      await persistEnrichmentStateForItem(item);
+      if(enrichment.wikidataEntityId){
+        await applyWikidataGraphToUniverseStore(item);
+      }
+      return enrichment;
+    } catch (error) {
+      console.error("Wikidata enrichment pipeline error:", error);
+      item.enrichment = buildEnrichmentState({
+        ...(item.enrichment || {}),
+        status: "failed",
+        error: error?.message || "Wikidata enrichment failed",
+        lastEnrichedAt: new Date().toISOString()
+      });
+      await persistEnrichmentStateForItem(item);
+      return item.enrichment;
+    } finally {
+      wikidataEnrichmentJobs.delete(itemKey);
+    }
+  })();
+
+  wikidataEnrichmentJobs.set(itemKey, job);
+  return await job;
+}
+
+async function triggerBackgroundWikidataEnrichment(items = [], options = {}){
+  const queue = items.filter(Boolean).slice(0, options.limit || 4);
+  for(const item of queue){
+    if(!shouldEnrichItem(item, options.force)) continue;
+    enrichItemFromWikidata(item, { force: options.force }).catch((error) => {
+      console.error("Background Wikidata enrichment error:", error);
+    });
+  }
 }
 
 function getTrackerConfigByCategory(category){
@@ -7009,13 +10484,15 @@ async function renderUniversesScreen(){
   const store = await getUniverseStore();
   const items = getAllLibraryItems();
   container.innerHTML = (store.universes || []).length ? (store.universes || []).map((universe) => {
-    const members = (store.memberships || []).filter((membership) => membership.universeId === universe.id);
+    const members = (store.memberships || []).filter((membership) => membership.universeId === universe.id && membership.status !== "rejected");
     const memberTitles = members.map((membership) => items.find((item) => buildTrackerStorageKey(item, item.category) === membership.itemKey)?.title).filter(Boolean).slice(0, 4);
+    const suggestedCount = members.filter((membership) => membership.status === "suggested").length;
     return `
       <article class="universe-card">
         <h3 class="universe-card-title">${escapeHtml(universe.name)}</h3>
         <div class="universe-card-meta">${escapeHtml(universe.description || "")}</div>
-        <div class="now-card-meta">Объектов: ${members.length}</div>
+        <div class="now-card-meta">Объектов: ${members.length} · ${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(universe.source || "user")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(universe.confidence || 0.7))}</div>
+        ${suggestedCount ? `<div class="activity-card-meta">${escapeHtml(t().labels.enrichmentSuggestedStatus)}: ${suggestedCount}</div>` : ""}
         <div class="linked-list">${memberTitles.map((title) => `<div class="link-chip"><strong>${escapeHtml(title)}</strong></div>`).join("")}</div>
       </article>`;
   }).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
@@ -7037,28 +10514,179 @@ async function renderTrackerSummaryForCurrentItem(){
   container.innerHTML = cards.map(([value,label]) => `<article class="tracker-stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
 }
 
+function formatConfidence(value){
+  const score = Math.round(Number(value || 0) * 100);
+  return `${score}%`;
+}
+
+function formatEnrichmentStatus(status){
+  const labels = {
+    ready: t().labels.enrichmentReady,
+    pending: t().labels.enrichmentPending,
+    missing: t().labels.enrichmentMissing,
+    failed: t().labels.enrichmentFailed,
+    suggested: t().labels.enrichmentSuggestedStatus
+  };
+  return labels[status] || t().labels.enrichmentSecondary;
+}
+
+function getCurrentItemUniverseGraphSnapshot(item, store){
+  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
+  const memberships = (store.memberships || []).filter((membership) => membership.itemKey === itemKey && membership.status !== "rejected");
+  const confirmedLinks = (store.links || []).filter((link) => link.sourceKey === itemKey || link.targetKey === itemKey).map((entry) => ({ ...entry, status: "confirmed" }));
+  const candidateLinks = (store.candidates || []).filter((link) => (link.sourceKey === itemKey || link.targetKey === itemKey) && link.status !== "rejected").map((entry) => ({ ...entry, status: entry.status || "suggested" }));
+  return { itemKey, memberships, confirmedLinks, candidateLinks };
+}
+
+function renderUniverseMembershipCards(memberships = [], universes = []){
+  return memberships.map((membership) => {
+    const universe = universes.find((entry) => entry.id === membership.universeId);
+    if(!universe) return "";
+    return `
+      <article class="relation-card">
+        <div class="relation-card-main">
+          <div class="relation-card-title">${escapeHtml(universe.name)}</div>
+          <div class="relation-card-meta">${escapeHtml(formatRelationType(membership.relationType))} · ${escapeHtml(universe.kind || "universe")}</div>
+          <div class="relation-card-submeta">${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(membership.source || universe.source || "user")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(membership.confidence || universe.confidence || 0.7))}</div>
+        </div>
+        ${isPublicView ? "" : `<div class="relation-card-actions">
+          <button class="button button-ghost" type="button" onclick="detachUniverseMembership('${escapeHtml(membership.universeId)}')">${escapeHtml(t().labels.enrichmentDetach)}</button>
+        </div>`}
+      </article>
+    `;
+  }).join("");
+}
+
+function renderRelationCards(relations = [], items = [], itemKey = ""){
+  return relations.map((relation) => {
+    const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
+    const target = items.find((candidate) => getItemStorageKey(candidate, candidate.category) === targetKey);
+    const targetTitle = target?.title || relation.relatedLabel || t().labels.enrichmentExternal;
+    const targetMeta = target ? translateCategory(target.category) : (relation.relatedDescription || t().labels.enrichmentExternal);
+    const actions = isPublicView
+      ? ""
+      : relation.status === "suggested"
+      ? `
+        <button class="button button-secondary" type="button" onclick="confirmRelationCandidate('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentConfirm)}</button>
+        <button class="button button-ghost" type="button" onclick="rejectRelationCandidate('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentReject)}</button>
+      `
+      : `<button class="button button-ghost" type="button" onclick="detachConfirmedRelation('${escapeHtml(relation.id)}')">${escapeHtml(t().labels.enrichmentDetach)}</button>`;
+
+    return `
+      <article class="relation-card ${relation.status === "suggested" ? "is-suggested" : ""}">
+        <div class="relation-card-main">
+          <div class="relation-card-title">${escapeHtml(targetTitle)}</div>
+          <div class="relation-card-meta">${escapeHtml(formatRelationType(relation.relationType))} · ${escapeHtml(targetMeta)}</div>
+          <div class="relation-card-submeta">${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(relation.source || "wikidata")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(relation.confidence || 0))}</div>
+        </div>
+        <div class="relation-card-actions">${actions}</div>
+      </article>
+    `;
+  }).join("");
+}
+
 async function renderUniverseDetailsForCurrentItem(){
   const container = document.getElementById("details-universe-list");
-  if(!container) return;
+  const meta = document.getElementById("details-enrichment-meta");
+  const suggested = document.getElementById("details-suggested-relations");
+  const suggestedWrap = document.getElementById("details-suggested-relations-wrap");
+  const retryButton = document.getElementById("retry-wikidata-btn");
+  const manualLinkButton = document.getElementById("open-universe-modal-btn");
+  if(!container || !meta || !suggested || !suggestedWrap) return;
   const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item){ container.innerHTML = ""; return; }
+  if(!item){
+    container.innerHTML = "";
+    meta.innerHTML = "";
+    suggested.innerHTML = "";
+    return;
+  }
+
+  await ensureItemEnrichmentHydrated(item);
+  const enrichment = buildEnrichmentState(item.enrichment || {});
   const store = await getUniverseStore();
-  const itemKey = buildTrackerStorageKey(item, currentCategory);
-  const memberships = (store.memberships || []).filter((membership) => membership.itemKey === itemKey);
-  const linkedRelations = (store.links || []).filter((link) => link.sourceKey === itemKey || link.targetKey === itemKey);
   const items = getAllLibraryItems();
-  const html = [
-    ...memberships.map((membership) => {
-      const universe = (store.universes || []).find((entry) => entry.id === membership.universeId);
-      return universe ? `<article class="link-chip"><strong>${escapeHtml(universe.name)}</strong><span class="small">${escapeHtml(membership.relationType || "same_universe")}</span></article>` : "";
-    }),
-    ...linkedRelations.map((relation) => {
-      const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
-      const target = items.find((candidate) => buildTrackerStorageKey(candidate, candidate.category) === targetKey);
-      return target ? `<article class="link-chip"><strong>${escapeHtml(target.title)}</strong><span class="small">${escapeHtml(relation.relationType)}</span></article>` : "";
-    })
-  ].filter(Boolean).join("");
-  container.innerHTML = html || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+  const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
+
+  if(retryButton){
+    retryButton.classList.toggle("hidden", isPublicView);
+    retryButton.disabled = enrichment.status === "pending";
+    retryButton.textContent = enrichment.status === "pending" ? t().labels.enrichmentPending : t().labels.enrichmentRetry;
+  }
+  if(manualLinkButton){
+    manualLinkButton.classList.toggle("hidden", isPublicView);
+  }
+
+  meta.innerHTML = `
+    <article class="enrichment-state-card ${enrichment.status === "ready" ? "is-ready" : enrichment.status === "failed" ? "is-error" : ""}">
+      <div class="enrichment-state-header">
+        <div>
+          <div class="enrichment-state-title">${escapeHtml(enrichment.wikidataLabel || enrichment.wikidataEntityId || t().labels.wikidata)}</div>
+          <div class="enrichment-state-meta">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</div>
+        </div>
+        <span class="meta-chip">${escapeHtml(formatConfidence(enrichment.confidence || 0))}</span>
+      </div>
+      <div class="enrichment-state-copy">${escapeHtml(enrichment.wikidataDescription || enrichment.error || t().labels.enrichmentSecondary)}</div>
+      <div class="enrichment-state-footer">
+        <span>${escapeHtml(t().labels.enrichmentLastUpdated)}: ${escapeHtml(enrichment.lastEnrichedAt ? enrichment.lastEnrichedAt.slice(0, 10) : "—")}</span>
+        ${enrichment.sitelinkUrl ? `<a href="${escapeHtml(enrichment.sitelinkUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t().labels.wikidata)}</a>` : ""}
+      </div>
+    </article>
+  `;
+
+  const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
+  const relationHtml = renderRelationCards(snapshot.confirmedLinks, items, snapshot.itemKey);
+  container.innerHTML = membershipHtml || relationHtml
+    ? `<div class="relation-group">${membershipHtml}</div><div class="relation-group">${relationHtml}</div>`
+    : `<div class="small">${escapeHtml(t().labels.enrichmentNoRelations)}</div>`;
+
+  suggested.innerHTML = renderRelationCards(snapshot.candidateLinks, items, snapshot.itemKey) || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+  suggestedWrap.classList.toggle("hidden", snapshot.candidateLinks.length === 0);
+}
+
+async function retryCurrentItemWikidataEnrichment(){
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  await enrichItemFromWikidata(item, { force: true });
+  await renderUniverseDetailsForCurrentItem();
+  await renderUniversesScreen();
+}
+
+async function confirmRelationCandidate(candidateId){
+  const store = await getUniverseStore();
+  const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
+  if(index < 0) return;
+  const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
+  store.candidates.splice(index, 1);
+  upsertGraphLink(store, candidate, false);
+  await setUniverseStore(store);
+  await renderUniverseDetailsForCurrentItem();
+  await renderUniversesScreen();
+}
+
+async function rejectRelationCandidate(candidateId){
+  const store = await getUniverseStore();
+  store.candidates = (store.candidates || []).map((entry) => entry.id === candidateId ? { ...entry, status: "rejected" } : entry);
+  await setUniverseStore(store);
+  await renderUniverseDetailsForCurrentItem();
+}
+
+async function detachConfirmedRelation(relationId){
+  const store = await getUniverseStore();
+  store.links = (store.links || []).filter((entry) => entry.id !== relationId);
+  await setUniverseStore(store);
+  await renderUniverseDetailsForCurrentItem();
+  await renderUniversesScreen();
+}
+
+async function detachUniverseMembership(universeId){
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  const store = await getUniverseStore();
+  const itemKey = getItemStorageKey(item, currentCategory);
+  store.memberships = (store.memberships || []).filter((entry) => !(entry.universeId === universeId && entry.itemKey === itemKey));
+  await setUniverseStore(store);
+  await renderUniverseDetailsForCurrentItem();
+  await renderUniversesScreen();
 }
 
 function updateBottomNavState(section){
@@ -7207,8 +10835,8 @@ function openUniverseEditor(){
   const relationInput = document.getElementById("universe-item-relation-input");
   const relatedItemInput = document.getElementById("universe-related-item-input");
   const linkTypeInput = document.getElementById("universe-link-type-input");
-  if(relationInput) relationInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
-  if(linkTypeInput) linkTypeInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+  if(relationInput) relationInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatRelationType(type))}</option>`).join("");
+  if(linkTypeInput) linkTypeInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatRelationType(type))}</option>`).join("");
   if(relatedItemInput) relatedItemInput.innerHTML = buildUniverseOptions(currentOpenItemId ? buildTrackerStorageKey(getItemById(currentCategory, currentOpenItemId), currentCategory) : "");
   renderUniverseModalExisting();
   document.getElementById("universe-modal")?.classList.remove("hidden");
@@ -7232,14 +10860,24 @@ async function renderUniverseModalExisting(){
 async function saveUniverseFromModal(){
   const store = await getUniverseStore();
   const name = normalizeSpaces(document.getElementById("universe-name-input")?.value || "");
-  const slug = normalizeSpaces(document.getElementById("universe-slug-input")?.value || name.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, "-").replace(/^-+|-+$/g, ""));
+  const slug = normalizeSpaces(document.getElementById("universe-slug-input")?.value || buildUniverseSlug(name));
   const description = normalizeSpaces(document.getElementById("universe-description-input")?.value || "");
   let universeId = "";
   if(name){
-    universeId = `universe_${slug || Date.now()}`;
+    universeId = buildUniverseEntityId(slug || name || Date.now());
     const exists = (store.universes || []).find((entry) => entry.id === universeId || entry.slug === slug || entry.name === name);
     if(!exists){
-      store.universes = [{ id: universeId, name, slug, description }, ...(store.universes || [])];
+      store.universes = [{
+        id: universeId,
+        name,
+        slug,
+        description,
+        kind: "universe",
+        source: "user",
+        confidence: 1,
+        status: "confirmed",
+        wikidataEntityId: ""
+      }, ...(store.universes || [])];
     } else {
       universeId = exists.id;
     }
@@ -7248,11 +10886,26 @@ async function saveUniverseFromModal(){
   if(item && universeId){
     const itemKey = buildTrackerStorageKey(item, currentCategory);
     if(!(store.memberships || []).some((entry) => entry.universeId === universeId && entry.itemKey === itemKey)){
-      store.memberships = [{ universeId, itemKey, relationType: document.getElementById("universe-item-relation-input")?.value || "same_universe" }, ...(store.memberships || [])];
+      store.memberships = [{
+        universeId,
+        itemKey,
+        relationType: normalizeRelationType(document.getElementById("universe-item-relation-input")?.value || "same_universe"),
+        source: "user",
+        confidence: 1,
+        status: "confirmed",
+        createdAt: new Date().toISOString()
+      }, ...(store.memberships || [])];
     }
     const relatedKey = document.getElementById("universe-related-item-input")?.value || "";
     if(relatedKey){
-      store.links = [{ sourceKey: itemKey, targetKey: relatedKey, relationType: document.getElementById("universe-link-type-input")?.value || "related_work" }, ...(store.links || [])];
+      upsertGraphLink(store, {
+        sourceKey: itemKey,
+        targetKey: relatedKey,
+        relationType: normalizeRelationType(document.getElementById("universe-link-type-input")?.value || "related_work"),
+        source: "user",
+        confidence: 1,
+        status: "confirmed"
+      }, false);
     }
     await recordProductActivity("universe_linked", item, { universeId, relatedKey });
   }
@@ -7293,7 +10946,9 @@ applyTranslations = function applyTranslationsProductArchitecture(){
     ["open-tracker-modal-btn", "Обновить"],
     ["details-universe-title", "Связи и вселенные"],
     ["details-universe-note", "Франшизы, циклы и связанные работы"],
+    ["retry-wikidata-btn", t().labels.enrichmentRetry],
     ["open-universe-modal-btn", "Связать"],
+    ["details-suggested-relations-summary", t().labels.enrichmentSuggested],
     ["tracker-modal-title", "Трекер"],
     ["tracker-status-label", "Статус"],
     ["tracker-started-label", "Дата начала"],
@@ -7330,6 +10985,13 @@ applyTranslations = function applyTranslationsProductArchitecture(){
 const productArchitectureOpenCardById = openCardById;
 openCardById = async function openCardByIdWithArchitecture(id){
   await productArchitectureOpenCardById(id);
+  const item = getItemById(currentCategory, id);
+  if(item){
+    await ensureItemEnrichmentHydrated(item);
+    if(shouldEnrichItem(item, false)){
+      await enrichItemFromWikidata(item, { force: false });
+    }
+  }
   await renderTrackerSummaryForCurrentItem();
   await renderUniverseDetailsForCurrentItem();
 };
@@ -7347,6 +11009,7 @@ loadCategoryFromSupabase = async function loadCategoryFromSupabaseWithArchitectu
   const result = await productArchitectureLoadCategory(category);
   await applyTrackerOverridesToCategory(category);
   await rebuildStatusFilterOptions();
+  await triggerBackgroundWikidataEnrichment(demoData[category] || [], { limit: 3 });
   refreshProductArchitectureViews();
   return result;
 };
