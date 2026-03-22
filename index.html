@@ -317,16 +317,19 @@
                 <h3 id="details-universe-title">Связи и вселенные</h3>
                 <div class="section-note" id="details-universe-note">Франшизы, циклы и связанные работы</div>
               </div>
-              <div class="section-heading-actions">
-                <button class="button button-secondary" type="button" onclick="retryCurrentItemWikidataEnrichment()" id="retry-wikidata-btn">Повторить Wikidata</button>
-                <button class="button button-secondary" type="button" onclick="openUniverseEditorByCurrentItem()" id="open-universe-modal-btn">Связать</button>
-              </div>
             </div>
             <div id="details-enrichment-meta" class="enrichment-meta"></div>
             <div id="details-universe-list" class="linked-list relation-stack"></div>
             <details id="details-suggested-relations-wrap" class="relation-suggestions hidden">
               <summary id="details-suggested-relations-summary">Suggested relations</summary>
               <div id="details-suggested-relations" class="linked-list relation-stack"></div>
+            </details>
+            <details id="details-relation-advanced" class="relation-advanced">
+              <summary id="details-relation-advanced-summary">Advanced editing</summary>
+              <div class="section-heading-actions relation-advanced-actions">
+                <button class="button button-secondary" type="button" onclick="retryCurrentItemWikidataEnrichment()" id="retry-wikidata-btn">Повторить Wikidata</button>
+                <button class="button button-secondary" type="button" onclick="openUniverseEditorByCurrentItem()" id="open-universe-modal-btn">Связать вручную</button>
+              </div>
             </details>
           </div>
 
@@ -781,6 +784,21 @@
         <div class="modal-actions">
           <button class="button button-ghost" type="button" onclick="closeUniverseModal()" id="universe-cancel-btn">Отмена</button>
           <button class="button button-primary" type="button" onclick="saveUniverseFromModal()" id="universe-save-btn">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="series-insight-modal" class="modal hidden">
+      <div class="modal-box series-insight-modal-box">
+        <div class="section-heading compact-heading">
+          <div>
+            <h3 id="series-insight-modal-title">Серия и подсказки</h3>
+            <div class="section-note" id="series-insight-modal-note">Система сама нашла серию, связанные части и быстрые действия.</div>
+          </div>
+        </div>
+        <div id="series-insight-body" class="series-insight-body"></div>
+        <div class="modal-actions">
+          <button class="button button-ghost" type="button" onclick="closeSeriesInsightModal()" id="series-insight-close-btn">Закрыть</button>
         </div>
       </div>
     </div>
