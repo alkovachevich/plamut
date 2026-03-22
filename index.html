@@ -78,7 +78,7 @@
       </div>
     </header>
 
-    <div id="auth-screen" class="auth-screen hidden">
+    <div id="auth-screen" class="auth-screen">
       <div class="auth-card">
         <div class="auth-badge">Plamut</div>
         <h2 class="auth-title">Plamut Login</h2>
@@ -95,17 +95,17 @@
     </div>
 
     <div id="home-screen" class="hidden">
-      <section class="home-minimal panel-section">
-        <div class="home-minimal-copy">
+      <section class="home-overview panel-section">
+        <div class="home-overview-copy">
           <div class="hero-badge" id="hero-badge">Your personal universe</div>
           <h1 class="home-title">Plamut</h1>
           <div class="subtitle" id="home-subtitle"></div>
         </div>
 
-        <div class="home-minimal-actions">
-          <button id="home-add-btn" class="button button-primary home-minimal-button" type="button" onclick="handlePrimaryAddAction()">Добавить</button>
-          <div class="header-panel-wrap share-menu-wrap home-share-wrap">
-            <button id="share-library-btn" class="button button-secondary share-library-btn home-minimal-button" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
+        <div class="home-overview-actions">
+          <button id="home-add-btn" class="button hidden" type="button" aria-hidden="true" tabindex="-1">Добавить</button>
+          <div class="header-panel-wrap share-menu-wrap">
+            <button id="share-library-btn" class="button button-secondary share-library-btn" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
               <button class="button button-secondary header-popover-button" type="button" onclick="copyPublicShareLinkFromMenu()" id="share-library-copy-action">Copy link</button>
               <button class="button button-secondary header-popover-button" type="button" onclick="toggleShareMenuQr()" id="share-library-qr-action">Show QR</button>
@@ -130,6 +130,53 @@
           <button class="button button-secondary" type="button" onclick="startQuickAdd('Anime')" id="quick-add-anime">🍥 Аниме</button>
           <button class="button button-secondary" type="button" onclick="startQuickAdd('Manga')" id="quick-add-manga">📖 Манга</button>
         </div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-now-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="now-section-title">Сейчас</h2>
+            <div class="section-note" id="now-section-note">Продолжайте с места, где остановились</div>
+          </div>
+          <button class="button button-ghost" type="button" onclick="showNowScreen()" id="open-now-screen-btn">Открыть</button>
+        </div>
+        <div id="home-now-grid" class="dashboard-compact-grid"></div>
+      </section>
+
+      <section class="dashboard-section panel-section home-shortcuts-section" id="home-shortcuts-section">
+        <div class="section-heading compact-heading">
+          <div>
+            <h2 class="section-title" id="home-shortcuts-title">Быстрые переходы</h2>
+            <div class="section-note" id="home-shortcuts-note">Главная отвечает только на вопрос, что делать сейчас.</div>
+          </div>
+        </div>
+        <div id="home-shortcuts-grid" class="home-shortcuts-grid">
+          <button class="button button-primary" type="button" onclick="showNowScreen()" id="home-shortcut-now">Сейчас</button>
+          <button class="button button-secondary" type="button" onclick="showLibraryRoot()" id="home-shortcut-library">Библиотека</button>
+          <button class="button button-secondary" type="button" onclick="showUniversesScreen()" id="home-shortcut-universes">Связи</button>
+          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="home-shortcut-stats">Статистика</button>
+        </div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-summary-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="home-summary-title">Краткая сводка</h2>
+            <div class="section-note" id="home-summary-note">Только ключевые цифры по библиотеке.</div>
+          </div>
+          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="open-stats-screen-btn">Открыть</button>
+        </div>
+        <div id="home-stats-grid" class="dashboard-stats-grid"></div>
+      </section>
+
+      <section class="dashboard-section panel-section" id="home-activity-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="section-title" id="activity-section-title">Продолжить</h2>
+            <div class="section-note" id="activity-section-note">Последние изменения и то, к чему стоит вернуться.</div>
+          </div>
+        </div>
+        <div id="home-activity-list" class="activity-list"></div>
       </section>
     </div>
 
@@ -156,61 +203,6 @@
           <div class="card category-card" onclick="openCategory('Manga')" id="cat-manga"></div>
           <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
         </div>
-      </section>
-    </div>
-
-    <div id="collections-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-collections-btn">←</button>
-          <h2 id="collections-screen-title" class="screen-title">Коллекции</h2>
-        </div>
-      </div>
-      <section class="panel-section collections-screen-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="collections-section-title">Папки и коллекции</h2>
-            <div class="section-note" id="collections-section-note">Все ваши папки по категориям.</div>
-          </div>
-        </div>
-        <div id="collections-summary-grid" class="dashboard-stats-grid"></div>
-        <div id="collections-list" class="collections-grid"></div>
-      </section>
-    </div>
-
-    <div id="profile-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="showSettingsScreen()" id="back-profile-screen-btn">←</button>
-          <h2 id="profile-screen-page-title" class="screen-title">Профиль</h2>
-        </div>
-      </div>
-      <section class="panel-section settings-screen-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="profile-screen-heading">Профиль</h2>
-            <div class="section-note" id="profile-screen-note">Аккаунт, публичная карточка и быстрые действия.</div>
-          </div>
-        </div>
-        <div id="profile-screen-summary" class="settings-stack"></div>
-      </section>
-    </div>
-
-    <div id="settings-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-settings-btn">←</button>
-          <h2 id="settings-screen-title" class="screen-title">Настройки</h2>
-        </div>
-      </div>
-      <section class="panel-section settings-screen-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="settings-section-title">Настройки</h2>
-            <div class="section-note" id="settings-section-note">Сессия, интерфейс, шэринг и профиль.</div>
-          </div>
-        </div>
-        <div id="settings-stack" class="settings-stack"></div>
       </section>
     </div>
 
@@ -927,27 +919,12 @@
       </div>
     </div>
 
-  <nav class="bottom-nav" id="bottom-nav" aria-label="Primary navigation">
-    <button class="bottom-nav-btn" type="button" onclick="showLibraryRoot()" id="nav-library-btn">
-      <span class="bottom-nav-icon" aria-hidden="true">📚</span>
-      <span class="bottom-nav-label">Библиотека</span>
-    </button>
-    <button class="bottom-nav-btn" type="button" onclick="showCollectionsScreen()" id="nav-collections-btn">
-      <span class="bottom-nav-icon" aria-hidden="true">🗂️</span>
-      <span class="bottom-nav-label">Папки</span>
-    </button>
-    <button class="bottom-nav-btn bottom-nav-btn-add is-active" type="button" onclick="openPrimaryAddFromNav()" id="nav-add-btn" aria-label="Добавить">
-      <span class="bottom-nav-icon" aria-hidden="true">＋</span>
-      <span class="bottom-nav-label">Добавить</span>
-    </button>
-    <button class="bottom-nav-btn" type="button" onclick="showUniversesScreen()" id="nav-universes-btn">
-      <span class="bottom-nav-icon" aria-hidden="true">🪐</span>
-      <span class="bottom-nav-label">Связи</span>
-    </button>
-    <button class="bottom-nav-btn" type="button" onclick="showSettingsScreen()" id="nav-settings-btn">
-      <span class="bottom-nav-icon" aria-hidden="true">⚙️</span>
-      <span class="bottom-nav-label">Профиль</span>
-    </button>
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bottom-nav-btn is-active" type="button" onclick="showDashboardScreen()" id="nav-home-btn">Главная</button>
+    <button class="bottom-nav-btn" type="button" onclick="showNowScreen()" id="nav-now-btn">Сейчас</button>
+    <button class="bottom-nav-btn" type="button" onclick="showLibraryRoot()" id="nav-library-btn">Библиотека</button>
+    <button class="bottom-nav-btn" type="button" onclick="showStatsScreen()" id="nav-stats-btn">Статистика</button>
+    <button class="bottom-nav-btn" type="button" onclick="showUniversesScreen()" id="nav-universes-btn">Вселенные</button>
   </nav>
 
   <script src="/script.js"></script>
