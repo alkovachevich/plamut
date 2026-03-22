@@ -2639,9 +2639,17 @@ body.sheet-open {
 
 .enrichment-meta,
 .relation-stack,
-.relation-group {
+.relation-group,
+.relation-layer-group {
   display: grid;
   gap: 10px;
+}
+
+.relation-layer-title {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .enrichment-state-card,
