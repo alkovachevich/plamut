@@ -496,6 +496,8 @@
     let searchTimer = null;
     let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
     let currentShelfSearchQuery = "";
+    let currentFolderModalItemId = null;
+    let pendingFolderSelection = "";
     let currentOpenMenuItemId = null;
     let currentProfileData = null;
     let currentPublicProfile = null;
@@ -854,6 +856,10 @@
       syncShelfSearchInput();
     }
 
+    function updateHeaderCompactState(){
+      document.body.classList.toggle("header-compact", window.scrollY > 18);
+    }
+
     async function renderStatusOptions(){
       const container = document.getElementById("status-buttons");
       if(!container) return;
@@ -874,15 +880,7 @@
     }
 
     async function renderFolderFilterOptions(){
-      const detailsFolderSelect = document.getElementById("details-folder-select");
-      const folders = await getAvailableFolders();
-
-      if(detailsFolderSelect){
-        detailsFolderSelect.innerHTML = [
-          `<option value="">${escapeHtml(t().labels.noFolder)}</option>`,
-          ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
-        ].join("");
-      }
+      return await getAvailableFolders();
     }
 
     async function renderCustomCollections(){
@@ -952,7 +950,12 @@
       document.getElementById("canonical-key-section").querySelector("h3").textContent = t().labels.canonicalKey;
       document.querySelector("#canonical-key-section .button").textContent = t().buttons.save;
       document.getElementById("details-folder-title").textContent = t().labels.folder;
-      document.getElementById("save-folder-btn").textContent = t().labels.saveFolder;
+      document.getElementById("open-folder-modal-btn").textContent = t().buttons.addToFolder;
+      document.getElementById("details-folder-current").textContent = t().labels.noFolder;
+      document.getElementById("folder-modal-title").textContent = t().buttons.addToFolder;
+      document.getElementById("folder-modal-subtitle").textContent = t().labels.folder;
+      document.getElementById("folder-modal-cancel-btn").textContent = t().buttons.cancel;
+      document.getElementById("folder-modal-save-btn").textContent = t().labels.saveFolder;
 
       document.getElementById("profile-title").textContent = t().profile.title;
       document.getElementById("profile-subtitle").textContent = t().profile.subtitle;
@@ -1128,6 +1131,7 @@
       document.getElementById("details-screen").classList.add("hidden");
       document.getElementById("auth-screen").classList.add("hidden");
       document.getElementById("public-share-screen")?.classList.add("hidden");
+      closeFolderModal();
     }
 
     function isPublicShareRoute(){
@@ -1547,14 +1551,26 @@
       return Array.from(grouped.values());
     }
 
+    function mergeResults(results = [], queryMeta = {}){
+      return mergeBookResults(results, queryMeta);
+    }
+
     function dedupeBookResults(results = [], queryMeta = {}){
       return mergeBookResults(results, queryMeta);
+    }
+
+    function dedupeResults(results = [], queryMeta = {}){
+      return dedupeBookResults(results, queryMeta);
     }
 
     function rankBookResults(results = [], queryMeta = {}){
       return results
         .filter((item) => isBookResultUsable(item))
         .sort((a, b) => buildBookResultScore(b, queryMeta) - buildBookResultScore(a, queryMeta));
+    }
+
+    function rankResults(results = [], queryMeta = {}){
+      return rankBookResults(results, queryMeta);
     }
 
     function createBookResult({
@@ -1991,13 +2007,13 @@
         const google = await searchGoogleBooks(queryMeta, limit);
         const openLibrary = await searchOpenLibrary(queryMeta, limit);
 
-        const merged = mergeBookResults([
+        const merged = mergeResults([
           ...fantlab,
           ...google,
           ...openLibrary
         ], queryMeta);
 
-        return rankBookResults(dedupeBookResults(merged, queryMeta), queryMeta).slice(0, limit);
+        return rankResults(dedupeResults(merged, queryMeta), queryMeta).slice(0, limit);
       } catch (e) {
         console.error("Books search error:", e);
         return [];
@@ -2367,23 +2383,82 @@
       }
     }
 
-    async function saveItemFolder(){
+    async function renderFolderModalOptions(){
+      const list = document.getElementById("folder-modal-list");
+      if(!list) return;
+
+      const folders = await getAvailableFolders();
+      const options = ["", ...folders];
+      list.innerHTML = "";
+
+      options.forEach((folder) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "folder-option" + (pendingFolderSelection === folder ? " is-active" : "");
+        button.textContent = folder || t().labels.noFolder;
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          pendingFolderSelection = folder;
+          renderFolderModalOptions();
+        });
+        list.appendChild(button);
+      });
+    }
+
+    async function openFolderModalById(id){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(currentCategory, currentOpenItemId);
-      const select = document.getElementById("details-folder-select");
-      if(!item || !select){
+      const item = getItemById(currentCategory, id);
+      if(!item) return;
+
+      currentFolderModalItemId = id;
+      pendingFolderSelection = item.folder || "";
+      await renderFolderModalOptions();
+      document.getElementById("folder-modal")?.classList.remove("hidden");
+    }
+
+    async function openFolderModalByCurrentItem(){
+      if(!currentOpenItemId) return;
+      await openFolderModalById(currentOpenItemId);
+    }
+
+    function closeFolderModal(){
+      document.getElementById("folder-modal")?.classList.add("hidden");
+      currentFolderModalItemId = null;
+      pendingFolderSelection = "";
+    }
+
+    function closeFolderModalOnBackdrop(event){
+      if(event?.target?.id === "folder-modal"){
+        closeFolderModal();
+      }
+    }
+
+    async function saveItemFolderFromModal(){
+      if(!isOwnerControlAllowed()) return;
+      const item = getItemById(currentCategory, currentFolderModalItemId);
+      if(!item){
+        closeFolderModal();
         return;
       }
 
       const assignments = await getFolderAssignments();
-      const folder = select.value || "";
-      assignments[getItemStorageKey({ ...item, category: currentCategory })] = folder;
+      assignments[getItemStorageKey({ ...item, category: currentCategory })] = pendingFolderSelection || "";
       await setFolderAssignments(assignments);
 
-      item.folder = folder;
+      item.folder = pendingFolderSelection || "";
+      closeFolderModal();
       renderShelf();
-      await openCardById(item.id);
+
+      if(currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
+        await openCardById(item.id);
+      }
+
       alert(t().labels.folderSaved);
+    }
+
+    async function saveItemFolder(){
+      await saveItemFolderFromModal();
     }
 
     async function updateStatusInSupabase(itemId, status){
@@ -2604,11 +2679,7 @@
     async function openFolderPickerById(id){
       if(!isOwnerControlAllowed()) return;
       closeCardMenu();
-      await openCardById(id);
-      const folderSelect = document.getElementById("details-folder-select");
-      if(folderSelect){
-        folderSelect.focus();
-      }
+      await openFolderModalById(id);
     }
 
     function renderShelf(){
@@ -2669,11 +2740,14 @@
         const card = document.createElement("div");
         card.className = "media-card";
         card.dataset.itemId = item.id;
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.setAttribute("aria-label", item.title || t().buttons.open);
         card.innerHTML = `
           <div class="media-card-top">
-            <button class="media-cover media-cover-button" type="button" onclick="openCardById(${item.id})">
+            <div class="media-cover">
               ${coverHtml}
-            </button>
+            </div>
             ${menuHtml}
           </div>
           <div class="media-info">
@@ -2682,6 +2756,13 @@
             <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
           </div>
         `;
+        card.addEventListener("click", () => openCardById(item.id));
+        card.addEventListener("keydown", (event) => {
+          if(event.key === "Enter" || event.key === " "){
+            event.preventDefault();
+            openCardById(item.id);
+          }
+        });
 
         return card;
       };
@@ -3212,20 +3293,21 @@
       const canonicalSection = document.getElementById("canonical-key-section");
       const canonicalInput = document.getElementById("canonical-key-input");
       const folderSection = document.getElementById("details-folder-section");
-      const folderSelect = document.getElementById("details-folder-select");
+      const folderCurrent = document.getElementById("details-folder-current");
+      const folderButton = document.getElementById("open-folder-modal-btn");
 
       if(canonicalInput && canonicalSection){
         canonicalSection.classList.add("hidden");
         canonicalInput.value = item?.canonical_key || "";
       }
 
-      if(folderSection && folderSelect){
+      if(folderSection && folderCurrent && folderButton){
         if(isPublicView){
           folderSection.classList.add("hidden");
         } else {
           folderSection.classList.remove("hidden");
-          await renderFolderFilterOptions();
-          folderSelect.value = item?.folder || "";
+          folderCurrent.textContent = item?.folder || t().labels.noFolder;
+          folderButton.disabled = !item;
         }
       }
 
@@ -4745,12 +4827,15 @@ async function removeAvatar(){
     async function init(){
       applyThemeMode();
       applyTranslations();
+      updateHeaderCompactState();
 
       systemThemeMedia.addEventListener("change", () => {
         if(currentThemeMode === "system"){
           applyThemeMode();
         }
       });
+
+      window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
 
       document.addEventListener("click", (event) => {
         const panel = document.getElementById("preferences-panel");
@@ -4764,6 +4849,7 @@ async function removeAvatar(){
         if(event.key === "Escape"){
           closePreferencesPanel();
           closeShareItemModal();
+          closeFolderModal();
         }
       });
 
