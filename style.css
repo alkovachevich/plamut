@@ -3040,3 +3040,139 @@ body.sheet-open {
   }
 
 }
+
+.home-minimal {
+  min-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px 24px;
+}
+
+.home-minimal-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-minimal .subtitle {
+  max-width: 26rem;
+}
+
+.home-minimal-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.home-minimal-button {
+  min-height: 56px;
+  width: 100%;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.home-share-wrap {
+  width: 100%;
+}
+
+.home-share-wrap .share-library-btn {
+  width: 100%;
+}
+
+.collections-grid,
+.settings-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.collection-card,
+.settings-card {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent 16%);
+  box-shadow: var(--shadow-soft);
+}
+
+.collection-card-header,
+.settings-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.collection-card-title,
+.settings-card-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.collection-card-meta,
+.settings-card-meta {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.collection-chip-row,
+.settings-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.collection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.collection-chip-count {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.settings-screen-section .section-heading,
+.collections-screen-section .section-heading {
+  margin-bottom: 18px;
+}
+
+@media (min-width: 721px) {
+  .home-minimal {
+    padding: 48px;
+  }
+
+  .home-minimal-actions {
+    max-width: 360px;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100%, calc(100% - 20px));
+    padding-top: 12px;
+  }
+
+  .home-minimal {
+    min-height: calc(100vh - 220px);
+    padding: 24px 18px;
+  }
+
+  .bottom-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .bottom-nav-btn {
+    font-size: 0.74rem;
+  }
+}
