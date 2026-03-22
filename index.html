@@ -138,14 +138,19 @@
       </div>
 
       <div class="toolbar-row filter-toolbar" id="filter-toolbar">
-        <label for="status-filter" id="status-filter-label"></label>
-        <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
-          <option value="All">All</option>
-          <option value="Planned">Planned</option>
-          <option value="In progress">In progress</option>
-          <option value="Done">Done</option>
-          <option value="Dropped">Dropped</option>
-        </select>
+        <div class="filter-toolbar-search">
+          <input id="shelf-search-input" class="input" type="search" autocomplete="off" oninput="setShelfSearchQuery(this.value)">
+        </div>
+        <div class="filter-toolbar-status" id="status-filter-wrap">
+          <label for="status-filter" id="status-filter-label"></label>
+          <select id="status-filter" class="select" onchange="setStatusFilter(this.value)">
+            <option value="All">All</option>
+            <option value="Planned">Planned</option>
+            <option value="In progress">In progress</option>
+            <option value="Done">Done</option>
+            <option value="Dropped">Dropped</option>
+          </select>
+        </div>
       </div>
 
       <div class="shelf-shell">
