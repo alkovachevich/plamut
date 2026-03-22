@@ -2708,6 +2708,97 @@ body.sheet-open {
   margin-bottom: 12px;
 }
 
+.relation-advanced {
+  margin-top: 12px;
+}
+
+.relation-advanced summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.relation-advanced-actions {
+  margin-top: 10px;
+}
+
+.series-insight-card,
+.series-insight-row {
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 96%, transparent 4%);
+  box-shadow: var(--shadow-soft);
+}
+
+.series-insight-card {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.series-insight-heading,
+.series-insight-actions,
+.series-insight-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.series-insight-label {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.series-insight-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.series-insight-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 8px;
+}
+
+.series-insight-stat {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent 18%);
+  display: grid;
+  gap: 2px;
+}
+
+.series-insight-stat strong {
+  font-size: 1rem;
+}
+
+.series-insight-stat span,
+.series-insight-next {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.series-insight-missing,
+.series-insight-actions,
+.series-insight-list,
+.series-insight-body {
+  display: grid;
+  gap: 10px;
+}
+
+.series-insight-row {
+  padding: 12px 14px;
+}
+
+.series-insight-row.is-current {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border) 55%);
+}
+
+.series-insight-modal-box {
+  width: min(720px, 100%);
+}
+
 .tracker-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2808,5 +2899,12 @@ body.sheet-open {
   .relation-card,
   .enrichment-state-header {
     flex-direction: column;
+  }
+
+  .series-insight-heading,
+  .series-insight-actions,
+  .series-insight-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
