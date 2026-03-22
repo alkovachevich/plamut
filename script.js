@@ -87,6 +87,7 @@
         buttons: {
           backHome: "← Back",
           addNew: "+ Add new",
+          addPrimary: "Add",
           addFolder: "+ Add folder",
           addToFolder: "Add to folder",
           moreActions: "More actions",
@@ -172,7 +173,9 @@
         home: {
           heroBadge: "Your personal universe",
           libraryTitle: "Library",
-          libraryNote: "Choose a category"
+          libraryNote: "Choose a category",
+          quickAddTitle: "Quick add",
+          quickAddNote: "Choose a category and jump straight into adding."
         },
         brand: {
           subtitle: "Media Tracker"
@@ -256,6 +259,7 @@
         buttons: {
           backHome: "← Назад",
           addNew: "+ Добавить",
+          addPrimary: "Добавить",
           addFolder: "+ Папка",
           addToFolder: "Добавить в папку",
           moreActions: "Ещё действия",
@@ -341,7 +345,9 @@
         home: {
           heroBadge: "Ваша личная вселенная",
           libraryTitle: "Библиотека",
-          libraryNote: "Выберите категорию"
+          libraryNote: "Выберите категорию",
+          quickAddTitle: "Быстрое добавление",
+          quickAddNote: "Выберите категорию и сразу перейдите к добавлению."
         },
         brand: {
           subtitle: "Трекер медиа"
@@ -360,6 +366,7 @@
         previewMode: "Preview",
         fullMode: "Full library",
         publicLink: "Public link",
+        nfcLink: "NFC link",
         copyLink: "Copy link",
         showQr: "Show QR",
         hideQr: "Hide QR",
@@ -377,9 +384,11 @@
         previewHint: "A read-only preview from this public library.",
         openLibrary: "Open library",
         saveToMine: "Save to my library",
+        saveToMineDone: "Saved",
         savedToMine: "Library saved to your collection.",
         loginToSave: "Log in to save this library to your collection.",
         alreadySaved: "This library is already saved.",
+        ownLibrary: "This is your own library.",
         unavailable: "This public card is unavailable.",
         private: "Public access is disabled for this card.",
         noItems: "No public items yet.",
@@ -412,6 +421,7 @@
         previewMode: "Превью",
         fullMode: "Полная библиотека",
         publicLink: "Публичная ссылка",
+        nfcLink: "NFC-ссылка",
         copyLink: "Скопировать ссылку",
         showQr: "Показать QR",
         hideQr: "Скрыть QR",
@@ -429,9 +439,11 @@
         previewHint: "Read-only превью этой публичной библиотеки.",
         openLibrary: "Открыть библиотеку",
         saveToMine: "Сохранить в мою библиотеку",
+        saveToMineDone: "Сохранено",
         savedToMine: "Библиотека сохранена в вашу коллекцию.",
         loginToSave: "Войдите, чтобы сохранить эту библиотеку к себе.",
         alreadySaved: "Эта библиотека уже сохранена.",
+        ownLibrary: "Это ваша собственная библиотека.",
         unavailable: "Эта публичная карточка недоступна.",
         private: "Публичный доступ к этой карточке выключен.",
         noItems: "Публичных материалов пока нет.",
@@ -463,6 +475,10 @@
       notFoundHint: "Please check the link and try again.",
       guestBadge: "Public library",
       ownerBadge: "NFC business card",
+      libraryCategories: "Categories",
+      libraryFolders: "Folders",
+      libraryStatuses: "Statuses",
+      fastEntry: "NFC quick entry",
       originalTitle: "Original title",
       rating: "Rating",
       year: "Year",
@@ -477,8 +493,12 @@
       emptyLibraryHint: "Вернитесь позже — владелец может добавить новые книги, фильмы или сериалы.",
       notFound: "Эта публичная визитка недоступна.",
       notFoundHint: "Проверьте ссылку и попробуйте ещё раз.",
-      guestBadge: "Public library",
+      guestBadge: "Публичная библиотека",
       ownerBadge: "NFC-визитка",
+      libraryCategories: "Категории",
+      libraryFolders: "Папки",
+      libraryStatuses: "Статусы",
+      fastEntry: "Быстрый вход по NFC",
       originalTitle: "Оригинальное название",
       rating: "Рейтинг",
       year: "Год",
@@ -505,6 +525,9 @@
     let currentPublicShareItems = [];
     let currentPublicShareState = "loading";
     let publicLibraryExpanded = false;
+    let currentNfcContext = null;
+    let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
+    let currentSavedLibraryState = { saved: false, source: "none" };
 
     const demoData = {
       Books: [],
@@ -705,8 +728,23 @@
       return mode === "full" ? "full" : "preview";
     }
 
+    function generateToken(length = 24){
+      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+      const bytes = new Uint8Array(length);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+    }
+
     function buildPublicShareUrl(token){
-      return `${window.location.origin}/share/${encodeURIComponent(token || "")}`;
+      return `${window.location.origin}/nfc/${encodeURIComponent(token || "")}`;
+    }
+
+    function isNfcRoute(){
+      return window.location.pathname.startsWith("/nfc/");
+    }
+
+    function supportsTable(error, tableName){
+      return !error || !new RegExp(`relation .*${tableName}`, "i").test(String(error.message || ""));
     }
 
     function buildQrImageUrl(url){
@@ -816,11 +854,20 @@
 
     async function getAvailableStatuses(){
       const customStatuses = await getCustomStatuses();
-      return ["Planned", "In progress", "Done", "Dropped", ...customStatuses];
+      const dynamicStatuses = Object.values(demoData)
+        .flat()
+        .map((item) => normalizeSpaces(item?.status || ""))
+        .filter(Boolean);
+      return Array.from(new Set(["Planned", "In progress", "Done", "Dropped", ...customStatuses, ...dynamicStatuses]));
     }
 
     async function getAvailableFolders(){
-      return await getCustomFolders();
+      const customFolders = await getCustomFolders();
+      const dynamicFolders = Object.values(demoData)
+        .flat()
+        .map((item) => normalizeSpaces(item?.folder || ""))
+        .filter(Boolean);
+      return Array.from(new Set([...customFolders, ...dynamicFolders]));
     }
 
     function setLanguage(lang) {
@@ -900,6 +947,9 @@
       document.getElementById("hero-badge").textContent = t().home.heroBadge;
       document.getElementById("library-section-title").textContent = t().home.libraryTitle;
       document.getElementById("library-section-note").textContent = t().home.libraryNote;
+      document.getElementById("home-add-btn").textContent = t().buttons.addPrimary;
+      document.getElementById("home-add-panel-title").textContent = t().home.quickAddTitle;
+      document.getElementById("home-add-panel-note").textContent = t().home.quickAddNote;
       document.getElementById("brand-subtitle").textContent = t().brand.subtitle;
 
       document.getElementById("cat-books").textContent = t().categories.Books;
@@ -908,6 +958,11 @@
       document.getElementById("cat-anime").textContent = t().categories.Anime;
       document.getElementById("cat-manga").textContent = t().categories.Manga;
       document.getElementById("cat-blacklist").textContent = t().categories.Blacklist;
+      document.getElementById("quick-add-books").textContent = t().categories.Books;
+      document.getElementById("quick-add-movies").textContent = t().categories.Movies;
+      document.getElementById("quick-add-series").textContent = t().categories.Series;
+      document.getElementById("quick-add-anime").textContent = t().categories.Anime;
+      document.getElementById("quick-add-manga").textContent = t().categories.Manga;
 
       document.getElementById("public-tab-books").textContent = t().categoryNames.Books;
       document.getElementById("public-tab-movies").textContent = t().categoryNames.Movies;
@@ -995,7 +1050,7 @@
       setTextIfPresent("share-modal-library-mode-label", t().share.libraryMode);
       setTextIfPresent("share-modal-library-mode-preview", t().share.previewMode);
       setTextIfPresent("share-modal-library-mode-full", t().share.fullMode);
-      setTextIfPresent("share-modal-link-label", t().share.publicLink);
+      setTextIfPresent("share-modal-link-label", t().share.nfcLink);
       setTextIfPresent("share-modal-copy-btn", t().share.copyLink);
       setTextIfPresent("share-modal-qr-btn", t().share.showQr);
       setTextIfPresent("share-modal-write-nfc-btn", t().share.writeNfc);
@@ -1005,8 +1060,9 @@
       setTextIfPresent("share-modal-close-btn", t().share.close);
       setTextIfPresent("share-modal-save-btn", t().share.saveSettings);
       setTextIfPresent("public-share-back-btn", t().share.back);
-      setTextIfPresent("public-share-link-label", t().share.publicLink);
+      setTextIfPresent("public-share-link-label", t().share.nfcLink);
       setTextIfPresent("public-share-open-library-btn", t().share.openLibrary);
+      setTextIfPresent("public-share-save-btn", currentSavedLibraryState.saved ? t().share.saveToMineDone : t().share.saveToMine);
       setTextIfPresent("public-share-owner-controls-title", t().share.ownerControlsTitle);
       setTextIfPresent("public-share-owner-controls-hint", t().share.ownerControlsHint);
       setTextIfPresent("share-public-enabled-label", t().share.publicAccess);
@@ -1135,7 +1191,7 @@
     }
 
     function isPublicShareRoute(){
-      return window.location.pathname.startsWith("/share/");
+      return window.location.pathname.startsWith("/share/") || window.location.pathname.startsWith("/nfc/");
     }
 
     function setPublicRouteMode(active){
@@ -1146,11 +1202,85 @@
       }
     }
 
+    function toggleHomeAddPanel(force){
+      const panel = document.getElementById("home-add-panel");
+      if(!panel) return;
+      const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+      panel.classList.toggle("hidden", !shouldOpen);
+    }
+
+    async function startQuickAdd(category){
+      if(!category) return;
+      toggleHomeAddPanel(false);
+      await openCategory(category);
+      openAddModal();
+    }
+
+    function updatePublicSaveButton(){
+      const button = document.getElementById("public-share-save-btn");
+      if(!button) return;
+
+      const isOwner = Boolean(currentPublicProfile?.isOwner);
+      const isSaved = Boolean(currentSavedLibraryState.saved);
+      button.disabled = isOwner || isSaved;
+      button.classList.toggle("hidden", isOwner);
+      button.textContent = isSaved ? t().share.saveToMineDone : t().share.saveToMine;
+    }
+
+    function renderPublicLibraryMeta(){
+      const container = document.getElementById("public-share-library-meta");
+      if(!container) return;
+
+      const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+      const categoryValues = orderedCategories.filter((category) => (demoData[category] || []).length).map((category) => translateCategory(category));
+      const folderValues = [];
+      const statusValues = [];
+      const folderSet = new Set();
+      const statusSet = new Set();
+
+      orderedCategories.forEach((category) => {
+        (demoData[category] || []).forEach((item) => {
+          if(item.folder && !folderSet.has(item.folder)){
+            folderSet.add(item.folder);
+            folderValues.push(item.folder);
+          }
+          const translatedStatus = translateStatus(item.status || "Planned");
+          if(translatedStatus && !statusSet.has(translatedStatus)){
+            statusSet.add(translatedStatus);
+            statusValues.push(translatedStatus);
+          }
+        });
+      });
+
+      const sections = [
+        [t().share.libraryCategories, categoryValues],
+        [t().share.libraryFolders, folderValues],
+        [t().share.libraryStatuses, statusValues]
+      ]
+        .filter(([, values]) => Array.isArray(values) && values.length)
+        .map(([label, values]) => `
+          <div class="public-card-meta-group">
+            <div class="public-card-meta-label">${escapeHtml(label)}</div>
+            <div class="public-card-meta-values">${values.map((value) => `<span class="public-card-meta-chip">${escapeHtml(value)}</span>`).join("")}</div>
+          </div>
+        `)
+        .join("");
+
+      container.innerHTML = sections;
+      container.classList.toggle("hidden", !sections);
+    }
+
     function goHome(){
       closePreferencesPanel();
       resetShelfSearchQuery();
+      toggleHomeAddPanel(false);
       if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
-        showPublicLibraryCategoryView(currentPublicProfile);
+        if(document.body.classList.contains("public-route-active")){
+          showPublicShareScreen(currentPublicProfile);
+          renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
+        } else {
+          showPublicLibraryCategoryView(currentPublicProfile);
+        }
         return;
       }
       isPublicView = false;
@@ -2447,6 +2577,18 @@
       await setFolderAssignments(assignments);
 
       item.folder = pendingFolderSelection || "";
+      const user = await getCurrentUser();
+      if(user && item?.id){
+        const { error } = await supabaseClient
+          .from("user_media")
+          .update({ folder_name: pendingFolderSelection || null })
+          .eq("user_id", user.id)
+          .eq("id", item.id);
+
+        if(error){
+          console.error("Supabase folder update error:", error);
+        }
+      }
       closeFolderModal();
       renderShelf();
 
@@ -2626,7 +2768,7 @@
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
-          folder: ""
+          folder: item.folder_name || ""
         });
       });
 
@@ -2700,7 +2842,7 @@
         }
       }
       if(statusFilterWrap){
-        statusFilterWrap.classList.toggle("hidden", isPublicView);
+        statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
       }
 
       const items = getFilteredItems();
@@ -3468,10 +3610,11 @@
       }
     }
 
-    async function showAuthorizedUI(){
-      closePreferencesPanel();
-      document.getElementById("auth-screen").classList.add("hidden");
-      document.getElementById("home-screen").classList.remove("hidden");
+async function showAuthorizedUI(){
+  closePreferencesPanel();
+  setPublicRouteMode(false);
+  hideAllScreens();
+  document.getElementById("home-screen").classList.remove("hidden");
 
       setAuthorizedButtons(true);
       refreshAccountCollectionsUI();
@@ -3556,6 +3699,189 @@ async function fetchProfileByUserId(userId){
   return data || null;
 }
 
+async function fetchNfcTagByToken(token){
+  if(!token) return null;
+
+  const { data, error } = await supabaseClient
+    .from("nfc_tags")
+    .select("id, user_id, token, is_active, created_at, updated_at")
+    .eq("token", token)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if(error){
+    console.error("NFC tag fetch error:", error);
+    return null;
+  }
+
+  return data || null;
+}
+
+async function ensureCurrentUserNfcTag(){
+  const user = await getCurrentUser();
+  if(!user) return null;
+
+  const { data: existing, error: existingError } = await supabaseClient
+    .from("nfc_tags")
+    .select("id, user_id, token, is_active, created_at, updated_at")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if(existingError){
+    console.error("NFC tag lookup error:", existingError);
+    return null;
+  }
+
+  if(existing){
+    return existing;
+  }
+
+  const payload = {
+    user_id: user.id,
+    token: generateToken(24),
+    is_active: true
+  };
+
+  const { data, error } = await supabaseClient
+    .from("nfc_tags")
+    .insert(payload)
+    .select("id, user_id, token, is_active, created_at, updated_at")
+    .single();
+
+  if(error){
+    console.error("NFC tag create error:", error);
+    return null;
+  }
+
+  return data || null;
+}
+
+async function regenerateCurrentUserNfcTag(){
+  const user = await getCurrentUser();
+  if(!user) return null;
+
+  const existing = await ensureCurrentUserNfcTag();
+  if(!existing?.id) return null;
+
+  const { data, error } = await supabaseClient
+    .from("nfc_tags")
+    .update({
+      token: generateToken(24),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", existing.id)
+    .eq("user_id", user.id)
+    .select("id, user_id, token, is_active, created_at, updated_at")
+    .single();
+
+  if(error){
+    console.error("NFC tag regenerate error:", error);
+    return null;
+  }
+
+  return data || null;
+}
+
+async function saveLibraryFallback(ownerProfileId, token){
+  const saved = await getAccountStorageValue("saved_libraries", []);
+  const next = Array.isArray(saved) ? saved : [];
+  const exists = next.some((item) => item.owner_profile_id === ownerProfileId || item.nfc_token === token);
+  if(exists){
+    currentSavedLibraryState = { saved: true, source: "local" };
+    return "exists";
+  }
+
+  next.unshift({
+    owner_profile_id: ownerProfileId,
+    nfc_token: token,
+    saved_at: new Date().toISOString()
+  });
+  await setAccountStorageValue("saved_libraries", next);
+  currentSavedLibraryState = { saved: true, source: "local" };
+  return "saved";
+}
+
+async function getSavedLibraryState(ownerProfileId, token){
+  const user = await getCurrentUser();
+  if(!user || !ownerProfileId){
+    currentSavedLibraryState = { saved: false, source: "none" };
+    return currentSavedLibraryState;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("saved_libraries")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("owner_profile_id", ownerProfileId)
+    .limit(1);
+
+  if(error){
+    console.error("Saved library lookup error:", error);
+    const saved = await getAccountStorageValue("saved_libraries", []);
+    const exists = Array.isArray(saved) && saved.some((item) => item.owner_profile_id === ownerProfileId || item.nfc_token === token);
+    currentSavedLibraryState = { saved: exists, source: exists ? "local" : "none" };
+    return currentSavedLibraryState;
+  }
+
+  currentSavedLibraryState = { saved: Boolean(data?.length), source: data?.length ? "remote" : "none" };
+  return currentSavedLibraryState;
+}
+
+async function saveCurrentLibraryToCollection(){
+  const ownerProfileId = currentPublicProfile?.id || currentNfcContext?.ownerId || null;
+  const token = currentNfcContext?.token || activeShareToken || currentPublicProfile?.public_share_token || "";
+  const user = await getCurrentUser();
+
+  if(!user){
+    alert(t().share.loginToSave);
+    showAuthScreen();
+    return;
+  }
+
+  if(user.id === ownerProfileId){
+    alert(t().share.ownLibrary);
+    return;
+  }
+
+  if(!ownerProfileId){
+    alert(t().share.unavailable);
+    return;
+  }
+
+  const nfcTagId = currentNfcContext?.tagId || null;
+  const payload = {
+    user_id: user.id,
+    owner_profile_id: ownerProfileId,
+    nfc_tag_id: nfcTagId,
+    nfc_token: token || null
+  };
+
+  const { error } = await supabaseClient
+    .from("saved_libraries")
+    .insert(payload);
+
+  if(error){
+    if(/duplicate|unique/i.test(String(error.message || ""))){
+      currentSavedLibraryState = { saved: true, source: "remote" };
+      updatePublicSaveButton();
+      alert(t().share.alreadySaved);
+      return;
+    }
+
+    console.error("Saved library insert error:", error);
+    const result = await saveLibraryFallback(ownerProfileId, token);
+    updatePublicSaveButton();
+    alert(result === "exists" ? t().share.alreadySaved : t().share.savedToMine);
+    return;
+  }
+
+  currentSavedLibraryState = { saved: true, source: "remote" };
+  updatePublicSaveButton();
+  alert(t().share.savedToMine);
+}
+
 function extractRpcToken(data){
   if(!data) return "";
   if(typeof data === "string") return data;
@@ -3597,7 +3923,8 @@ function normalizePublicLibraryItem(item = {}){
     description_en: item.description_en || "",
     creator: item.creator || item.author || item.director || item.studio || "",
     work_key: item.work_key || item.media_work_key || "",
-    canonical_key: item.canonical_key || item.media_canonical_key || ""
+    canonical_key: item.canonical_key || item.media_canonical_key || "",
+    folder_name: item.folder_name || item.folder || ""
   };
 }
 
@@ -3689,6 +4016,7 @@ async function ensureCurrentProfileData(){
   if(!user) return null;
 
   let profile = await fetchProfileByUserId(user.id);
+  const nfcTag = await ensureCurrentUserNfcTag();
   if(!profile?.public_share_token){
     try {
       const ensuredToken = await ensureProfileShareTokenRpc();
@@ -3709,11 +4037,15 @@ async function ensureCurrentProfileData(){
   currentProfileData = profile
     ? {
         ...profile,
+        nfc_tag_id: nfcTag?.id || null,
+        nfc_token: nfcTag?.token || profile?.public_share_token || "",
         public_share_enabled: isShareEnabled(profile),
         public_library_mode: getShareLibraryMode(profile)
       }
     : {
         id: user.id,
+        nfc_tag_id: nfcTag?.id || null,
+        nfc_token: nfcTag?.token || "",
         public_share_enabled: true,
         public_share_token: "",
         public_library_mode: "preview"
@@ -3780,7 +4112,7 @@ async function upsertCurrentProfilePatch(patch = {}){
 }
 
 function applyShareSettingsToOwnerPanels(profile = {}){
-  const token = profile.public_share_token || "";
+  const token = profile.nfc_token || profile.public_share_token || "";
   const url = token ? buildPublicShareUrl(token) : "";
   const enabled = isShareEnabled(profile);
   const title = profile.public_card_title || profile.display_name || profile.username || "";
@@ -3940,11 +4272,16 @@ async function savePublicShareSettings(){
 
 async function regeneratePublicShareToken(){
   try {
-    const token = await regenerateProfileShareTokenRpc();
+    let nfcTag = await regenerateCurrentUserNfcTag();
+    if(!nfcTag){
+      const token = await regenerateProfileShareTokenRpc();
+      nfcTag = { id: null, token };
+    }
     const refreshedProfile = await ensureCurrentProfileData();
     const profile = {
       ...(refreshedProfile || currentProfileData || {}),
-      public_share_token: token || refreshedProfile?.public_share_token || currentProfileData?.public_share_token || ""
+      nfc_tag_id: nfcTag?.id || refreshedProfile?.nfc_tag_id || currentProfileData?.nfc_tag_id || null,
+      nfc_token: nfcTag?.token || refreshedProfile?.nfc_token || currentProfileData?.nfc_token || ""
     };
 
     currentProfileData = profile;
@@ -4026,7 +4363,11 @@ async function fetchPublicLibraryItems(userId){
 
 function applyPublicLibraryItems(data = []){
   ensurePublicProfileCollectionsReset();
+  currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
   const seen = new Set();
+  const categories = new Set();
+  const folders = new Set();
+  const statuses = new Set();
 
   data.forEach((item) => {
     const dedupeKey = item.canonical_key || item.work_key || (item.title || "").trim().toLowerCase();
@@ -4040,6 +4381,10 @@ function applyPublicLibraryItems(data = []){
       demoData[item.category] = [];
     }
 
+    if(item.category) categories.add(translateCategory(item.category));
+    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
+    if(item.status) statuses.add(translateStatus(item.status));
+
     demoData[item.category].push({
       id: item.id,
       title: item.title,
@@ -4051,9 +4396,15 @@ function applyPublicLibraryItems(data = []){
       creator: item.creator || "",
       work_key: item.work_key || "",
       canonical_key: item.canonical_key || "",
-      folder: ""
+      folder: item.folder_name || item.folder || ""
     });
   });
+
+  currentPublicLibraryMeta = {
+    categories: Array.from(categories),
+    folders: Array.from(folders),
+    statuses: Array.from(statuses)
+  };
 }
 
 function collectPublicPreviewItems(limit = 8){
@@ -4105,8 +4456,14 @@ function getDefaultPublicCategory(){
   renderShelf();
 }
 
-async function openOwnerLibraryFromShareToken(profile = {}){
+async function openOwnerLibraryFromNfc(profile = {}, token = ""){
   activeShareToken = "";
+  currentNfcContext = {
+    token: token || "",
+    ownerId: profile.id || null,
+    mode: "owner",
+    tagId: profile.nfc_tag_id || null
+  };
   currentPublicProfile = { ...profile, isOwner: true };
   currentProfileData = { ...(currentProfileData || {}), ...profile };
   isPublicView = false;
@@ -4193,7 +4550,7 @@ function renderOwnerPanel(profile = {}){
 
 function renderPublicCard(profile = {}){
   currentPublicProfile = profile;
-  activeShareToken = profile.public_share_token || activeShareToken;
+  activeShareToken = profile.nfc_token || profile.public_share_token || activeShareToken;
   currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
 
   const loadingCard = document.getElementById("public-share-loading-card");
@@ -4220,7 +4577,7 @@ function renderPublicCard(profile = {}){
     avatarFallback.classList.toggle("hidden", hasAvatar);
   }
 
-  const link = buildPublicShareUrl(profile.public_share_token || "");
+  const link = buildPublicShareUrl(profile.nfc_token || profile.public_share_token || "");
   setValueIfPresent("public-share-link-input", link);
   setValueIfPresent("owner-share-link-input", link);
   populateShareQr("public-share-qr-box", "public-share-qr-image", link);
@@ -4231,7 +4588,9 @@ function renderPublicCard(profile = {}){
     publicCopyBtn.setAttribute("aria-label", t().share.copyLink);
   }
 
+  renderPublicLibraryMeta();
   syncPublicQrButtons();
+  updatePublicSaveButton();
   renderOwnerPanel(profile);
 }
 
@@ -4248,6 +4607,7 @@ async function showPublicShareScreen(profile){
 
 async function loadPublicShareRoute(token){
   activeShareToken = token || "";
+  currentNfcContext = null;
   currentPublicProfile = null;
   currentPublicShareItems = [];
   currentPublicShareState = "loading";
@@ -4272,10 +4632,96 @@ async function loadPublicShareRoute(token){
     renderPublicShareProfile(currentPublicProfile);
 
     const items = await fetchPublicShareLibraryItems(profile.id);
+    if(!isOwner){
+      await getSavedLibraryState(profile.id, token);
+      updatePublicSaveButton();
+    }
     renderShareLibrary(items);
     return true;
   } catch (error) {
     console.error("Public share page init error:", error);
+    currentPublicProfile = null;
+    renderShareState("error");
+    return true;
+  }
+}
+
+async function loadNfcRoute(token){
+  activeShareToken = token || "";
+  currentPublicProfile = null;
+  currentPublicShareItems = [];
+  currentPublicShareState = "loading";
+  publicLibraryExpanded = true;
+  currentSavedLibraryState = { saved: false, source: "none" };
+
+  setPublicRouteMode(true);
+  hideAllScreens();
+  document.getElementById("public-share-screen")?.classList.remove("hidden");
+  renderShareState("loading");
+
+  try {
+    let tag = await fetchNfcTagByToken(token);
+    let profile = null;
+
+    if(!tag){
+      profile = await fetchPublicProfileByToken(token);
+      if(profile){
+        tag = {
+          id: null,
+          user_id: profile.id,
+          token,
+          is_active: true
+        };
+      }
+    }
+
+    if(!tag){
+      currentPublicProfile = null;
+      renderShareState("error");
+      return true;
+    }
+
+    const user = await getCurrentUser();
+    profile = profile || await fetchProfileByUserId(tag.user_id);
+    if(user && user.id === tag.user_id){
+      const ownerProfile = {
+        ...(profile || {}),
+        id: tag.user_id,
+        nfc_tag_id: tag.id,
+        nfc_token: tag.token,
+        public_share_token: profile?.public_share_token || ""
+      };
+      await openOwnerLibraryFromNfc(ownerProfile, tag.token);
+      return true;
+    }
+
+    if(!profile || !isShareEnabled(profile)){
+      currentPublicProfile = null;
+      renderShareState("error");
+      return true;
+    }
+
+    currentNfcContext = {
+      token: tag.token,
+      ownerId: tag.user_id,
+      mode: "guest",
+      tagId: tag.id
+    };
+    currentPublicProfile = {
+      ...profile,
+      isOwner: false,
+      nfc_tag_id: tag.id,
+      nfc_token: tag.token
+    };
+
+    const items = await fetchPublicShareLibraryItems(profile.id);
+    applyPublicLibraryItems(items);
+    await getSavedLibraryState(profile.id, tag.token);
+    renderPublicShareProfile(currentPublicProfile);
+    renderShareLibrary(items);
+    return true;
+  } catch (error) {
+    console.error("NFC page init error:", error);
     currentPublicProfile = null;
     renderShareState("error");
     return true;
@@ -4353,6 +4799,7 @@ function openShareItemModal(item = {}){
     meta.innerHTML = [
       buildShareMetaRow(t().share.type, item.category ? translateCategory(item.category) : ""),
       buildShareMetaRow(t().labels.statusLabel, item.status ? translateStatus(item.status) : ""),
+      buildShareMetaRow(t().labels.folder, item.folder || item.folder_name || ""),
       buildShareMetaRow(t().share.year, item.year || item.release_year || ""),
       buildShareMetaRow(t().share.rating, item.rating || item.score || ""),
       buildShareMetaRow(t().labels.creator, item.creator || "")
@@ -4400,6 +4847,9 @@ function renderShareLibrary(items = []){
     ...item,
     cover: item.cover || item.cover_url || ""
   })) : [];
+  applyPublicLibraryItems(currentPublicShareItems);
+  applyTranslations();
+  renderPublicLibraryMeta();
 
   if(currentPublicShareItems.length === 0){
     grid.innerHTML = "";
@@ -4415,16 +4865,20 @@ function renderShareLibrary(items = []){
 }
 
 async function initPublicSharePage(){
-  const token = decodeURIComponent(window.location.pathname.replace("/share/", "").trim());
+  const token = decodeURIComponent(window.location.pathname.replace(/^\/(?:share|nfc)\//, "").trim());
   if(!token){
     return false;
   }
 
-  return loadPublicShareRoute(token);
+  return isNfcRoute() ? loadNfcRoute(token) : loadPublicShareRoute(token);
 }
 
 function openSharedLibrary(){
   if(document.body.classList.contains("public-route-active")){
+    if(currentPublicProfile && !currentPublicProfile.isOwner){
+      showPublicLibraryCategoryView(currentPublicProfile);
+      return;
+    }
     setPublicLibraryExpanded(true);
     renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState === "loading" ? "loading" : "empty");
     return;
@@ -4631,6 +5085,13 @@ async function changePassword(){
     async function checkPublicRoute(){
       const path = window.location.pathname;
 
+      if(path.startsWith("/nfc/")){
+        const token = decodeURIComponent(path.replace("/nfc/", "").trim());
+        if(token){
+          return await loadNfcRoute(token);
+        }
+      }
+
       if(path.startsWith("/share/")){
         const token = decodeURIComponent(path.replace("/share/", "").trim());
         if(token){
@@ -4801,7 +5262,11 @@ async function removeAvatar(){
           if(session?.user){
             await ensureCurrentProfileData();
           }
-          await loadPublicShareRoute(activeShareToken);
+          if(isNfcRoute()){
+            await loadNfcRoute(activeShareToken);
+          } else {
+            await loadPublicShareRoute(activeShareToken);
+          }
           return;
         }
 
@@ -4872,3 +5337,21 @@ async function removeAvatar(){
     }
 
     init();
+
+===== vercel.json =====
+{
+  "rewrites": [
+    {
+      "source": "/u/:username",
+      "destination": "/"
+    },
+    {
+      "source": "/share/:token",
+      "destination": "/"
+    },
+    {
+      "source": "/nfc/:token",
+      "destination": "/"
+    }
+  ]
+}
