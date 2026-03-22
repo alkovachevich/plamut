@@ -5337,21 +5337,3 @@ async function removeAvatar(){
     }
 
     init();
-
-===== vercel.json =====
-{
-  "rewrites": [
-    {
-      "source": "/u/:username",
-      "destination": "/"
-    },
-    {
-      "source": "/share/:token",
-      "destination": "/"
-    },
-    {
-      "source": "/nfc/:token",
-      "destination": "/"
-    }
-  ]
-}
