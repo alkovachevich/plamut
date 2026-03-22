@@ -6657,4 +6657,750 @@ async function init(){
   updatePrimaryActionVisibility();
 }
 
+
+const PRODUCT_TRACKER_STATUSES = [
+  "Planned",
+  "Watching",
+  "Reading",
+  "Playing",
+  "On hold",
+  "Done",
+  "Dropped",
+  "Rewatching",
+  "Rereading"
+];
+const PRODUCT_NOW_STATUSES = ["Watching", "Reading", "Playing", "On hold", "Rewatching", "Rereading"];
+const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spinoff", "adaptation", "based_on", "related_work"];
+let currentNowSort = "updated";
+let currentUniverseContextItemId = null;
+
+Object.assign(translations.en.statuses, {
+  Watching: "Watching",
+  Reading: "Reading",
+  Playing: "Playing",
+  "On hold": "On hold",
+  Rewatching: "Rewatching",
+  Rereading: "Rereading"
+});
+Object.assign(translations.ru.statuses, {
+  Watching: "Смотрю",
+  Reading: "Читаю",
+  Playing: "Прохожу",
+  "On hold": "На паузе",
+  Rewatching: "Пересматриваю",
+  Rereading: "Перечитываю"
+});
+Object.assign(translations.en.labels, {
+  progress: "Progress",
+  rating: "Rating",
+  note: "Note",
+  startedAt: "Started",
+  completedAt: "Completed",
+  inProgress: "In progress",
+  relatedWorks: "Related works",
+  universes: "Universes"
+});
+Object.assign(translations.ru.labels, {
+  progress: "Прогресс",
+  rating: "Рейтинг",
+  note: "Заметка",
+  startedAt: "Начато",
+  completedAt: "Завершено",
+  inProgress: "В процессе",
+  relatedWorks: "Связанные работы",
+  universes: "Вселенные"
+});
+
+function buildTrackerStorageKey(item, category = currentCategory){
+  return getItemStorageKey({ ...(item || {}), category: category || item?.category || currentCategory || "" });
+}
+
+async function getTrackerOverrides(){
+  return await getAccountStorageValue("tracker_overrides", {});
+}
+
+async function setTrackerOverrides(value){
+  await setAccountStorageValue("tracker_overrides", value);
+}
+
+async function getUniverseStore(){
+  return await getAccountStorageValue("universe_store", { universes: [], memberships: [], links: [], activity: [] });
+}
+
+async function setUniverseStore(value){
+  await setAccountStorageValue("universe_store", value);
+}
+
+function getTrackerConfigByCategory(category){
+  switch(category){
+    case "Books": return { unit: "pages", label: "Страницы" };
+    case "Movies": return { unit: "viewed", label: "Просмотр" };
+    case "Series":
+    case "Anime": return { unit: "episodes", label: "Серии" };
+    case "Manga": return { unit: "chapters", label: "Главы" };
+    default: return { unit: "percent", label: "%" };
+  }
+}
+
+function buildDefaultTracker(category, status = "Planned"){
+  const config = getTrackerConfigByCategory(category);
+  return {
+    status,
+    started_at: "",
+    completed_at: "",
+    rating: "",
+    note: "",
+    progress_current: config.unit === "viewed" ? 0 : 0,
+    progress_total: config.unit === "viewed" ? 1 : 0,
+    progress_unit: config.unit,
+    progress_label: config.label,
+    revisit_count: 0,
+    last_updated_at: "",
+    watched_on: ""
+  };
+}
+
+function normalizeTracker(item){
+  const base = buildDefaultTracker(item?.category || currentCategory || "", item?.status || "Planned");
+  const tracker = item?.tracker || {};
+  const merged = { ...base, ...tracker };
+  merged.status = item?.status || merged.status || "Planned";
+  return merged;
+}
+
+function computeProgressPercent(item){
+  const tracker = normalizeTracker(item);
+  if(tracker.progress_unit === "viewed") return tracker.progress_current ? 100 : 0;
+  const total = Number(tracker.progress_total || 0);
+  const current = Number(tracker.progress_current || 0);
+  if(!total || total <= 0) return current ? Math.min(100, current) : 0;
+  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+}
+
+function formatTrackerProgress(item){
+  const tracker = normalizeTracker(item);
+  const current = Number(tracker.progress_current || 0);
+  const total = Number(tracker.progress_total || 0);
+  if(tracker.progress_unit === "viewed"){
+    return current ? "Просмотрено" : "Не просмотрено";
+  }
+  if(total > 0) return `${current}/${total} ${tracker.progress_label.toLowerCase()}`;
+  return current ? `${current} ${tracker.progress_label.toLowerCase()}` : t().labels.progress;
+}
+
+function isNowStatus(status){
+  return PRODUCT_NOW_STATUSES.includes(status || "");
+}
+
+async function applyTrackerOverridesToCategory(category){
+  const overrides = await getTrackerOverrides();
+  (demoData[category] || []).forEach((item) => {
+    const key = buildTrackerStorageKey(item, category);
+    item.tracker = { ...buildDefaultTracker(category, item.status || "Planned"), ...(overrides[key] || {}), ...(item.tracker || {}) };
+    if(item.tracker.status && item.status !== item.tracker.status){
+      item.status = item.tracker.status;
+    }
+  });
+}
+
+async function saveTrackerOverrideForItem(item){
+  if(!item) return;
+  const overrides = await getTrackerOverrides();
+  const key = buildTrackerStorageKey(item, item.category || currentCategory);
+  overrides[key] = normalizeTracker(item);
+  await setTrackerOverrides(overrides);
+}
+
+async function recordProductActivity(kind, item, payload = {}){
+  const store = await getUniverseStore();
+  const entry = {
+    id: `activity_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    kind,
+    itemKey: item ? buildTrackerStorageKey(item, item.category || currentCategory) : "",
+    itemTitle: item?.title || "",
+    category: item?.category || currentCategory || "",
+    timestamp: new Date().toISOString(),
+    payload
+  };
+  store.activity = [entry, ...(store.activity || [])].slice(0, 80);
+  await setUniverseStore(store);
+}
+
+async function rebuildStatusFilterOptions(){
+  const select = document.getElementById("status-filter");
+  if(!select) return;
+  const previous = currentFilterStatus || "All";
+  select.innerHTML = "";
+  const values = ["All", ...PRODUCT_TRACKER_STATUSES];
+  values.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value === "All" ? t().statuses.All : translateStatus(value);
+    if(value === previous) option.selected = true;
+    select.appendChild(option);
+  });
+}
+
+async function updateAllProductData(){
+  for(const category of Object.keys(demoData)){
+    await applyTrackerOverridesToCategory(category);
+  }
+}
+
+function getAllLibraryItems(){
+  return Object.entries(demoData).flatMap(([category, items]) => (items || []).map((item) => ({ ...item, category })));
+}
+
+function getNowItems(){
+  let items = getAllLibraryItems().filter((item) => isNowStatus(item.status));
+  items = items.map((item) => ({ ...item, tracker: normalizeTracker(item), progressPercent: computeProgressPercent(item) }));
+  switch(currentNowSort){
+    case "category":
+      items.sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.title).localeCompare(String(b.title)));
+      break;
+    case "progress":
+      items.sort((a, b) => b.progressPercent - a.progressPercent);
+      break;
+    case "started":
+      items.sort((a, b) => String(b.tracker.started_at || "").localeCompare(String(a.tracker.started_at || "")));
+      break;
+    default:
+      items.sort((a, b) => String(b.tracker.last_updated_at || "").localeCompare(String(a.tracker.last_updated_at || "")));
+      break;
+  }
+  return items;
+}
+
+function getStatsSnapshot(){
+  const items = getAllLibraryItems();
+  const byCategory = {};
+  items.forEach((item) => {
+    if(!byCategory[item.category]) byCategory[item.category] = { total: 0, done: 0, inProgress: 0, planned: 0, dropped: 0, ratings: [] };
+    const bucket = byCategory[item.category];
+    const tracker = normalizeTracker(item);
+    bucket.total += 1;
+    if(item.status === "Done") bucket.done += 1;
+    if(isNowStatus(item.status)) bucket.inProgress += 1;
+    if(item.status === "Planned") bucket.planned += 1;
+    if(item.status === "Dropped") bucket.dropped += 1;
+    if(tracker.rating) bucket.ratings.push(Number(tracker.rating));
+  });
+  const totalCompletedThisYear = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(String(new Date().getFullYear()))).length;
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const consumedThisMonth = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(monthKey)).length;
+  return {
+    byCategory,
+    total: items.length,
+    now: items.filter((item) => isNowStatus(item.status)).length,
+    completed: items.filter((item) => item.status === "Done").length,
+    dropped: items.filter((item) => item.status === "Dropped").length,
+    consumedThisMonth,
+    totalCompletedThisYear
+  };
+}
+
+async function renderHomeNowSection(){
+  const container = document.getElementById("home-now-grid");
+  if(!container) return;
+  const items = getNowItems().slice(0, 4);
+  container.innerHTML = items.length ? items.map((item) => `
+    <article class="dashboard-card">
+      <div class="media-meta-chips">
+        <span class="meta-chip is-status">${escapeHtml(translateStatus(item.status))}</span>
+        <span class="meta-chip">${escapeHtml(translateCategory(item.category))}</span>
+      </div>
+      <h3 class="dashboard-card-title">${escapeHtml(item.title)}</h3>
+      <div class="now-card-meta">${escapeHtml(formatTrackerProgress(item))}</div>
+      <div class="now-card-progress"><span style="width:${item.progressPercent}%"></span></div>
+      <div class="now-card-actions">
+        <button class="button button-secondary" type="button" onclick="openTrackerModalById(${item.id}, '${item.category}')">${escapeHtml(t().labels.progress)}</button>
+        <button class="button button-ghost" type="button" onclick="openCardFromSection(${item.id}, '${item.category}')">${escapeHtml(t().buttons.open)}</button>
+      </div>
+    </article>
+  `).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+}
+
+async function renderHomeStatsSection(){
+  const container = document.getElementById("home-stats-grid");
+  if(!container) return;
+  const stats = getStatsSnapshot();
+  const cards = [
+    [t().labels.allItems, stats.total],
+    [t().labels.inProgress, stats.now],
+    [translateStatus("Done"), stats.completed],
+    ["Месяц", stats.consumedThisMonth]
+  ];
+  container.innerHTML = cards.map(([label, value]) => `
+    <article class="stat-card">
+      <div class="stat-card-value">${escapeHtml(String(value))}</div>
+      <div class="stat-card-label">${escapeHtml(String(label))}</div>
+    </article>
+  `).join("");
+}
+
+async function renderActivityLists(){
+  const store = await getUniverseStore();
+  const html = (store.activity || []).slice(0, 8).map((entry) => `
+    <article class="activity-card">
+      <div>${escapeHtml(entry.itemTitle || "Plamut")}</div>
+      <div class="activity-card-meta">${escapeHtml(entry.kind)} · ${escapeHtml((entry.timestamp || "").slice(0, 10))}</div>
+    </article>
+  `).join("") || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+  ["home-activity-list", "stats-activity-list"].forEach((id) => {
+    const node = document.getElementById(id);
+    if(node) node.innerHTML = html;
+  });
+}
+
+async function renderNowScreen(){
+  const container = document.getElementById("now-list");
+  if(!container) return;
+  const items = getNowItems();
+  container.innerHTML = items.length ? items.map((item) => `
+    <article class="now-card">
+      <div class="media-meta-chips">
+        <span class="meta-chip is-status">${escapeHtml(translateStatus(item.status))}</span>
+        <span class="meta-chip">${escapeHtml(translateCategory(item.category))}</span>
+        ${item.folder ? `<span class="meta-chip is-folder">${escapeHtml(item.folder)}</span>` : ""}
+      </div>
+      <h3 class="now-card-title">${escapeHtml(item.title)}</h3>
+      <div class="now-card-meta">${escapeHtml(formatTrackerProgress(item))}</div>
+      <div class="now-card-progress"><span style="width:${item.progressPercent}%"></span></div>
+      <div class="now-card-actions">
+        <button class="button button-secondary" type="button" onclick="openTrackerModalById(${item.id}, '${item.category}')">Обновить прогресс</button>
+        <button class="button button-secondary" type="button" onclick="changeStatusByCategory(${item.id}, '${item.category}')">${escapeHtml(t().buttons.changeStatus)}</button>
+        <button class="button button-ghost" type="button" onclick="openCardFromSection(${item.id}, '${item.category}')">${escapeHtml(t().buttons.open)}</button>
+      </div>
+    </article>
+  `).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+}
+
+async function renderStatsScreen(){
+  const summary = document.getElementById("stats-summary-grid");
+  const categoryGrid = document.getElementById("stats-category-grid");
+  if(!summary || !categoryGrid) return;
+  const stats = getStatsSnapshot();
+  summary.innerHTML = [
+    [t().labels.allItems, stats.total],
+    [t().labels.inProgress, stats.now],
+    [translateStatus("Done"), stats.completed],
+    [translateStatus("Dropped"), stats.dropped],
+    ["За месяц", stats.consumedThisMonth],
+    ["За год", stats.totalCompletedThisYear]
+  ].map(([label, value]) => `<article class="stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
+  categoryGrid.innerHTML = Object.entries(stats.byCategory).map(([category, data]) => {
+    const avg = data.ratings.length ? (data.ratings.reduce((sum, v) => sum + v, 0) / data.ratings.length).toFixed(1) : "—";
+    return `
+      <article class="stat-card">
+        <div class="dashboard-card-title">${escapeHtml(translateCategory(category))}</div>
+        <div class="activity-card-meta">Всего: ${data.total}</div>
+        <div class="activity-card-meta">Завершено: ${data.done}</div>
+        <div class="activity-card-meta">В процессе: ${data.inProgress}</div>
+        <div class="activity-card-meta">План: ${data.planned}</div>
+        <div class="activity-card-meta">Брошено: ${data.dropped}</div>
+        <div class="activity-card-meta">Средний рейтинг: ${avg}</div>
+      </article>`;
+  }).join("");
+}
+
+async function renderUniversesScreen(){
+  const container = document.getElementById("universes-list");
+  if(!container) return;
+  const store = await getUniverseStore();
+  const items = getAllLibraryItems();
+  container.innerHTML = (store.universes || []).length ? (store.universes || []).map((universe) => {
+    const members = (store.memberships || []).filter((membership) => membership.universeId === universe.id);
+    const memberTitles = members.map((membership) => items.find((item) => buildTrackerStorageKey(item, item.category) === membership.itemKey)?.title).filter(Boolean).slice(0, 4);
+    return `
+      <article class="universe-card">
+        <h3 class="universe-card-title">${escapeHtml(universe.name)}</h3>
+        <div class="universe-card-meta">${escapeHtml(universe.description || "")}</div>
+        <div class="now-card-meta">Объектов: ${members.length}</div>
+        <div class="linked-list">${memberTitles.map((title) => `<div class="link-chip"><strong>${escapeHtml(title)}</strong></div>`).join("")}</div>
+      </article>`;
+  }).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+}
+
+async function renderTrackerSummaryForCurrentItem(){
+  const container = document.getElementById("tracker-summary-grid");
+  if(!container) return;
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item){ container.innerHTML = ""; return; }
+  const tracker = normalizeTracker(item);
+  const cards = [
+    [translateStatus(item.status), t().labels.statusLabel],
+    [formatTrackerProgress(item), t().labels.progress],
+    [tracker.rating || "—", t().labels.rating],
+    [tracker.started_at || "—", t().labels.startedAt],
+    [tracker.completed_at || "—", t().labels.completedAt]
+  ];
+  container.innerHTML = cards.map(([value,label]) => `<article class="tracker-stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
+}
+
+async function renderUniverseDetailsForCurrentItem(){
+  const container = document.getElementById("details-universe-list");
+  if(!container) return;
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item){ container.innerHTML = ""; return; }
+  const store = await getUniverseStore();
+  const itemKey = buildTrackerStorageKey(item, currentCategory);
+  const memberships = (store.memberships || []).filter((membership) => membership.itemKey === itemKey);
+  const linkedRelations = (store.links || []).filter((link) => link.sourceKey === itemKey || link.targetKey === itemKey);
+  const items = getAllLibraryItems();
+  const html = [
+    ...memberships.map((membership) => {
+      const universe = (store.universes || []).find((entry) => entry.id === membership.universeId);
+      return universe ? `<article class="link-chip"><strong>${escapeHtml(universe.name)}</strong><span class="small">${escapeHtml(membership.relationType || "same_universe")}</span></article>` : "";
+    }),
+    ...linkedRelations.map((relation) => {
+      const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
+      const target = items.find((candidate) => buildTrackerStorageKey(candidate, candidate.category) === targetKey);
+      return target ? `<article class="link-chip"><strong>${escapeHtml(target.title)}</strong><span class="small">${escapeHtml(relation.relationType)}</span></article>` : "";
+    })
+  ].filter(Boolean).join("");
+  container.innerHTML = html || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+}
+
+function updateBottomNavState(section){
+  const map = {
+    dashboard: "nav-home-btn",
+    now: "nav-now-btn",
+    library: "nav-library-btn",
+    stats: "nav-stats-btn",
+    universes: "nav-universes-btn"
+  };
+  Object.values(map).forEach((id) => document.getElementById(id)?.classList.remove("is-active"));
+  if(map[section]) document.getElementById(map[section])?.classList.add("is-active");
+}
+
+function hideAllScreens(){
+  ["home-screen", "now-screen", "stats-screen", "universes-screen", "category-screen", "details-screen", "auth-screen", "public-share-screen"].forEach((id) => document.getElementById(id)?.classList.add("hidden"));
+  closeFolderModal();
+}
+
+function showDashboardScreen(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("home-screen")?.classList.remove("hidden");
+  updateBottomNavState("dashboard");
+  refreshProductArchitectureViews();
+}
+
+function showNowScreen(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("now-screen")?.classList.remove("hidden");
+  updateBottomNavState("now");
+  renderNowScreen();
+}
+
+function showStatsScreen(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("stats-screen")?.classList.remove("hidden");
+  updateBottomNavState("stats");
+  renderStatsScreen();
+  renderActivityLists();
+}
+
+function showUniversesScreen(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("universes-screen")?.classList.remove("hidden");
+  updateBottomNavState("universes");
+  renderUniversesScreen();
+}
+
+function showLibraryRoot(){
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("home-screen")?.classList.remove("hidden");
+  updateBottomNavState("library");
+  document.getElementById("library-section-title")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  refreshProductArchitectureViews();
+}
+
+function goHome(){
+  showDashboardScreen();
+}
+
+function openCardFromSection(id, category){
+  currentCategory = category;
+  openCardById(id);
+}
+
+function changeStatusByCategory(id, category){
+  currentCategory = category;
+  changeStatusById(id);
+}
+
+function setNowSort(value){
+  currentNowSort = value || "updated";
+  renderNowScreen();
+}
+
+function openTrackerModalByCurrentItem(){
+  if(!currentOpenItemId) return;
+  openTrackerModalById(currentOpenItemId, currentCategory);
+}
+
+function openTrackerModalById(id, category = currentCategory){
+  currentCategory = category;
+  const item = getItemById(category, id);
+  if(!item) return;
+  const tracker = normalizeTracker(item);
+  currentOpenItemId = id;
+  const statusInput = document.getElementById("tracker-status-input");
+  if(statusInput){
+    statusInput.innerHTML = PRODUCT_TRACKER_STATUSES.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(translateStatus(status))}</option>`).join("");
+    statusInput.value = item.status || tracker.status || "Planned";
+  }
+  setValueIfPresent("tracker-started-input", tracker.started_at || "");
+  setValueIfPresent("tracker-completed-input", tracker.completed_at || "");
+  setValueIfPresent("tracker-rating-input", tracker.rating || "");
+  setValueIfPresent("tracker-progress-current-input", tracker.progress_current || "");
+  setValueIfPresent("tracker-progress-total-input", tracker.progress_total || "");
+  setValueIfPresent("tracker-repeat-input", tracker.revisit_count || 0);
+  const note = document.getElementById("tracker-note-input");
+  if(note) note.value = tracker.note || "";
+  document.getElementById("tracker-modal")?.classList.remove("hidden");
+}
+
+function closeTrackerModal(){
+  document.getElementById("tracker-modal")?.classList.add("hidden");
+}
+
+async function saveTrackerFromModal(){
+  const item = getItemById(currentCategory, currentOpenItemId);
+  if(!item) return;
+  const tracker = normalizeTracker(item);
+  tracker.status = document.getElementById("tracker-status-input")?.value || item.status || tracker.status;
+  tracker.started_at = document.getElementById("tracker-started-input")?.value || "";
+  tracker.completed_at = document.getElementById("tracker-completed-input")?.value || "";
+  tracker.rating = document.getElementById("tracker-rating-input")?.value || "";
+  tracker.progress_current = Number(document.getElementById("tracker-progress-current-input")?.value || 0);
+  tracker.progress_total = Number(document.getElementById("tracker-progress-total-input")?.value || 0);
+  tracker.revisit_count = Number(document.getElementById("tracker-repeat-input")?.value || 0);
+  tracker.note = document.getElementById("tracker-note-input")?.value || "";
+  tracker.last_updated_at = new Date().toISOString();
+  item.tracker = tracker;
+  item.status = tracker.status;
+  await saveTrackerOverrideForItem(item);
+  await recordProductActivity("tracker_updated", item, { status: tracker.status, progress: tracker.progress_current });
+  renderShelf();
+  renderNowScreen();
+  renderStatsScreen();
+  renderHomeNowSection();
+  renderHomeStatsSection();
+  renderActivityLists();
+  await renderTrackerSummaryForCurrentItem();
+  closeTrackerModal();
+}
+
+function buildUniverseOptions(excludeKey = ""){
+  const items = getAllLibraryItems().filter((item) => buildTrackerStorageKey(item, item.category) !== excludeKey);
+  return [`<option value="">—</option>`, ...items.map((item) => `<option value="${escapeHtml(buildTrackerStorageKey(item, item.category))}">${escapeHtml(item.title)} (${escapeHtml(translateCategory(item.category))})</option>`)].join("");
+}
+
+function openUniverseEditor(){
+  currentUniverseContextItemId = currentOpenItemId;
+  const relationInput = document.getElementById("universe-item-relation-input");
+  const relatedItemInput = document.getElementById("universe-related-item-input");
+  const linkTypeInput = document.getElementById("universe-link-type-input");
+  if(relationInput) relationInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+  if(linkTypeInput) linkTypeInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+  if(relatedItemInput) relatedItemInput.innerHTML = buildUniverseOptions(currentOpenItemId ? buildTrackerStorageKey(getItemById(currentCategory, currentOpenItemId), currentCategory) : "");
+  renderUniverseModalExisting();
+  document.getElementById("universe-modal")?.classList.remove("hidden");
+}
+
+function openUniverseEditorByCurrentItem(){
+  openUniverseEditor();
+}
+
+function closeUniverseModal(){
+  document.getElementById("universe-modal")?.classList.add("hidden");
+}
+
+async function renderUniverseModalExisting(){
+  const container = document.getElementById("universe-modal-existing");
+  if(!container) return;
+  const store = await getUniverseStore();
+  container.innerHTML = (store.universes || []).map((universe) => `<article class="link-chip"><strong>${escapeHtml(universe.name)}</strong><span class="small">${escapeHtml(universe.slug || "")}</span></article>`).join("") || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+}
+
+async function saveUniverseFromModal(){
+  const store = await getUniverseStore();
+  const name = normalizeSpaces(document.getElementById("universe-name-input")?.value || "");
+  const slug = normalizeSpaces(document.getElementById("universe-slug-input")?.value || name.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, "-").replace(/^-+|-+$/g, ""));
+  const description = normalizeSpaces(document.getElementById("universe-description-input")?.value || "");
+  let universeId = "";
+  if(name){
+    universeId = `universe_${slug || Date.now()}`;
+    const exists = (store.universes || []).find((entry) => entry.id === universeId || entry.slug === slug || entry.name === name);
+    if(!exists){
+      store.universes = [{ id: universeId, name, slug, description }, ...(store.universes || [])];
+    } else {
+      universeId = exists.id;
+    }
+  }
+  const item = currentUniverseContextItemId ? getItemById(currentCategory, currentUniverseContextItemId) : null;
+  if(item && universeId){
+    const itemKey = buildTrackerStorageKey(item, currentCategory);
+    if(!(store.memberships || []).some((entry) => entry.universeId === universeId && entry.itemKey === itemKey)){
+      store.memberships = [{ universeId, itemKey, relationType: document.getElementById("universe-item-relation-input")?.value || "same_universe" }, ...(store.memberships || [])];
+    }
+    const relatedKey = document.getElementById("universe-related-item-input")?.value || "";
+    if(relatedKey){
+      store.links = [{ sourceKey: itemKey, targetKey: relatedKey, relationType: document.getElementById("universe-link-type-input")?.value || "related_work" }, ...(store.links || [])];
+    }
+    await recordProductActivity("universe_linked", item, { universeId, relatedKey });
+  }
+  await setUniverseStore(store);
+  renderUniversesScreen();
+  renderUniverseDetailsForCurrentItem();
+  closeUniverseModal();
+}
+
+function refreshProductArchitectureViews(){
+  renderHomeNowSection();
+  renderHomeStatsSection();
+  renderActivityLists();
+  renderNowScreen();
+  renderStatsScreen();
+  renderUniversesScreen();
+  renderTrackerSummaryForCurrentItem();
+  renderUniverseDetailsForCurrentItem();
+}
+
+const productArchitectureApplyTranslations = applyTranslations;
+applyTranslations = function applyTranslationsProductArchitecture(){
+  productArchitectureApplyTranslations();
+  [
+    ["now-section-title", "Сейчас"],
+    ["now-section-note", "Продолжайте с места, где остановились"],
+    ["open-now-screen-btn", "Открыть"],
+    ["stats-section-title", "Статистика"],
+    ["stats-section-note", "Сводка по библиотеке и активности"],
+    ["open-stats-screen-btn", "Открыть"],
+    ["activity-section-title", "Недавняя активность"],
+    ["activity-section-note", "Последние изменения статуса и прогресса"],
+    ["now-screen-title", "Сейчас"],
+    ["stats-screen-title", "Статистика"],
+    ["universes-screen-title", "Вселенные"],
+    ["tracker-section-title", "Трекер"],
+    ["tracker-section-note", "Прогресс, рейтинг и заметка"],
+    ["open-tracker-modal-btn", "Обновить"],
+    ["details-universe-title", "Связи и вселенные"],
+    ["details-universe-note", "Франшизы, циклы и связанные работы"],
+    ["open-universe-modal-btn", "Связать"],
+    ["tracker-modal-title", "Трекер"],
+    ["tracker-status-label", "Статус"],
+    ["tracker-started-label", "Дата начала"],
+    ["tracker-completed-label", "Дата завершения"],
+    ["tracker-rating-label", "Рейтинг"],
+    ["tracker-progress-current-label", "Текущий прогресс"],
+    ["tracker-progress-total-label", "Всего"],
+    ["tracker-repeat-label", "Повтор / пересмотр"],
+    ["tracker-note-label", "Заметка"],
+    ["tracker-cancel-btn", t().buttons.cancel],
+    ["tracker-save-btn", t().buttons.save],
+    ["universe-modal-title", "Связи вселенных"],
+    ["universe-name-label", "Вселенная / франшиза"],
+    ["universe-slug-label", "Slug"],
+    ["universe-description-label", "Описание"],
+    ["universe-item-label", "Привязать текущий объект"],
+    ["universe-related-item-label", "Связать с другим объектом"],
+    ["universe-link-type-label", "Тип связи"],
+    ["universe-cancel-btn", t().buttons.cancel],
+    ["universe-save-btn", t().buttons.save],
+    ["nav-home-btn", "Главная"],
+    ["nav-now-btn", "Сейчас"],
+    ["nav-library-btn", "Библиотека"],
+    ["nav-stats-btn", "Статистика"],
+    ["nav-universes-btn", "Вселенные"],
+    ["add-universe-btn", "+ Вселенная"],
+    ["stats-activity-title", "История активности"],
+    ["stats-activity-note", "Что вы меняли в библиотеке недавно"]
+  ].forEach(([id, value]) => setTextIfPresent(id, value));
+  rebuildStatusFilterOptions();
+  refreshProductArchitectureViews();
+};
+
+const productArchitectureOpenCardById = openCardById;
+openCardById = async function openCardByIdWithArchitecture(id){
+  await productArchitectureOpenCardById(id);
+  await renderTrackerSummaryForCurrentItem();
+  await renderUniverseDetailsForCurrentItem();
+};
+
+const productArchitectureShowAuthorizedUI = showAuthorizedUI;
+showAuthorizedUI = async function showAuthorizedUIWithArchitecture(){
+  await updateAllProductData();
+  await productArchitectureShowAuthorizedUI();
+  updateBottomNavState("dashboard");
+  refreshProductArchitectureViews();
+};
+
+const productArchitectureLoadCategory = loadCategoryFromSupabase;
+loadCategoryFromSupabase = async function loadCategoryFromSupabaseWithArchitecture(category){
+  const result = await productArchitectureLoadCategory(category);
+  await applyTrackerOverridesToCategory(category);
+  await rebuildStatusFilterOptions();
+  refreshProductArchitectureViews();
+  return result;
+};
+
+const productArchitectureRenderShelf = renderShelf;
+renderShelf = function renderShelfWithArchitecture(){
+  productArchitectureRenderShelf();
+  refreshProductArchitectureViews();
+};
+
+async function init(){
+  applyThemeMode();
+  await updateAllProductData();
+  applyTranslations();
+  updateHeaderCompactState();
+  systemThemeMedia.addEventListener("change", () => {
+    if(currentThemeMode === "system") applyThemeMode();
+  });
+  window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
+  window.addEventListener("resize", () => {
+    if(!isMobileViewport()) closeItemActionsSheet();
+  });
+  document.addEventListener("click", (event) => {
+    const profileMenu = document.getElementById("profile-menu");
+    const profileButton = document.getElementById("profile-btn");
+    if(profileMenu && !profileMenu.classList.contains("hidden") && !profileMenu.contains(event.target) && !profileButton?.contains(event.target)) closeProfileMenu();
+    const shareMenu = document.getElementById("share-library-menu");
+    const shareButton = document.getElementById("share-library-btn");
+    if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if(event.key === "Escape"){
+      closePreferencesPanel();
+      closeShareItemModal();
+      closeFolderModal();
+      closeTrackerModal();
+      closeUniverseModal();
+      toggleHomeAddPanel(false);
+    }
+  });
+  window.addEventListener("error", (event) => showRuntimeError(event?.message || "Unknown script error"));
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
+  });
+  if(isPublicShareRoute()){
+    await initPublicSharePage();
+    updatePrimaryActionVisibility();
+    return;
+  }
+  await initApp();
+  updateBottomNavState("dashboard");
+  refreshProductArchitectureViews();
+  updatePrimaryActionVisibility();
+}
+
     init();
