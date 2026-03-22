@@ -2078,3 +2078,439 @@ body.header-compact .app-header {
     bottom: 82px;
   }
 }
+
+/* --- mobile refinement / sheets / folder UX refresh --- */
+:root {
+  --safe-bottom: max(14px, env(safe-area-inset-bottom));
+  --safe-top: max(10px, env(safe-area-inset-top));
+}
+
+body.sheet-open {
+  overflow: hidden;
+}
+
+.mobile-sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  pointer-events: none;
+}
+
+.sheet-layer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  pointer-events: auto;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.56);
+  backdrop-filter: blur(6px);
+  animation: sheet-backdrop-in 180ms ease;
+}
+
+.mobile-sheet {
+  position: relative;
+  width: min(100%, 560px);
+  margin: auto auto 0;
+  padding: 14px 14px calc(16px + var(--safe-bottom));
+  border-radius: 28px 28px 0 0;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 90%, transparent 10%);
+  background: color-mix(in srgb, var(--panel) 98%, transparent 2%);
+  box-shadow: 0 -18px 40px rgba(2, 8, 18, 0.26);
+  animation: sheet-panel-in 220ms cubic-bezier(.2,.85,.22,1);
+}
+
+.sheet-handle {
+  width: 42px;
+  height: 5px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-soft) 55%, transparent 45%);
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sheet-header h3 {
+  margin: 0 0 4px;
+  font-size: 1.02rem;
+  letter-spacing: -0.03em;
+}
+
+.sheet-close-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 82%, transparent 18%);
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-actions-grid,
+.sheet-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sheet-action-btn,
+.sheet-action-list .button,
+.folder-manager-row .button {
+  min-height: 52px;
+  justify-content: flex-start;
+}
+
+.sheet-cancel-btn {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.folder-rail {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 10px;
+  margin-bottom: 12px;
+  scrollbar-width: none;
+}
+
+.folder-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.folder-chip,
+.folder-manage-chip {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 76%, transparent 24%);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.folder-chip:hover,
+.folder-chip:focus-visible,
+.folder-manage-chip:hover,
+.folder-manage-chip:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-strong) 70%);
+  color: var(--text);
+  outline: none;
+}
+
+.folder-chip.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface) 86%);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-strong) 56%);
+  color: var(--text);
+}
+
+.folder-manage-chip {
+  background: transparent;
+}
+
+.folder-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.folder-manager-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(48vh, 360px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.folder-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, transparent 30%);
+}
+
+.folder-manager-row-main {
+  min-width: 0;
+}
+
+.folder-manager-row-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.folder-manager-row-meta {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.item-actions-panel .sheet-action-list .button {
+  width: 100%;
+}
+
+.item-actions-panel .sheet-action-list .button-danger {
+  justify-content: center;
+}
+
+.folder-option {
+  min-height: 56px;
+  border-radius: 18px;
+}
+
+.media-card {
+  overflow: visible;
+}
+
+.media-card-top {
+  padding: 10px 10px 0;
+}
+
+.media-cover {
+  aspect-ratio: 0.72;
+}
+
+.media-menu-wrap {
+  top: 16px;
+  right: 16px;
+}
+
+.media-menu {
+  z-index: 4;
+}
+
+.filter-toolbar,
+.folder-rail,
+.shelf-shell {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes sheet-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheet-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100% - 12px, 1180px);
+    padding-top: 8px;
+    padding-bottom: calc(82px + var(--safe-bottom));
+  }
+
+  .app-header {
+    top: var(--safe-top);
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(2, 8, 18, 0.1);
+  }
+
+  .profile-trigger {
+    width: 38px;
+    height: 38px;
+    box-shadow: 0 8px 20px rgba(2, 8, 18, 0.14);
+  }
+
+  .home-overview {
+    padding: 14px;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .home-overview-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .share-library-btn {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+  }
+
+  .panel-section,
+  .screen-panel,
+  .shelf-shell,
+  .auth-card,
+  .modal-box,
+  .details-panel,
+  .details-cover {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .filter-toolbar {
+    gap: 8px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: transparent;
+    border: 0;
+  }
+
+  .filter-toolbar-search,
+  .filter-toolbar-status {
+    width: 100%;
+  }
+
+  .filter-toolbar-search .input,
+  .filter-toolbar-status .select {
+    min-height: 42px;
+    border-radius: 14px;
+  }
+
+  .shelf-shell {
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .media-card {
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(2, 8, 18, 0.12);
+  }
+
+  .media-card:hover {
+    transform: none;
+  }
+
+  .media-info {
+    gap: 8px;
+    padding: 10px 10px 12px;
+  }
+
+  .media-title {
+    font-size: 0.9rem;
+    line-height: 1.3;
+  }
+
+  .media-meta {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .meta-chip,
+  .badge {
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 0.69rem;
+  }
+
+  .folder-block {
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .folder-block-title {
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+  }
+
+  .global-add-fab {
+    right: 12px;
+    left: auto;
+    bottom: calc(12px + var(--safe-bottom));
+    min-height: 50px;
+    padding: 0 16px;
+    gap: 8px;
+    box-shadow: 0 14px 30px color-mix(in srgb, var(--accent-strong) 26%, transparent 74%);
+  }
+
+  .global-add-fab-label {
+    font-size: 0.92rem;
+  }
+
+  .home-add-panel {
+    width: calc(100vw - 12px);
+    bottom: calc(72px + var(--safe-bottom));
+    padding: 14px;
+    border-radius: 22px;
+  }
+
+  .mobile-sheet {
+    width: 100%;
+    max-width: none;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 480px) {
+  .home-title {
+    font-size: 1.22rem;
+  }
+
+  .category-grid,
+  .shelf,
+  .home-add-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .category-card {
+    min-height: 68px;
+    padding: 14px;
+    font-size: 0.88rem;
+  }
+
+  .folder-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-action-btn,
+  .sheet-action-list .button,
+  .folder-manager-row .button,
+  .folder-manager-create-btn {
+    min-height: 50px;
+  }
+}
+
+@media (max-width: 720px) {
+  #folder-modal {
+    align-items: flex-end;
+    padding: 0;
+    background: rgba(6, 10, 18, 0.56);
+  }
+
+  #folder-modal .folder-modal-box {
+    width: 100%;
+    max-height: min(78vh, 640px);
+    margin: 0;
+    padding: 14px 14px calc(16px + var(--safe-bottom));
+    border-radius: 28px 28px 0 0;
+    animation: sheet-panel-in 220ms cubic-bezier(.2,.85,.22,1);
+  }
+}
