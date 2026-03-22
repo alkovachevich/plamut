@@ -317,9 +317,17 @@
                 <h3 id="details-universe-title">Связи и вселенные</h3>
                 <div class="section-note" id="details-universe-note">Франшизы, циклы и связанные работы</div>
               </div>
-              <button class="button button-secondary" type="button" onclick="openUniverseEditorByCurrentItem()" id="open-universe-modal-btn">Связать</button>
+              <div class="section-heading-actions">
+                <button class="button button-secondary" type="button" onclick="retryCurrentItemWikidataEnrichment()" id="retry-wikidata-btn">Повторить Wikidata</button>
+                <button class="button button-secondary" type="button" onclick="openUniverseEditorByCurrentItem()" id="open-universe-modal-btn">Связать</button>
+              </div>
             </div>
-            <div id="details-universe-list" class="linked-list"></div>
+            <div id="details-enrichment-meta" class="enrichment-meta"></div>
+            <div id="details-universe-list" class="linked-list relation-stack"></div>
+            <details id="details-suggested-relations-wrap" class="relation-suggestions hidden">
+              <summary id="details-suggested-relations-summary">Suggested relations</summary>
+              <div id="details-suggested-relations" class="linked-list relation-stack"></div>
+            </details>
           </div>
 
           <div class="section">
