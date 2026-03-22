@@ -1,4 +1,3 @@
-}
     const SUPABASE_URL = "https://rqtqimjenotjspqumeni.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_LOzTBbVK8tg6kDOrO8AcrQ_j52hzXTf";
     const GOOGLE_BOOKS_API_KEY = "AIzaSyAisvc1YIhHWofTe45-ESHF0JVp9t92Oys";
