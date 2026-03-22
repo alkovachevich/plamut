@@ -2616,6 +2616,15 @@ body.sheet-open {
   margin-top: 10px;
 }
 
+.section-heading-actions,
+.relation-card-actions,
+.enrichment-state-footer {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .activity-card {
   display: grid;
   gap: 4px;
@@ -2626,6 +2635,77 @@ body.sheet-open {
   flex-direction: column;
   gap: 4px;
   padding: 12px;
+}
+
+.enrichment-meta,
+.relation-stack,
+.relation-group {
+  display: grid;
+  gap: 10px;
+}
+
+.enrichment-state-card,
+.relation-card {
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+  box-shadow: var(--shadow-soft);
+  padding: 14px;
+}
+
+.enrichment-state-card.is-ready {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border) 55%);
+}
+
+.enrichment-state-card.is-error {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border) 52%);
+}
+
+.enrichment-state-header,
+.relation-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.relation-card-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.relation-card-title,
+.enrichment-state-title {
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.relation-card-meta,
+.relation-card-submeta,
+.enrichment-state-meta,
+.enrichment-state-copy,
+.enrichment-state-footer,
+.relation-suggestions summary {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.relation-card.is-suggested {
+  border-style: dashed;
+}
+
+.relation-suggestions {
+  margin-top: 10px;
+}
+
+.relation-suggestions summary {
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 10px;
+}
+
+.relation-suggestions[open] summary {
+  margin-bottom: 12px;
 }
 
 .tracker-form-grid {
@@ -2710,14 +2790,23 @@ body.sheet-open {
   .universe-card,
   .activity-card,
   .stat-card,
-  .tracker-stat-card {
+  .tracker-stat-card,
+  .relation-card,
+  .enrichment-state-card {
     border-radius: 18px;
     padding: 12px;
   }
 
   .now-card-actions .button,
   .universe-card-actions .button,
-  .compact-heading .button {
+  .compact-heading .button,
+  .section-heading-actions,
+  .relation-card-actions {
     width: 100%;
+  }
+
+  .relation-card,
+  .enrichment-state-header {
+    flex-direction: column;
   }
 }
