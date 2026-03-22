@@ -5949,4 +5949,712 @@ async function init(){
   updatePrimaryActionVisibility();
 }
 
+
+let currentFilterFolder = localStorage.getItem("plamut_folder_filter") || "All";
+let currentItemActionSheetId = null;
+
+Object.assign(translations.en.profile, {
+  folderManagerTitle: "Folders",
+  folderManagerHint: "Create, rename and delete folders inside the current category.",
+  createFolder: "Create folder",
+  renameFolder: "Rename",
+  deleteFolder: "Delete"
+});
+Object.assign(translations.ru.profile, {
+  folderManagerTitle: "Папки",
+  folderManagerHint: "Создавайте, переименовывайте и удаляйте папки внутри текущей категории.",
+  createFolder: "Создать папку",
+  renameFolder: "Переименовать",
+  deleteFolder: "Удалить"
+});
+Object.assign(translations.en.buttons, {
+  cancelShort: "Cancel",
+  removeFromFolder: "Remove from folder",
+  moveToFolder: "Move to folder",
+  manageFolders: "Manage folders"
+});
+Object.assign(translations.ru.buttons, {
+  cancelShort: "Отмена",
+  removeFromFolder: "Убрать из папки",
+  moveToFolder: "Переместить в папку",
+  manageFolders: "Папки"
+});
+Object.assign(translations.en.labels, {
+  foldersEmpty: "No folders yet",
+  foldersManage: "Folders",
+  allItems: "All items",
+  ungroupedItems: "Without folder"
+});
+Object.assign(translations.ru.labels, {
+  foldersEmpty: "Папок пока нет",
+  foldersManage: "Папки",
+  allItems: "Все элементы",
+  ungroupedItems: "Без папки"
+});
+
+function isMobileViewport(){
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function setBodySheetLock(locked){
+  document.body.classList.toggle("sheet-open", Boolean(locked));
+}
+
+function getAnySheetOpen(){
+  return ["share-sheet", "folder-manager-sheet", "item-actions-sheet", "folder-modal"].some((id) => !document.getElementById(id)?.classList.contains("hidden"));
+}
+
+function syncBodySheetLock(){
+  setBodySheetLock(getAnySheetOpen());
+}
+
+function closeShareSheet(){
+  const sheet = document.getElementById("share-sheet");
+  if(sheet) sheet.classList.add("hidden");
+  const qr = document.getElementById("share-sheet-qr-box");
+  if(qr) qr.classList.add("hidden");
+  setTextIfPresent("share-sheet-qr-btn", t().share.showQr);
+  syncBodySheetLock();
+}
+
+function closeShareSheetOnBackdrop(event){
+  if(event?.target?.id === "share-sheet" || event?.target?.classList?.contains("sheet-backdrop")){
+    closeShareSheet();
+  }
+}
+
+function openShareSheet(){
+  const sheet = document.getElementById("share-sheet");
+  if(!sheet) return;
+  closeItemActionsSheet();
+  closeFolderManagerSheet();
+  sheet.classList.remove("hidden");
+  syncBodySheetLock();
+}
+
+function toggleShareSheetQr(){
+  const box = document.getElementById("share-sheet-qr-box");
+  if(!box) return;
+  const shouldOpen = box.classList.contains("hidden");
+  if(shouldOpen){
+    populateShareQr("share-sheet-qr-box", "share-sheet-qr-image", getCurrentShareUrl());
+  }
+  box.classList.toggle("hidden", !shouldOpen);
+  setTextIfPresent("share-sheet-qr-btn", shouldOpen ? t().share.hideQr : t().share.showQr);
+}
+
+async function copyPublicShareLinkFromSheet(){
+  await copyTextValue(getCurrentShareUrl());
+  closeShareSheet();
+}
+
+function openCurrentPublicCardFromSheet(){
+  closeShareSheet();
+  openCurrentPublicCard();
+}
+
+async function shareLibrary(){
+  const user = await getCurrentUser();
+  if(!user){
+    alert(t().labels.mustBeLoggedIn);
+    return;
+  }
+  const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    alert(t().share.unavailable);
+    return;
+  }
+  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  openShareSheet();
+}
+
+function closeItemActionsSheet(){
+  const sheet = document.getElementById("item-actions-sheet");
+  if(sheet) sheet.classList.add("hidden");
+  currentItemActionSheetId = null;
+  syncBodySheetLock();
+}
+
+function closeItemActionsSheetOnBackdrop(event){
+  if(event?.target?.id === "item-actions-sheet" || event?.target?.classList?.contains("sheet-backdrop")){
+    closeItemActionsSheet();
+  }
+}
+
+async function removeItemFromFolderById(id){
+  const item = getItemById(currentCategory, id);
+  if(!item) return;
+  pendingFolderSelection = "";
+  currentFolderModalItemId = id;
+  await saveItemFolderFromModal();
+  closeItemActionsSheet();
+}
+
+function buildItemActions(item){
+  if(!item) return [];
+  return [
+    {
+      label: item.folder ? t().buttons.moveToFolder : t().buttons.addToFolder,
+      variant: "secondary",
+      handler: async () => {
+        closeItemActionsSheet();
+        await openFolderModalById(item.id);
+      }
+    },
+    ...(item.folder ? [{
+      label: t().buttons.removeFromFolder,
+      variant: "secondary",
+      handler: async () => {
+        await removeItemFromFolderById(item.id);
+      }
+    }] : []),
+    {
+      label: t().buttons.changeStatus,
+      variant: "secondary",
+      handler: () => {
+        closeItemActionsSheet();
+        changeStatusById(item.id);
+      }
+    },
+    {
+      label: t().buttons.delete,
+      variant: "danger",
+      handler: async () => {
+        closeItemActionsSheet();
+        await deleteItemById(item.id);
+      }
+    }
+  ];
+}
+
+function openItemActionsSheet(id){
+  const item = getItemById(currentCategory, id);
+  if(!item) return;
+  const list = document.getElementById("item-actions-list");
+  if(!list) return;
+  currentItemActionSheetId = id;
+  setTextIfPresent("item-actions-title", item.title || t().buttons.moreActions);
+  setTextIfPresent("item-actions-subtitle", item.folder ? `${t().labels.folder}: ${item.folder}` : translateCategory(currentCategory));
+  list.innerHTML = "";
+  buildItemActions(item).forEach((action) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `button ${action.variant === "danger" ? "button-danger" : "button-secondary"}`;
+    button.textContent = action.label;
+    button.addEventListener("click", () => action.handler());
+    list.appendChild(button);
+  });
+  document.getElementById("item-actions-sheet")?.classList.remove("hidden");
+  syncBodySheetLock();
+}
+
+function toggleCardMenu(event, id){
+  if(isPublicView){
+    if(event){ event.preventDefault(); event.stopPropagation(); }
+    return;
+  }
+  if(event){
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if(isMobileViewport()){
+    openItemActionsSheet(id);
+    return;
+  }
+  const nextId = currentOpenMenuItemId === id ? null : id;
+  closeCardMenu();
+  currentOpenMenuItemId = nextId;
+  if(nextId === null) return;
+  const card = document.querySelector(`.media-card[data-item-id="${id}"]`);
+  const button = card?.querySelector(".media-menu-btn");
+  if(card) card.classList.add("menu-open");
+  if(button) button.setAttribute("aria-expanded", "true");
+}
+
+async function getFolderUsageMap(){
+  const usage = new Map();
+  (demoData[currentCategory] || []).forEach((item) => {
+    const key = normalizeSpaces(item.folder || "");
+    if(!key) return;
+    usage.set(key, (usage.get(key) || 0) + 1);
+  });
+  return usage;
+}
+
+async function renameCustomFolder(oldFolder, nextFolder){
+  const oldName = normalizeSpaces(oldFolder);
+  const newName = normalizeSpaces(nextFolder);
+  if(!oldName || !newName || oldName === newName) return;
+
+  const folders = await getCustomFolders();
+  if(folders.includes(newName)){
+    alert(t().profile.customFolderExists);
+    return;
+  }
+
+  await setCustomFolders(folders.map((folder) => folder === oldName ? newName : folder));
+
+  const assignments = await getFolderAssignments();
+  Object.keys(assignments).forEach((key) => {
+    if(assignments[key] === oldName) assignments[key] = newName;
+  });
+  await setFolderAssignments(assignments);
+
+  for(const category of Object.keys(demoData)){
+    demoData[category].forEach((item) => {
+      if(item.folder === oldName) item.folder = newName;
+    });
+  }
+
+  const user = await getCurrentUser();
+  if(user){
+    const { error } = await supabaseClient
+      .from("user_media")
+      .update({ folder_name: newName })
+      .eq("user_id", user.id)
+      .eq("folder_name", oldName);
+    if(error){
+      console.error("Folder rename update error:", error);
+    }
+  }
+
+  if(currentFilterFolder === oldName){
+    currentFilterFolder = newName;
+    localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  }
+
+  renderFolderRail();
+  renderFolderManagerList();
+  renderShelf();
+}
+
+async function removeCustomFolder(folder){
+  const folderName = normalizeSpaces(folder);
+  if(!folderName) return;
+  const folders = await getCustomFolders();
+  await setCustomFolders(folders.filter((item) => item !== folderName));
+
+  const assignments = await getFolderAssignments();
+  Object.keys(assignments).forEach((key) => {
+    if(assignments[key] === folderName){
+      assignments[key] = "";
+    }
+  });
+  await setFolderAssignments(assignments);
+
+  for(const category of Object.keys(demoData)){
+    demoData[category].forEach((item) => {
+      if(item.folder === folderName){
+        item.folder = "";
+      }
+    });
+  }
+
+  const user = await getCurrentUser();
+  if(user){
+    const { error } = await supabaseClient
+      .from("user_media")
+      .update({ folder_name: null })
+      .eq("user_id", user.id)
+      .eq("folder_name", folderName);
+    if(error){
+      console.error("Folder delete update error:", error);
+    }
+  }
+
+  if(currentFilterFolder === folderName){
+    currentFilterFolder = "All";
+    localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  }
+
+  renderFolderRail();
+  renderFolderManagerList();
+  renderShelf();
+}
+
+function setFolderFilter(value){
+  currentFilterFolder = value || "All";
+  localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  renderFolderRail();
+  renderShelf();
+}
+
+async function renderFolderRail(){
+  const rail = document.getElementById("folder-rail");
+  if(!rail) return;
+  if(isPublicView || currentCategory === "Blacklist"){
+    rail.classList.add("hidden");
+    rail.innerHTML = "";
+    return;
+  }
+
+  const folders = await getAvailableFolders();
+  const usage = await getFolderUsageMap();
+  const allCount = (demoData[currentCategory] || []).length;
+  const ungroupedCount = (demoData[currentCategory] || []).filter((item) => !normalizeSpaces(item.folder || "")).length;
+
+  rail.classList.remove("hidden");
+  rail.innerHTML = "";
+
+  const buttons = [
+    { label: `${t().labels.allItems} · ${allCount}`, value: "All" },
+    ...folders.map((folder) => ({ label: `${folder} · ${usage.get(folder) || 0}`, value: folder })),
+    ...(ungroupedCount ? [{ label: `${t().labels.ungroupedItems} · ${ungroupedCount}`, value: "__ungrouped__" }] : [])
+  ];
+
+  buttons.forEach(({ label, value }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `folder-chip${currentFilterFolder === value ? " is-active" : ""}`;
+    button.textContent = label;
+    button.addEventListener("click", () => setFolderFilter(value));
+    rail.appendChild(button);
+  });
+
+  const manageButton = document.createElement("button");
+  manageButton.type = "button";
+  manageButton.className = "folder-manage-chip";
+  manageButton.textContent = t().buttons.manageFolders;
+  manageButton.addEventListener("click", openFolderManagerSheet);
+  rail.appendChild(manageButton);
+}
+
+async function renderFolderManagerList(){
+  const list = document.getElementById("folder-manager-list");
+  if(!list) return;
+  const folders = await getAvailableFolders();
+  const usage = await getFolderUsageMap();
+  list.innerHTML = "";
+  if(!folders.length){
+    list.innerHTML = `<div class="small">${escapeHtml(t().labels.foldersEmpty)}</div>`;
+    return;
+  }
+
+  folders.forEach((folder) => {
+    const row = document.createElement("div");
+    row.className = "folder-manager-row";
+    row.innerHTML = `
+      <div class="folder-manager-row-main">
+        <div class="folder-manager-row-title">${escapeHtml(folder)}</div>
+        <div class="folder-manager-row-meta">${escapeHtml(String(usage.get(folder) || 0))} · ${escapeHtml(translateCategory(currentCategory || ""))}</div>
+      </div>
+    `;
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "button button-secondary";
+    renameBtn.textContent = t().profile.renameFolder;
+    renameBtn.addEventListener("click", async () => {
+      const nextName = normalizeSpaces(prompt(t().profile.renameFolder, folder));
+      if(!nextName || nextName === folder) return;
+      await renameCustomFolder(folder, nextName);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "button button-danger";
+    deleteBtn.textContent = t().profile.deleteFolder;
+    deleteBtn.addEventListener("click", async () => {
+      const confirmed = confirm(`${t().profile.deleteFolder}: ${folder}?`);
+      if(!confirmed) return;
+      await removeCustomFolder(folder);
+    });
+
+    row.appendChild(renameBtn);
+    row.appendChild(deleteBtn);
+    list.appendChild(row);
+  });
+}
+
+function openFolderManagerSheet(){
+  if(!isOwnerControlAllowed()) return;
+  closeShareSheet();
+  closeItemActionsSheet();
+  document.getElementById("folder-manager-sheet")?.classList.remove("hidden");
+  renderFolderManagerList();
+  syncBodySheetLock();
+}
+
+function closeFolderManagerSheet(){
+  document.getElementById("folder-manager-sheet")?.classList.add("hidden");
+  const input = document.getElementById("folder-manager-input");
+  if(input) input.value = "";
+  syncBodySheetLock();
+}
+
+function closeFolderManagerSheetOnBackdrop(event){
+  if(event?.target?.id === "folder-manager-sheet" || event?.target?.classList?.contains("sheet-backdrop")){
+    closeFolderManagerSheet();
+  }
+}
+
+async function createFolderFromSheet(){
+  if(!isOwnerControlAllowed()) return;
+  const input = document.getElementById("folder-manager-input");
+  const value = normalizeSpaces(input?.value || "");
+  if(!value){
+    alert(t().profile.customValueRequired);
+    return;
+  }
+  const folders = await getCustomFolders();
+  if(folders.includes(value)){
+    alert(t().profile.customFolderExists);
+    return;
+  }
+  folders.push(value);
+  await setCustomFolders(folders);
+  if(input) input.value = "";
+  renderFolderRail();
+  renderFolderManagerList();
+}
+
+function addCustomFolder(){
+  openFolderManagerSheet();
+}
+
+async function openFolderModalById(id){
+  if(!isOwnerControlAllowed()) return;
+  closeItemActionsSheet();
+  const item = getItemById(currentCategory, id);
+  if(!item) return;
+  currentFolderModalItemId = id;
+  pendingFolderSelection = item.folder || "";
+  await renderFolderModalOptions();
+  document.getElementById("folder-modal")?.classList.remove("hidden");
+  setBodySheetLock(true);
+}
+
+function closeFolderModal(){
+  document.getElementById("folder-modal")?.classList.add("hidden");
+  currentFolderModalItemId = null;
+  pendingFolderSelection = "";
+  syncBodySheetLock();
+}
+
+async function renderFolderModalOptions(){
+  const list = document.getElementById("folder-modal-list");
+  if(!list) return;
+  const folders = await getAvailableFolders();
+  const options = ["", ...folders];
+  list.innerHTML = "";
+  options.forEach((folder) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder-option" + (pendingFolderSelection === folder ? " is-active" : "");
+    button.innerHTML = `
+      <span>${escapeHtml(folder || t().labels.noFolder)}</span>
+      <span class="small">${pendingFolderSelection === folder ? "✓" : ""}</span>
+    `;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pendingFolderSelection = folder;
+      renderFolderModalOptions();
+    });
+    list.appendChild(button);
+  });
+}
+
+function closeFolderModalOnBackdrop(event){
+  if(event?.target?.id === "folder-modal"){
+    closeFolderModal();
+  }
+}
+
+function getFilteredItems(){
+  const items = demoData[currentCategory] || [];
+  const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
+  return items.filter((item) => {
+    const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
+    const folderMatches = currentFilterFolder === "All"
+      || (currentFilterFolder === "__ungrouped__" ? !normalizeSpaces(item.folder || "") : normalizeSpaces(item.folder || "") === currentFilterFolder);
+    const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
+    const searchMatches = !searchComparison || haystack.includes(searchComparison);
+    return statusMatches && folderMatches && searchMatches;
+  });
+}
+
+function renderShelf(){
+  const shelf = document.getElementById("shelf");
+  if(!shelf) return;
+  closeCardMenu();
+  shelf.innerHTML = "";
+  syncShelfSearchInput();
+  renderFolderRail();
+
+  const filterToolbar = document.getElementById("filter-toolbar");
+  const statusFilterWrap = document.getElementById("status-filter-wrap");
+  if(filterToolbar) filterToolbar.classList.toggle("hidden", currentCategory === "Blacklist");
+  if(statusFilterWrap) statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
+
+  const items = getFilteredItems();
+  if(items.length === 0){
+    shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
+    return;
+  }
+
+  const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
+  const createCard = (item) => {
+    const coverHtml = item.cover
+      ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
+      : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
+    const creatorLine = item.creator ? `<div class="media-meta">${escapeHtml(item.creator)}</div>` : "";
+    const chips = [
+      buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
+      buildChip(translateCategory(currentCategory), "is-category"),
+      buildChip(item.folder || "", "is-folder")
+    ].join("");
+    const menuHtml = isPublicView ? "" : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
+      <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
+      <div class="media-menu" role="menu">
+        <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(item.folder ? t().buttons.moveToFolder : t().buttons.addToFolder)}</button>
+        ${item.folder ? `<button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); removeItemFromFolderById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.removeFromFolder)}</button>` : ""}
+        <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
+        <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
+      </div>
+    </div>`;
+    const card = document.createElement("article");
+    card.className = "media-card";
+    card.dataset.itemId = item.id;
+    card.innerHTML = `
+      <div class="media-card-top">
+        <button class="media-cover-button" type="button" aria-label="${escapeHtml(item.title || t().buttons.open)}" onclick="event.stopPropagation(); openCardById(${item.id})">
+          <div class="media-cover">${coverHtml}</div>
+        </button>
+        ${menuHtml}
+      </div>
+      <div class="media-info">
+        <div class="media-meta-chips">${chips}</div>
+        <h3 class="media-title">${escapeHtml(item.title)}</h3>
+        ${creatorLine}
+      </div>`;
+    return card;
+  };
+
+  const folders = [];
+  const ungroupedItems = [];
+  const grouped = new Map();
+  items.forEach((item) => {
+    const folder = getItemFolder(item);
+    if(!folder){
+      ungroupedItems.push(item);
+      return;
+    }
+    if(!grouped.has(folder)){
+      grouped.set(folder, []);
+      folders.push(folder);
+    }
+    grouped.get(folder).push(item);
+  });
+
+  const showUngroupedBlock = currentFilterFolder === "All" || currentFilterFolder === "__ungrouped__";
+  if(ungroupedItems.length && showUngroupedBlock){
+    const defaultSection = document.createElement("section");
+    defaultSection.className = "folder-block";
+    defaultSection.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(t().labels.ungroupedItems)}</span><span class="small">${ungroupedItems.length}</span></h3>`;
+    const defaultGrid = document.createElement("div");
+    defaultGrid.className = "shelf";
+    ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
+    defaultSection.appendChild(defaultGrid);
+    shelf.appendChild(defaultSection);
+  }
+
+  folders.forEach((folder) => {
+    const section = document.createElement("section");
+    section.className = "folder-block";
+    section.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(folder)}</span><span class="small">${grouped.get(folder).length}</span></h3>`;
+    const folderGrid = document.createElement("div");
+    folderGrid.className = "shelf";
+    grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
+    section.appendChild(folderGrid);
+    shelf.appendChild(section);
+  });
+}
+
+const mobileRefineApplyTranslations = applyTranslations;
+applyTranslations = function applyTranslationsMobileRefine(){
+  mobileRefineApplyTranslations();
+  setTextIfPresent("share-sheet-title", t().topbar.shareLibrary);
+  setTextIfPresent("share-sheet-subtitle", t().share.libraryHint);
+  setTextIfPresent("share-sheet-copy-btn", t().share.copyLink);
+  setTextIfPresent("share-sheet-qr-btn", t().share.showQr);
+  setTextIfPresent("share-sheet-open-btn", t().share.openPublicCard);
+  setTextIfPresent("share-sheet-cancel-btn", t().buttons.cancel);
+  setTextIfPresent("folder-manager-title", t().profile.folderManagerTitle);
+  setTextIfPresent("folder-manager-subtitle", t().profile.folderManagerHint);
+  const folderInput = document.getElementById("folder-manager-input");
+  if(folderInput) folderInput.placeholder = t().profile.customFolderLabel;
+  setTextIfPresent("folder-manager-create-btn", t().profile.createFolder);
+  setTextIfPresent("folder-manager-cancel-btn", t().buttons.cancel);
+  setTextIfPresent("item-actions-cancel-btn", t().buttons.cancel);
+  renderFolderRail();
+  renderFolderManagerList();
+};
+
+const previousRefreshAccountCollectionsUI = refreshAccountCollectionsUI;
+refreshAccountCollectionsUI = function refreshAccountCollectionsUIWithFolders(){
+  previousRefreshAccountCollectionsUI();
+  renderFolderRail();
+  renderFolderManagerList();
+};
+
+function closePreferencesPanel(){
+  closeProfileMenu();
+  closeShareMenu();
+  closeShareSheet();
+  closeFolderManagerSheet();
+  closeItemActionsSheet();
+}
+
+function handlePrimaryAddAction(){
+  if(document.getElementById("home-screen") && !document.getElementById("home-screen").classList.contains("hidden")){
+    toggleHomeAddPanel();
+    return;
+  }
+  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !isPublicView && currentCategory !== "Blacklist"){
+    openAddModal();
+  }
+}
+
+async function init(){
+  applyThemeMode();
+  applyTranslations();
+  updateHeaderCompactState();
+  systemThemeMedia.addEventListener("change", () => {
+    if(currentThemeMode === "system") applyThemeMode();
+  });
+  window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
+  window.addEventListener("resize", () => {
+    if(!isMobileViewport()) closeItemActionsSheet();
+  });
+  document.addEventListener("click", (event) => {
+    const profileMenu = document.getElementById("profile-menu");
+    const profileButton = document.getElementById("profile-btn");
+    if(profileMenu && !profileMenu.classList.contains("hidden") && !profileMenu.contains(event.target) && !profileButton?.contains(event.target)) closeProfileMenu();
+    const shareMenu = document.getElementById("share-library-menu");
+    const shareButton = document.getElementById("share-library-btn");
+    if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if(event.key === "Escape"){
+      closePreferencesPanel();
+      closeShareItemModal();
+      closeFolderModal();
+      toggleHomeAddPanel(false);
+    }
+  });
+  window.addEventListener("error", (event) => showRuntimeError(event?.message || "Unknown script error"));
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
+  });
+  if(isPublicShareRoute()){
+    await initPublicSharePage();
+    updatePrimaryActionVisibility();
+    return;
+  }
+  await initApp();
+  updatePrimaryActionVisibility();
+}
+
     init();
