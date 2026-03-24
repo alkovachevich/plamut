@@ -1,0 +1,326 @@
+/* Plamut UI stage 1 overrides */
+:root {
+  --native-panel: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+  --native-surface: color-mix(in srgb, var(--surface) 84%, var(--panel) 16%);
+}
+
+/* Header becomes minimal, only Plamut remains floating on scroll */
+.app-header {
+  position: relative !important;
+  top: auto !important;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+body.plamut-floating-brand .app-header {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+}
+
+body.plamut-floating-brand .header-actions {
+  display: none !important;
+}
+
+body.plamut-floating-brand .brand-block-compact {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 120;
+  transform: translateX(-50%);
+  padding: 8px 14px !important;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent 18%);
+  background: color-mix(in srgb, var(--panel) 72%, transparent 28%);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 28px rgba(2, 8, 18, 0.18);
+}
+
+body.plamut-floating-brand .brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  box-shadow: none;
+}
+
+body.plamut-floating-brand .header-context {
+  display: block;
+}
+
+body.plamut-floating-brand .brand-title {
+  font-size: 0.92rem;
+}
+
+body.plamut-floating-brand .brand-subtitle {
+  display: none;
+}
+
+#home-screen .home-section {
+  display: none !important;
+}
+
+.home-overview {
+  align-items: stretch;
+  gap: 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 95%, #fff 5%) 0%, color-mix(in srgb, var(--panel-muted) 98%, transparent 2%) 100%);
+}
+
+.home-overview-copy {
+  gap: 10px;
+}
+
+.home-overview-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-native-btn,
+#share-library-btn {
+  min-height: 48px;
+  border-radius: 18px !important;
+  justify-content: center;
+}
+
+#share-library-btn {
+  width: 100%;
+}
+
+#home-library-btn {
+  display: inline-flex;
+}
+
+#library-screen {
+  display: grid;
+  gap: 14px;
+}
+
+.library-native-head {
+  display: grid;
+  gap: 12px;
+}
+
+.library-native-toprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-native-search {
+  display: grid;
+  gap: 10px;
+}
+
+.library-native-search .input {
+  min-height: 48px;
+  border-radius: 18px;
+}
+
+.library-search-results {
+  display: grid;
+  gap: 10px;
+}
+
+.library-search-result {
+  display: grid;
+  grid-template-columns: 52px minmax(0,1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent 22%);
+  cursor: pointer;
+}
+
+.library-search-result-thumb {
+  width: 52px;
+  aspect-ratio: 2 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel-muted) 88%, transparent 12%);
+}
+
+.library-search-result-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-native-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.library-native-category {
+  min-height: 82px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 95%, #fff 5%) 0%, color-mix(in srgb, var(--surface) 74%, transparent 26%) 100%);
+  cursor: pointer;
+}
+
+.library-native-category small {
+  color: var(--text-soft);
+}
+
+#category-screen .panel-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+#category-screen .toolbar-actions {
+  gap: 8px;
+}
+
+#category-screen #filter-toggle-btn {
+  display: inline-flex;
+}
+
+#filter-toolbar.plamut-filter-hidden {
+  display: none !important;
+}
+
+#filter-toolbar {
+  padding: 12px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent 30%);
+}
+
+#folder-rail {
+  margin-bottom: 10px;
+}
+
+/* Uniform card sizing, no folder group wrappers */
+#shelf {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(174px, 1fr));
+  gap: 14px;
+}
+
+#shelf > .folder-block {
+  display: contents !important;
+}
+
+#shelf > .shelf {
+  display: contents !important;
+}
+
+.folder-block-title {
+  display: none !important;
+}
+
+.media-card {
+  height: 100%;
+  overflow: visible;
+}
+
+.media-card-top {
+  padding: 10px 10px 0;
+}
+
+.media-cover {
+  aspect-ratio: 0.68 !important;
+  width: 100%;
+}
+
+.media-info {
+  min-height: 110px;
+  align-content: start;
+}
+
+.meta-chip.is-folder:empty {
+  display: none;
+}
+
+/* Details menu */
+.plamut-details-menu-wrap {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 3;
+}
+
+.plamut-details-shell {
+  position: relative;
+}
+
+.plamut-details-menu-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 92%, transparent 8%);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.plamut-details-menu {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  min-width: 180px;
+  display: none;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow-strong);
+}
+
+.plamut-details-menu.open {
+  display: grid;
+  gap: 4px;
+}
+
+.plamut-details-menu .media-menu-item {
+  border: 0;
+}
+
+#details-folder-badge.plamut-hidden-badge {
+  display: none !important;
+}
+
+.plamut-user-badge {
+  background: color-mix(in srgb, #a56eff 18%, var(--surface) 82%);
+  color: #eadcff;
+  border-color: color-mix(in srgb, #a56eff 42%, var(--border-strong) 58%);
+}
+
+@media (max-width: 720px) {
+  body.plamut-floating-brand .brand-block-compact {
+    top: calc(10px + env(safe-area-inset-top));
+  }
+
+  .home-overview-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .library-native-categories,
+  #shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .library-native-categories,
+  #shelf {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .media-info {
+    min-height: 92px;
+  }
+}
