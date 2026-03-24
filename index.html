@@ -132,70 +132,15 @@
         </div>
       </section>
 
-      <section class="dashboard-section panel-section" id="home-now-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="now-section-title">Сейчас</h2>
-            <div class="section-note" id="now-section-note">Продолжайте с места, где остановились</div>
-          </div>
-          <button class="button button-ghost" type="button" onclick="showNowScreen()" id="open-now-screen-btn">Открыть</button>
-        </div>
-        <div id="home-now-grid" class="dashboard-compact-grid"></div>
-      </section>
-
-      <section class="dashboard-section panel-section home-shortcuts-section" id="home-shortcuts-section">
-        <div class="section-heading compact-heading">
-          <div>
-            <h2 class="section-title" id="home-shortcuts-title">Быстрые переходы</h2>
-            <div class="section-note" id="home-shortcuts-note">Главная отвечает только на вопрос, что делать сейчас.</div>
-          </div>
-        </div>
-        <div id="home-shortcuts-grid" class="home-shortcuts-grid">
-          <button class="button button-primary" type="button" onclick="showNowScreen()" id="home-shortcut-now">Сейчас</button>
-          <button class="button button-secondary" type="button" onclick="showLibraryRoot()" id="home-shortcut-library">Библиотека</button>
-          <button class="button button-secondary" type="button" onclick="showUniversesScreen()" id="home-shortcut-universes">Связи</button>
-          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="home-shortcut-stats">Статистика</button>
-        </div>
-      </section>
-
-      <section class="dashboard-section panel-section" id="home-summary-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="home-summary-title">Краткая сводка</h2>
-            <div class="section-note" id="home-summary-note">Только ключевые цифры по библиотеке.</div>
-          </div>
-          <button class="button button-ghost" type="button" onclick="showStatsScreen()" id="open-stats-screen-btn">Открыть</button>
-        </div>
-        <div id="home-stats-grid" class="dashboard-stats-grid"></div>
-      </section>
-
-      <section class="dashboard-section panel-section" id="home-activity-section">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title" id="activity-section-title">Продолжить</h2>
-            <div class="section-note" id="activity-section-note">Последние изменения и то, к чему стоит вернуться.</div>
-          </div>
-        </div>
-        <div id="home-activity-list" class="activity-list"></div>
-      </section>
-    </div>
-
-    <div id="library-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-library-root-btn">←</button>
-          <h2 id="library-screen-title" class="screen-title">Библиотека</h2>
-        </div>
-      </div>
-      <section class="panel-section library-root-section">
+      <section class="home-section panel-section">
         <div class="section-heading">
           <div>
             <h2 class="section-title" id="library-section-title">Library</h2>
             <div class="section-note" id="library-section-note">Choose a category</div>
           </div>
         </div>
-        <div id="library-summary-grid" class="dashboard-stats-grid"></div>
-        <div class="grid category-grid library-category-grid">
+
+        <div class="grid category-grid">
           <div class="card category-card" onclick="openCategory('Books')" id="cat-books"></div>
           <div class="card category-card" onclick="openCategory('Movies')" id="cat-movies"></div>
           <div class="card category-card" onclick="openCategory('Series')" id="cat-series"></div>
@@ -204,57 +149,6 @@
           <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
         </div>
       </section>
-    </div>
-
-    <div id="now-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-now-btn">←</button>
-          <h2 id="now-screen-title" class="screen-title">Сейчас</h2>
-        </div>
-        <div class="toolbar-actions">
-          <select id="now-sort-select" class="select" onchange="setNowSort(this.value)">
-            <option value="updated">Недавно обновлённые</option>
-            <option value="category">По категории</option>
-            <option value="progress">По прогрессу</option>
-            <option value="started">По дате начала</option>
-          </select>
-        </div>
-      </div>
-      <div id="now-list" class="now-list"></div>
-    </div>
-
-    <div id="stats-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-stats-btn">←</button>
-          <h2 id="stats-screen-title" class="screen-title">Статистика</h2>
-        </div>
-      </div>
-      <div id="stats-summary-grid" class="dashboard-stats-grid"></div>
-      <div id="stats-category-grid" class="stats-category-grid"></div>
-      <div class="panel-section stats-panel">
-        <div class="section-heading">
-          <div>
-            <h3 id="stats-activity-title" class="section-title">История активности</h3>
-            <div id="stats-activity-note" class="section-note">Что вы меняли в библиотеке недавно</div>
-          </div>
-        </div>
-        <div id="stats-activity-list" class="activity-list"></div>
-      </div>
-    </div>
-
-    <div id="universes-screen" class="hidden screen-panel section-screen">
-      <div class="topbar panel-toolbar">
-        <div class="toolbar-primary">
-          <button class="button button-ghost" type="button" onclick="goHome()" id="back-universes-btn">←</button>
-          <h2 id="universes-screen-title" class="screen-title">Вселенные</h2>
-        </div>
-        <div class="toolbar-actions">
-          <button class="button button-secondary" type="button" onclick="openUniverseEditor()" id="add-universe-btn">+ Вселенная</button>
-        </div>
-      </div>
-      <div id="universes-list" class="universes-list"></div>
     </div>
 
     <div id="category-screen" class="hidden screen-panel">
@@ -323,46 +217,17 @@
             <span class="badge" id="details-status"></span>
           </div>
 
-          <div class="section tracker-summary-section">
-            <div class="section-heading compact-heading">
-              <div>
-                <h3 id="tracker-section-title">Трекер</h3>
-                <div class="section-note" id="tracker-section-note">Прогресс, рейтинг и заметка</div>
-              </div>
-              <button class="button button-secondary" type="button" onclick="openTrackerModalByCurrentItem()" id="open-tracker-modal-btn">Обновить</button>
-            </div>
-            <div id="tracker-summary-grid" class="tracker-summary-grid"></div>
-          </div>
-
-          <div class="section universe-summary-section">
-            <div class="section-heading compact-heading">
-              <div>
-                <h3 id="details-universe-title">Связи и вселенные</h3>
-                <div class="section-note" id="details-universe-note">Франшизы, циклы и связанные работы</div>
-              </div>
-            </div>
-            <div id="details-enrichment-meta" class="enrichment-meta"></div>
-            <div id="details-relations-summary" class="relation-summary-stack"></div>
-            <details id="details-relations-browser" class="relation-browser">
-              <summary id="details-relations-browser-summary">Подробнее о связях</summary>
-              <div id="details-universe-list" class="linked-list relation-stack"></div>
-              <details id="details-suggested-relations-wrap" class="relation-suggestions hidden">
-                <summary id="details-suggested-relations-summary">Suggested relations</summary>
-                <div id="details-suggested-relations" class="linked-list relation-stack"></div>
-              </details>
-            </details>
-            <details id="details-relation-advanced" class="relation-advanced">
-              <summary id="details-relation-advanced-summary">Advanced editing</summary>
-              <div class="section-heading-actions relation-advanced-actions">
-                <button class="button button-secondary" type="button" onclick="retryCurrentItemWikidataEnrichment()" id="retry-wikidata-btn">Повторить Wikidata</button>
-                <button class="button button-secondary" type="button" onclick="openUniverseEditorByCurrentItem()" id="open-universe-modal-btn">Связать вручную</button>
-              </div>
-            </details>
-          </div>
-
           <div class="section">
             <h3 id="description-label"></h3>
             <div class="muted" id="details-description"></div>
+          </div>
+
+          <div class="section details-relations-section" id="details-relations-section">
+            <div class="details-relations-header">
+              <h3 id="details-relations-title">Related works</h3>
+            </div>
+            <div id="details-relations-list" class="details-relations-list"></div>
+            <div class="small muted" id="details-relations-empty">No related works found yet.</div>
           </div>
 
           <div class="section" id="details-folder-section">
@@ -381,8 +246,7 @@
 
           <div class="section details-actions">
             <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
-            <button class="button button-secondary" type="button" onclick="openCurrentItemActionsSheet()" id="details-more-actions-btn">More actions</button>
-            <button class="button button-danger hidden" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
+            <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
           </div>
         </div>
       </div>
@@ -735,102 +599,6 @@
       </div>
     </div>
 
-    <div id="tracker-modal" class="modal hidden">
-      <div class="modal-box tracker-modal-box">
-        <h3 id="tracker-modal-title">Трекер</h3>
-        <div class="tracker-form-grid">
-          <label class="tracker-field">
-            <span id="tracker-status-label">Статус</span>
-            <select id="tracker-status-input" class="select"></select>
-          </label>
-          <label class="tracker-field">
-            <span id="tracker-started-label">Дата начала</span>
-            <input id="tracker-started-input" class="input" type="date">
-          </label>
-          <label class="tracker-field">
-            <span id="tracker-completed-label">Дата завершения</span>
-            <input id="tracker-completed-input" class="input" type="date">
-          </label>
-          <label class="tracker-field">
-            <span id="tracker-rating-label">Рейтинг</span>
-            <input id="tracker-rating-input" class="input" type="number" min="0" max="10" step="0.5">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="tracker-progress-current-label">Текущий прогресс</span>
-            <input id="tracker-progress-current-input" class="input" type="number" min="0" step="1">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="tracker-progress-total-label">Всего</span>
-            <input id="tracker-progress-total-input" class="input" type="number" min="0" step="1">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="tracker-repeat-label">Повтор / пересмотр</span>
-            <input id="tracker-repeat-input" class="input" type="number" min="0" step="1">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="tracker-note-label">Заметка</span>
-            <textarea id="tracker-note-input" class="textarea" rows="4"></textarea>
-          </label>
-        </div>
-        <div class="modal-actions">
-          <button class="button button-ghost" type="button" onclick="closeTrackerModal()" id="tracker-cancel-btn">Отмена</button>
-          <button class="button button-primary" type="button" onclick="saveTrackerFromModal()" id="tracker-save-btn">Сохранить</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="universe-modal" class="modal hidden">
-      <div class="modal-box universe-modal-box">
-        <h3 id="universe-modal-title">Связи вселенных</h3>
-        <div class="tracker-form-grid">
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-name-label">Вселенная / франшиза</span>
-            <input id="universe-name-input" class="input" type="text" maxlength="80">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-slug-label">Slug</span>
-            <input id="universe-slug-input" class="input" type="text" maxlength="80">
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-description-label">Описание</span>
-            <textarea id="universe-description-input" class="textarea" rows="3"></textarea>
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-item-label">Привязать текущий объект</span>
-            <select id="universe-item-relation-input" class="select"></select>
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-related-item-label">Связать с другим объектом</span>
-            <select id="universe-related-item-input" class="select"></select>
-          </label>
-          <label class="tracker-field tracker-field-wide">
-            <span id="universe-link-type-label">Тип связи</span>
-            <select id="universe-link-type-input" class="select"></select>
-          </label>
-        </div>
-        <div id="universe-modal-existing" class="linked-list"></div>
-        <div class="modal-actions">
-          <button class="button button-ghost" type="button" onclick="closeUniverseModal()" id="universe-cancel-btn">Отмена</button>
-          <button class="button button-primary" type="button" onclick="saveUniverseFromModal()" id="universe-save-btn">Сохранить</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="series-insight-modal" class="modal hidden">
-      <div class="modal-box series-insight-modal-box">
-        <div class="section-heading compact-heading">
-          <div>
-            <h3 id="series-insight-modal-title">Серия и подсказки</h3>
-            <div class="section-note" id="series-insight-modal-note">Система сама нашла серию, связанные части и быстрые действия.</div>
-          </div>
-        </div>
-        <div id="series-insight-body" class="series-insight-body"></div>
-        <div class="modal-actions">
-          <button class="button button-ghost" type="button" onclick="closeSeriesInsightModal()" id="series-insight-close-btn">Закрыть</button>
-        </div>
-      </div>
-    </div>
-
     <div id="status-modal" class="modal hidden">
       <div class="modal-box status-modal-box">
         <h3 id="status-modal-title"></h3>
@@ -918,14 +686,6 @@
         </div>
       </div>
     </div>
-
-  <nav class="bottom-nav" id="bottom-nav">
-    <button class="bottom-nav-btn is-active" type="button" onclick="showDashboardScreen()" id="nav-home-btn">Главная</button>
-    <button class="bottom-nav-btn" type="button" onclick="showNowScreen()" id="nav-now-btn">Сейчас</button>
-    <button class="bottom-nav-btn" type="button" onclick="showLibraryRoot()" id="nav-library-btn">Библиотека</button>
-    <button class="bottom-nav-btn" type="button" onclick="showStatsScreen()" id="nav-stats-btn">Статистика</button>
-    <button class="bottom-nav-btn" type="button" onclick="showUniversesScreen()" id="nav-universes-btn">Вселенные</button>
-  </nav>
 
   <script src="/script.js"></script>
 </body>
