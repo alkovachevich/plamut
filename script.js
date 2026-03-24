@@ -152,6 +152,8 @@
           noFolder: "No folder",
           saveFolder: "Save folder",
           folderSaved: "Folder saved",
+          relatedWorks: "Related works",
+          relatedWorksEmpty: "No related works found yet.",
           runtimeError: "Application error. Please refresh the page. Details:"
         },
         statuses: {
@@ -324,6 +326,8 @@
           noFolder: "Без папки",
           saveFolder: "Сохранить папку",
           folderSaved: "Папка сохранена",
+          relatedWorks: "Связанные произведения",
+          relatedWorksEmpty: "Связанные произведения пока не найдены.",
           runtimeError: "Ошибка приложения. Обновите страницу. Детали:"
         },
         statuses: {
@@ -528,7 +532,8 @@
     let currentNfcContext = null;
     let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
     let currentSavedLibraryState = { saved: false, source: "none" };
-    const relationAutomationMemo = new Map();
+    const relationCache = new Map();
+    let relatedLibraryItemsCache = { userId: "", items: [], loaded: false, promise: null };
 
     const demoData = {
       Books: [],
@@ -538,9 +543,6 @@
       Manga: [],
       Blacklist: []
     };
-    let libraryStateVersion = 0;
-    let cachedStatsSnapshot = null;
-    let cachedStatsSnapshotVersion = -1;
 
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -554,17 +556,50 @@
       return t().topbar.themeSystem;
     }
 
-    function markLibraryStateDirty(){
-      libraryStateVersion += 1;
-      cachedStatsSnapshot = null;
-      cachedStatsSnapshotVersion = -1;
-    }
-
     function resolveThemeMode(mode = currentThemeMode){
       if(mode === "system"){
         return systemThemeMedia.matches ? "dark" : "light";
       }
       return mode === "light" ? "light" : "dark";
+    }
+
+    function invalidateRelatedLibraryItemsCache(userId = relatedLibraryItemsCache.userId){
+      relatedLibraryItemsCache = { userId: userId || "", items: [], loaded: false, promise: null };
+    }
+
+    function clearRelationCache(){
+      relationCache.clear();
+      invalidateRelatedLibraryItemsCache(relatedLibraryItemsCache.userId);
+    }
+
+    function getRelationCacheKey(item, category = currentCategory){
+      if(!item) return "";
+      return buildRelationIdentity(item, category || item.category || currentCategory || "");
+    }
+
+    function getCachedRelatedItems(item, category = currentCategory){
+      const key = getRelationCacheKey(item, category);
+      if(!key || !relationCache.has(key)) return null;
+      return relationCache.get(key).map((entry) => ({ ...entry }));
+    }
+
+    function setCachedRelatedItems(item, category = currentCategory, relatedItems = []){
+      const key = getRelationCacheKey(item, category);
+      if(!key) return [];
+      const snapshot = relatedItems.slice(0, 6).map((entry) => ({ ...entry }));
+      relationCache.set(key, snapshot);
+      return snapshot.map((entry) => ({ ...entry }));
+    }
+
+    function deferRelatedItemsRender(item, category = currentCategory){
+      const run = () => renderRelatedItemsSection(item, category).catch((error) => {
+        console.error("Related items render error:", error);
+      });
+      if(typeof window.requestAnimationFrame === "function"){
+        window.requestAnimationFrame(() => window.setTimeout(run, 0));
+      } else {
+        window.setTimeout(run, 0);
+      }
     }
 
     function applyThemeMode(){
@@ -817,202 +852,6 @@
       const title = normalizeSpaces(itemOrParts.title || "").toLowerCase();
       return [category, canonicalKey || workKey || title].join(":");
     }
-    function getRelationCategoryGroup(category = ""){
-      const value = String(category || "").toLowerCase();
-      if(["movies", "series", "anime"].includes(value)) return "screen";
-      if(["books", "manga"].includes(value)) return "source";
-      if(value === "blacklist") return "blacklist";
-      return value || "other";
-    }
-
-    function getPrimaryCreatorKey(value = ""){
-      return normalizeComparisonText(String(value || "").split(",")[0] || "");
-    }
-
-    function buildLooseTitleKey(value = ""){
-      const fingerprint = typeof extractSeriesFingerprint === "function"
-        ? extractSeriesFingerprint(value || "")
-        : { baseLabel: value || "" };
-      return normalizeComparisonText(fingerprint.baseLabel || value || "");
-    }
-
-    function buildMediaIdentitySnapshot(itemOrParts = {}, options = {}){
-      const category = itemOrParts.category || currentCategory || "";
-      const canonicalKey = itemOrParts.canonical_key || itemOrParts.canonicalKey || "";
-      const workKey = itemOrParts.work_key || itemOrParts.workKey || "";
-      const wikidataEntityId = itemOrParts.wikidata_entity_id || itemOrParts.wikidataEntityId || itemOrParts?.enrichment?.wikidataEntityId || "";
-      const isbn = detectISBN(itemOrParts.isbn || "");
-      const title = normalizeSpaces(itemOrParts.title || "");
-      const titleKey = normalizeComparisonText(title);
-      const looseTitleKey = buildLooseTitleKey(title);
-      const creatorKey = getPrimaryCreatorKey(itemOrParts.creator || "");
-      const year = getItemReleaseYear(itemOrParts) || 0;
-      const categoryKey = options.crossCategory ? getRelationCategoryGroup(category) : String(category || "").toLowerCase();
-      return {
-        category,
-        categoryKey,
-        canonicalKey,
-        workKey,
-        wikidataEntityId,
-        isbn,
-        title,
-        titleKey,
-        looseTitleKey,
-        creatorKey,
-        year,
-        strictKey: canonicalKey || workKey || wikidataEntityId || (isbn ? `${categoryKey}:isbn:${isbn}` : ""),
-        fallbackKey: [categoryKey, looseTitleKey || titleKey || normalizeSpaces(title).toLowerCase(), creatorKey, year || ""].join("|")
-      };
-    }
-
-    function extractExternalIdentityTokens(itemOrParts = {}){
-      const values = [
-        itemOrParts.canonical_key,
-        itemOrParts.canonicalKey,
-        itemOrParts.work_key,
-        itemOrParts.workKey
-      ].filter(Boolean);
-      const identities = [];
-      values.forEach((value) => {
-        const normalized = String(value || "").trim();
-        if(!normalized) return;
-        const parts = normalized.split(":").map((entry) => entry.trim()).filter(Boolean);
-        if(parts.length < 2) return;
-        const source = parts[0].toLowerCase();
-        const externalId = parts.slice(1).join(":").toLowerCase();
-        if(!source || !externalId) return;
-        identities.push(`${source}:${externalId}`);
-        if(source === "tmdb" && parts.length >= 3){
-          identities.push(`${source}:${parts[parts.length - 1].toLowerCase()}`);
-        }
-      });
-      const wikidataEntityId = itemOrParts.wikidata_entity_id || itemOrParts.wikidataEntityId || itemOrParts?.enrichment?.wikidataEntityId || "";
-      if(wikidataEntityId){
-        identities.push(`wikidata:${String(wikidataEntityId).toLowerCase()}`);
-      }
-      const isbn = detectISBN(itemOrParts.isbn || "");
-      if(isbn){
-        identities.push(`isbn:${isbn}`);
-      }
-      return Array.from(new Set(identities));
-    }
-
-    function hasSequenceConflict(left, right){
-      const leftSequence = extractSeriesFingerprint(left?.title || "").sequenceNumber || 0;
-      const rightSequence = extractSeriesFingerprint(right?.title || "").sequenceNumber || 0;
-      return Boolean(leftSequence && rightSequence && leftSequence !== rightSequence);
-    }
-
-    function findBestMediaEntityMatch(collection = [], candidate, options = {}){
-      if(!candidate) return null;
-      const targetSnapshot = buildMediaIdentitySnapshot(candidate, options);
-      const targetExternal = new Set(extractExternalIdentityTokens(candidate));
-      let bestMatch = null;
-      let bestScore = 0;
-
-      collection.filter(Boolean).forEach((entry) => {
-        const entrySnapshot = buildMediaIdentitySnapshot(entry, options);
-        const entryExternal = extractExternalIdentityTokens(entry);
-        const hasExternalMatch = entryExternal.some((token) => targetExternal.has(token));
-        if(hasExternalMatch){
-          const exactMatch = { entry, score: 1 };
-          if(!bestMatch || exactMatch.score > bestScore){
-            bestMatch = exactMatch;
-            bestScore = exactMatch.score;
-          }
-          return;
-        }
-
-        if(hasSequenceConflict(entry, candidate)) return;
-
-        let score = getItemIdentityConfidence(entry, candidate, options);
-        const exactTitle = entrySnapshot.titleKey && targetSnapshot.titleKey && entrySnapshot.titleKey === targetSnapshot.titleKey;
-        const sameCategory = entrySnapshot.categoryKey && targetSnapshot.categoryKey && entrySnapshot.categoryKey === targetSnapshot.categoryKey;
-        const yearsAligned = entrySnapshot.year && targetSnapshot.year && Math.abs(entrySnapshot.year - targetSnapshot.year) <= 1;
-        const creatorsAligned = entrySnapshot.creatorKey && targetSnapshot.creatorKey && entrySnapshot.creatorKey === targetSnapshot.creatorKey;
-
-        if(exactTitle && sameCategory && yearsAligned){
-          score = Math.max(score, 0.93);
-        } else if(exactTitle && sameCategory && creatorsAligned){
-          score = Math.max(score, 0.9);
-        } else if(exactTitle && sameCategory && (!entrySnapshot.year || !targetSnapshot.year) && (!entrySnapshot.creatorKey || !targetSnapshot.creatorKey || creatorsAligned)){
-          score = Math.max(score, 0.89);
-        }
-
-        if(score >= (typeof options.threshold === "number" ? options.threshold : 0.88) && score > bestScore){
-          bestMatch = { entry, score };
-          bestScore = score;
-        }
-      });
-
-      return bestMatch?.entry || null;
-    }
-
-    function mergeMediaEntityRecords(existing = {}, incoming = {}){
-      const existingIdentityStrength = extractExternalIdentityTokens(existing).length;
-      const incomingIdentityStrength = extractExternalIdentityTokens(incoming).length;
-      const preferredCanonicalKey = incomingIdentityStrength > existingIdentityStrength
-        ? (incoming.canonical_key || incoming.work_key || existing.canonical_key || existing.work_key || "")
-        : (existing.canonical_key || existing.work_key || incoming.canonical_key || incoming.work_key || "");
-      const preferredWorkKey = incomingIdentityStrength > existingIdentityStrength
-        ? (incoming.work_key || existing.work_key || "")
-        : (existing.work_key || incoming.work_key || "");
-      const existingEnrichment = buildEnrichmentState(existing.enrichment || {});
-      const incomingEnrichment = buildEnrichmentState(incoming.enrichment || {});
-      const mergedEnrichment = {
-        ...existingEnrichment,
-        ...incomingEnrichment,
-        wikidataEntityId: existingEnrichment.wikidataEntityId || incomingEnrichment.wikidataEntityId || "",
-        wikidataLabel: existingEnrichment.wikidataLabel || incomingEnrichment.wikidataLabel || "",
-        wikidataDescription: existingEnrichment.wikidataDescription || incomingEnrichment.wikidataDescription || "",
-        sitelinkUrl: existingEnrichment.sitelinkUrl || incomingEnrichment.sitelinkUrl || "",
-        matchedBy: existingEnrichment.matchedBy || incomingEnrichment.matchedBy || "",
-        status: incomingEnrichment.status && incomingEnrichment.status !== "idle" ? incomingEnrichment.status : (existingEnrichment.status || incomingEnrichment.status || "idle"),
-        confidence: Math.max(Number(existingEnrichment.confidence || 0), Number(incomingEnrichment.confidence || 0)),
-        lastEnrichedAt: existingEnrichment.lastEnrichedAt || incomingEnrichment.lastEnrichedAt || ""
-      };
-      return {
-        ...existing,
-        ...incoming,
-        id: existing.id || incoming.id,
-        title: existing.title || incoming.title || "",
-        category: existing.category || incoming.category || "",
-        status: incoming.status || existing.status || "Planned",
-        cover: existing.cover || incoming.cover || "",
-        description: existing.description || incoming.description || "",
-        description_ru: existing.description_ru || incoming.description_ru || "",
-        description_original: existing.description_original || incoming.description_original || incoming.description_en || existing.description_en || "",
-        description_en: existing.description_en || incoming.description_en || incoming.description_original || existing.description_original || "",
-        creator: existing.creator || incoming.creator || "",
-        isbn: existing.isbn || incoming.isbn || "",
-        work_key: preferredWorkKey,
-        canonical_key: preferredCanonicalKey,
-        folder: existing.folder || incoming.folder || "",
-        enrichment: mergedEnrichment
-      };
-    }
-
-    function getItemIdentityConfidence(left, right, options = {}){
-      const source = buildMediaIdentitySnapshot(left, options);
-      const target = buildMediaIdentitySnapshot(right, options);
-      let score = 0;
-      if(hasSequenceConflict(left, right)) return 0;
-      if(source.strictKey && target.strictKey && source.strictKey === target.strictKey) return 1;
-      if(source.wikidataEntityId && target.wikidataEntityId && source.wikidataEntityId === target.wikidataEntityId) return 0.99;
-      if(source.isbn && target.isbn && source.isbn === target.isbn) return 0.99;
-      if(source.titleKey && target.titleKey && source.titleKey === target.titleKey) score += 0.56;
-      if(source.looseTitleKey && target.looseTitleKey && source.looseTitleKey === target.looseTitleKey) score += 0.18;
-      if(source.creatorKey && target.creatorKey && source.creatorKey === target.creatorKey) score += 0.2;
-      if(source.year && target.year && Math.abs(source.year - target.year) <= 1) score += 0.12;
-      if(source.categoryKey && target.categoryKey && source.categoryKey === target.categoryKey) score += 0.12;
-      return Math.max(0, Math.min(0.98, score));
-    }
-
-    function areItemsSameEntity(left, right, options = {}){
-      const threshold = typeof options.threshold === "number" ? options.threshold : 0.86;
-      return getItemIdentityConfidence(left, right, options) >= threshold;
-    }
-
 
     async function getCurrentUserId(){
       const user = await getCurrentUser();
@@ -1090,13 +929,11 @@
       currentFilterStatus = value || "All";
       localStorage.setItem("plamut_status_filter", currentFilterStatus);
       renderShelf();
-      persistAppRouteState();
     }
 
     function setShelfSearchQuery(value){
       currentShelfSearchQuery = normalizeSpaces(value);
       renderShelf();
-      persistAppRouteState();
     }
 
     function syncShelfSearchInput(){
@@ -1215,6 +1052,8 @@
       document.getElementById("details-folder-title").textContent = t().labels.folder;
       document.getElementById("open-folder-modal-btn").textContent = t().buttons.addToFolder;
       document.getElementById("details-folder-current").textContent = t().labels.noFolder;
+      document.getElementById("details-relations-title").textContent = t().labels.relatedWorks;
+      document.getElementById("details-relations-empty").textContent = t().labels.relatedWorksEmpty;
       document.getElementById("folder-modal-title").textContent = t().buttons.addToFolder;
       document.getElementById("folder-modal-subtitle").textContent = t().labels.folder;
       document.getElementById("folder-modal-cancel-btn").textContent = t().buttons.cancel;
@@ -1792,6 +1631,264 @@
       return `${category}:${String(title || "").trim().toLowerCase()}`;
     }
 
+    function normalizeRelationKey(value){
+      return String(value || "")
+        .toLowerCase()
+        .replace(/ё/g, "е")
+        .replace(/\b(part|volume|vol|season|том|часть|сезон)\s*[\divxlc]+\b/giu, " ")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function extractRelationTitleBase(title){
+      const base = String(title || "").split(/[:|—–-]/)[0] || "";
+      return normalizeRelationKey(base);
+    }
+
+    function extractRelationSourceKey(value){
+      const normalized = String(value || "").trim();
+      if(!normalized) return "";
+      const parts = normalized.split(":").map((entry) => entry.trim()).filter(Boolean);
+      if(parts.length >= 3) return normalizeRelationKey(parts.slice(2).join(" "));
+      if(parts.length >= 2) return normalizeRelationKey(parts.slice(1).join(" "));
+      return normalizeRelationKey(normalized);
+    }
+
+    function buildRelationIdentity(item = {}, category = ""){
+      return `${category || item.category || ""}:${item.id || item.canonical_key || item.work_key || normalizeRelationKey(item.title || "")}`;
+    }
+
+    function buildRelationCandidateSnapshot(item = {}, category = ""){
+      const resolvedCategory = category || item.category || currentCategory || "";
+      return {
+        ...item,
+        category: resolvedCategory,
+        identity: buildRelationIdentity(item, resolvedCategory),
+        canonicalBase: extractRelationSourceKey(item.canonical_key || ""),
+        workBase: extractRelationSourceKey(item.work_key || ""),
+        titleBase: extractRelationTitleBase(item.title || ""),
+        titleKey: normalizeRelationKey(item.title || ""),
+        creatorKey: normalizeRelationKey(String(item.creator || "").split(",")[0] || "")
+      };
+    }
+
+    function getLoadedLibraryItems(){
+      const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+      return categories.flatMap((category) => (demoData[category] || []).map((item) => ({ ...item, category })));
+    }
+
+    async function getLibraryItemsForRelations(){
+      if(isPublicView){
+        return getLoadedLibraryItems();
+      }
+
+      const user = await getCurrentUser();
+      if(!user){
+        invalidateRelatedLibraryItemsCache("");
+        return getLoadedLibraryItems();
+      }
+
+      if(relatedLibraryItemsCache.loaded && relatedLibraryItemsCache.userId === user.id){
+        return relatedLibraryItemsCache.items;
+      }
+
+      if(relatedLibraryItemsCache.promise && relatedLibraryItemsCache.userId === user.id){
+        return await relatedLibraryItemsCache.promise;
+      }
+
+      relatedLibraryItemsCache.userId = user.id;
+      relatedLibraryItemsCache.promise = (async () => {
+        const { data, error } = await supabaseClient
+          .from("user_media")
+          .select("id, title, status, cover_url, creator, work_key, canonical_key, category")
+          .eq("user_id", user.id)
+          .order("id", { ascending: false });
+
+        if(error){
+          console.error("Relation library load error:", error);
+          return getLoadedLibraryItems();
+        }
+
+        const seen = new Set();
+        const items = (data || []).map((entry) => ({
+          id: entry.id,
+          title: entry.title || "",
+          status: entry.status || "Planned",
+          cover: entry.cover_url || "",
+          creator: entry.creator || "",
+          work_key: entry.work_key || "",
+          canonical_key: entry.canonical_key || "",
+          category: entry.category || "Books"
+        })).filter((entry) => {
+          const key = buildRelationIdentity(entry, entry.category);
+          if(seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        relatedLibraryItemsCache.items = items;
+        relatedLibraryItemsCache.loaded = true;
+        return items;
+      })();
+
+      try {
+        return await relatedLibraryItemsCache.promise;
+      } finally {
+        relatedLibraryItemsCache.promise = null;
+      }
+    }
+
+    function finalizeComputedRelatedItems(source, matches = []){
+      const seen = new Set();
+      const sourceIdentity = source.identity;
+      const sourceKeys = new Set([sourceIdentity, source.canonicalBase, source.workBase].filter(Boolean));
+      return matches.filter((entry) => {
+        const dedupeKey = entry.identity || entry.id || entry.canonical_key || entry.work_key || entry.titleKey;
+        if(!dedupeKey || seen.has(dedupeKey)) return false;
+        if(entry.identity === sourceIdentity) return false;
+        if(entry.canonicalBase && sourceKeys.has(entry.canonicalBase) && entry.identity === sourceIdentity) return false;
+        if(entry.workBase && sourceKeys.has(entry.workBase) && entry.identity === sourceIdentity) return false;
+        seen.add(dedupeKey);
+        return true;
+      }).slice(0, 6);
+    }
+
+    function computeRelatedItems(item, category, collection = []){
+      if(!item) return [];
+      const source = buildRelationCandidateSnapshot(item, category);
+      const candidates = collection
+        .map((candidate) => buildRelationCandidateSnapshot(candidate, candidate.category || category))
+        .filter((candidate) => candidate.identity !== source.identity);
+
+      if(source.canonicalBase){
+        const canonicalMatches = candidates.filter((candidate) => candidate.canonicalBase && candidate.canonicalBase === source.canonicalBase);
+        if(canonicalMatches.length){
+          return finalizeComputedRelatedItems(source, canonicalMatches);
+        }
+      }
+
+      if(source.workBase){
+        const workMatches = candidates.filter((candidate) => candidate.workBase && candidate.workBase === source.workBase);
+        if(workMatches.length){
+          return finalizeComputedRelatedItems(source, workMatches);
+        }
+      }
+
+      if(!source.titleBase || source.titleBase.length < 3){
+        return [];
+      }
+
+      const titleMatches = candidates.filter((candidate) => {
+        if(!candidate.titleBase || candidate.titleBase !== source.titleBase) return false;
+        if(source.creatorKey && candidate.creatorKey && source.creatorKey !== candidate.creatorKey){
+          return false;
+        }
+        return true;
+      });
+
+      return finalizeComputedRelatedItems(source, titleMatches);
+    }
+
+    async function getRelatedItemsForItem(item, category = currentCategory){
+      if(!item) return [];
+      const cached = getCachedRelatedItems(item, category);
+      if(cached) return cached;
+      const libraryItems = await getLibraryItemsForRelations();
+      return setCachedRelatedItems(item, category, computeRelatedItems(item, category, libraryItems));
+    }
+
+    async function openRelatedItemFromDetails(id, category){
+      if(!id || !category) return;
+      if(isPublicView){
+        if(category !== currentCategory){
+          openPublicCategory(category, currentPublicProfileName);
+        }
+        await openCardById(id);
+        return;
+      }
+
+      if(category !== currentCategory){
+        await openCategory(category);
+      }
+      await openCardById(id);
+    }
+
+    function buildRelatedItemCard(item){
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "related-work-card";
+      button.addEventListener("click", () => openRelatedItemFromDetails(item.id, item.category));
+
+      const cover = document.createElement("div");
+      cover.className = "related-work-cover";
+      if(item.cover){
+        const image = document.createElement("img");
+        image.src = item.cover;
+        image.alt = item.title || t().labels.cover;
+        cover.appendChild(image);
+      } else {
+        cover.textContent = t().labels.cover;
+      }
+
+      const body = document.createElement("div");
+      body.className = "related-work-body";
+
+      const title = document.createElement("div");
+      title.className = "related-work-title";
+      title.textContent = item.title || "—";
+
+      const meta = document.createElement("div");
+      meta.className = "related-work-meta";
+      [translateCategory(item.category), translateStatus(item.status || "Planned")].filter(Boolean).forEach((value) => {
+        const chip = document.createElement("span");
+        chip.className = "related-work-chip";
+        chip.textContent = value;
+        meta.appendChild(chip);
+      });
+
+      body.appendChild(title);
+      body.appendChild(meta);
+
+      if(item.creator){
+        const creator = document.createElement("div");
+        creator.className = "related-work-creator";
+        creator.textContent = item.creator;
+        body.appendChild(creator);
+      }
+
+      button.appendChild(cover);
+      button.appendChild(body);
+      return button;
+    }
+
+    async function renderRelatedItemsSection(item, category = currentCategory){
+      const list = document.getElementById("details-relations-list");
+      const empty = document.getElementById("details-relations-empty");
+      if(!list || !empty) return;
+
+      list.innerHTML = "";
+      empty.textContent = t().labels.relatedWorksEmpty;
+      empty.classList.add("hidden");
+
+      if(!item){
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      const relatedItems = await getRelatedItemsForItem(item, category);
+      if(currentOpenItemId !== item.id || currentCategory !== category){
+        return;
+      }
+
+      if(!relatedItems.length){
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      relatedItems.forEach((entry) => list.appendChild(buildRelatedItemCard(entry)));
+    }
+
     function getOpenLibraryCoverUrl(coverId){
       if(!coverId) return "";
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
@@ -2010,14 +2107,15 @@
     }
 
     function dedupeSearchResults(items){
-      const unique = [];
-      items.filter(Boolean).forEach((item) => {
-        const duplicate = unique.find((entry) => areItemsSameEntity({ ...entry, category: entry.category || item.category }, { ...item, category: item.category || entry.category }, { threshold: 0.9 }));
-        if(!duplicate){
-          unique.push(item);
-        }
+      const seen = new Set();
+      return items.filter(item => {
+        const key = item.category === "Books"
+          ? buildBookIdentityKey(item)
+          : (item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase()));
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
-      return unique;
     }
 
     async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
@@ -2543,42 +2641,44 @@
       return combined.slice(0, limit);
     }
 
-    function isDuplicateItem(category, title, workKey = "", candidate = {}){
+    function isDuplicateItem(category, title, workKey = ""){
       const items = demoData[category] || [];
-      const target = {
-        ...candidate,
-        category,
-        title: candidate.title || title,
-        work_key: candidate.work_key || workKey,
-        canonical_key: candidate.canonical_key || ""
-      };
-      return Boolean(findBestMediaEntityMatch(items.map((item) => ({ ...item, category })), target, { threshold: 0.88 }));
+
+      return items.some(item => {
+        if(workKey && item.work_key && item.work_key === workKey){
+          return true;
+        }
+        return (item.title || "").trim().toLowerCase() === title.trim().toLowerCase();
+      });
     }
 
-    async function existsInSupabase(category, title, workKey = "", canonicalKey = "", candidate = {}){
+    async function existsInSupabase(category, title, workKey = "", canonicalKey = ""){
       const user = await getCurrentUser();
       if(!user) return false;
 
-      const { data, error } = await supabaseClient
+      let query = supabaseClient
         .from("user_media")
-        .select("id, title, work_key, canonical_key, creator, category")
+        .select("id, title, work_key, canonical_key")
         .eq("user_id", user.id)
-        .eq("category", category);
+        .eq("category", category)
+        .limit(20);
+
+      if(workKey){
+        query = query.eq("work_key", workKey);
+      } else if(canonicalKey){
+        query = query.eq("canonical_key", canonicalKey);
+      } else {
+        query = query.ilike("title", title);
+      }
+
+      const { data, error } = await query;
 
       if(error){
         console.error("Supabase duplicate check error:", error);
         return false;
       }
 
-      const target = {
-        ...candidate,
-        category,
-        title: candidate.title || title,
-        work_key: candidate.work_key || workKey,
-        canonical_key: candidate.canonical_key || canonicalKey,
-        creator: candidate.creator || ""
-      };
-      return Boolean(Array.isArray(data) && findBestMediaEntityMatch(data, target, { threshold: 0.88 }));
+      return Array.isArray(data) && data.length > 0;
     }
 
     async function saveItemToSupabase(
@@ -2609,7 +2709,7 @@
       const autoLang = splitDescriptionFields(description);
       const originalDescription = description_original || description_en || autoLang.description_original || "";
 
-      const incomingRecord = {
+      const insertData = {
         user_id: user.id,
         title: title,
         category: category,
@@ -2620,141 +2720,23 @@
         work_key: workKey || "",
         canonical_key: finalCanonicalKey,
         description_ru: description_ru || autoLang.description_ru || "",
-        description_en: originalDescription || autoLang.description_en || "",
-        wikidata_entity_id: null,
-        wikidata_label: null,
-        wikidata_description: null,
-        wikidata_last_enriched_at: null,
-        enrichment_status: "pending",
-        enrichment_confidence: 0,
-        enrichment_source: null
+        description_en: originalDescription || autoLang.description_en || ""
       };
 
-      const { data: existingRows, error: existingError } = await supabaseClient
+      const { error } = await supabaseClient
         .from("user_media")
-        .select("id, title, category, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, wikidata_entity_id, wikidata_label, wikidata_description, wikidata_last_enriched_at, enrichment_status, enrichment_confidence, enrichment_source")
-        .eq("user_id", user.id)
-        .eq("category", category);
-
-      if(existingError){
-        console.error("Supabase upsert precheck error:", existingError);
-        alert(t().labels.dbSaveError + ": " + existingError.message);
-        return { ok: false, id: null, mode: "error" };
-      }
-
-      const existingMatch = findBestMediaEntityMatch((existingRows || []).map((row) => ({
-        ...row,
-        cover: row.cover_url || "",
-        enrichment: buildEnrichmentState({
-          wikidataEntityId: row.wikidata_entity_id || "",
-          wikidataLabel: row.wikidata_label || "",
-          wikidataDescription: row.wikidata_description || "",
-          lastEnrichedAt: row.wikidata_last_enriched_at || "",
-          status: row.enrichment_status || "idle",
-          confidence: Number(row.enrichment_confidence || 0),
-          matchedBy: row.enrichment_source || ""
-        })
-      })), {
-        title,
-        category,
-        status,
-        cover,
-        description,
-        description_ru,
-        description_en,
-        description_original,
-        creator,
-        work_key: workKey,
-        canonical_key: finalCanonicalKey
-      }, { threshold: 0.88 });
-
-      if(existingMatch){
-        const mergedRecord = mergeMediaEntityRecords({
-          id: existingMatch.id,
-          title: existingMatch.title,
-          category: existingMatch.category,
-          status: existingMatch.status,
-          cover: existingMatch.cover_url || "",
-          description: existingMatch.description || "",
-          description_ru: existingMatch.description_ru || "",
-          description_original: existingMatch.description_original || existingMatch.description_en || "",
-          description_en: existingMatch.description_en || "",
-          creator: existingMatch.creator || "",
-          work_key: existingMatch.work_key || "",
-          canonical_key: existingMatch.canonical_key || "",
-          enrichment: buildEnrichmentState({
-            wikidataEntityId: existingMatch.wikidata_entity_id || "",
-            wikidataLabel: existingMatch.wikidata_label || "",
-            wikidataDescription: existingMatch.wikidata_description || "",
-            lastEnrichedAt: existingMatch.wikidata_last_enriched_at || "",
-            status: existingMatch.enrichment_status || "idle",
-            confidence: Number(existingMatch.enrichment_confidence || 0),
-            matchedBy: existingMatch.enrichment_source || ""
-          })
-        }, {
-          title,
-          category,
-          status,
-          cover,
-          description,
-          description_ru,
-          description_original,
-          description_en,
-          creator,
-          work_key: workKey,
-          canonical_key: finalCanonicalKey
-        });
-        const updatePayload = {
-          title: mergedRecord.title,
-          category: mergedRecord.category,
-          status: mergedRecord.status,
-          cover_url: mergedRecord.cover || "",
-          description: mergedRecord.description || "",
-          description_ru: mergedRecord.description_ru || "",
-          description_en: mergedRecord.description_en || "",
-          description_original: mergedRecord.description_original || mergedRecord.description_en || "",
-          creator: mergedRecord.creator || "",
-          work_key: mergedRecord.work_key || "",
-          canonical_key: mergedRecord.canonical_key || "",
-          wikidata_entity_id: existingMatch.wikidata_entity_id || null,
-          wikidata_label: existingMatch.wikidata_label || null,
-          wikidata_description: existingMatch.wikidata_description || null,
-          wikidata_last_enriched_at: existingMatch.wikidata_last_enriched_at || null,
-          enrichment_status: existingMatch.enrichment_status || "idle",
-          enrichment_confidence: Number(existingMatch.enrichment_confidence || 0),
-          enrichment_source: existingMatch.enrichment_source || null
-        };
-        const { error: updateError } = await supabaseClient
-          .from("user_media")
-          .update(updatePayload)
-          .eq("user_id", user.id)
-          .eq("id", existingMatch.id);
-
-        if(updateError){
-          console.error("Supabase update error:", updateError);
-          alert(t().labels.dbUpdateError + ": " + updateError.message);
-          return { ok: false, id: null, mode: "error" };
-        }
-        return { ok: true, id: existingMatch.id, mode: "updated", canonicalKey: mergedRecord.canonical_key || finalCanonicalKey };
-      }
-
-      const { data: insertedRow, error } = await supabaseClient
-        .from("user_media")
-        .insert([incomingRecord])
-        .select("id")
-        .single();
+        .insert([insertData]);
 
       if(error){
         console.error("Supabase insert error:", error);
         alert(t().labels.dbSaveError + ": " + error.message);
-        return { ok: false, id: null, mode: "error" };
+        return false;
       }
 
-      return { ok: true, id: insertedRow?.id || null, mode: "inserted", canonicalKey: finalCanonicalKey };
+      return true;
     }
 
     function buildLocalShelfItem({
-      id = null,
       title,
       category,
       status = "Planned",
@@ -2767,11 +2749,10 @@
       isbn = "",
       description_ru = "",
       description_en = "",
-      description_original = "",
-      enrichment = undefined
+      description_original = ""
     }){
       return {
-        id: id || -Date.now() - Math.floor(Math.random() * 1000),
+        id: -Date.now() - Math.floor(Math.random() * 1000),
         title: title || "",
         category: category || "",
         status: status || "Planned",
@@ -2782,7 +2763,6 @@
         description_en: description_en || "",
         creator: creator || "",
         isbn: isbn || "",
-        enrichment: buildEnrichmentState(enrichment || {}),
         work_key: work_key || "",
         canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase(),
         folder: folder || ""
@@ -2798,16 +2778,24 @@
         demoData[category] = [];
       }
 
-      const existingMatch = findBestMediaEntityMatch(demoData[category].map((row) => ({ ...row, category })), { ...item, category }, { threshold: 0.88 });
-      if(existingMatch){
-        const existingIndex = demoData[category].findIndex((row) => row.id === existingMatch.id || getItemStorageKey({ ...row, category }) === getItemStorageKey({ ...existingMatch, category }));
-        demoData[category][existingIndex] = mergeMediaEntityRecords(demoData[category][existingIndex], item);
-        markLibraryStateDirty();
-        return;
-      }
+      const dedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        normalizeSpaces(item.title || "").toLowerCase();
 
-      demoData[category].unshift(item);
-      markLibraryStateDirty();
+      const alreadyExists = demoData[category].some((row) => {
+        const rowKey =
+          row.canonical_key ||
+          row.work_key ||
+          normalizeSpaces(row.title || "").toLowerCase();
+
+        return rowKey === dedupeKey;
+      });
+
+      if(!alreadyExists){
+        demoData[category].unshift(item);
+        clearRelationCache();
+      }
     }
 
     async function applyFolderAssignmentsToItems(category){
@@ -3001,8 +2989,20 @@
         return false;
       }
 
+      const itemDedupeKey =
+        item.canonical_key ||
+        item.work_key ||
+        normalizeSpaces(item.title || "").toLowerCase();
+
       const idsToDelete = (rows || [])
-        .filter((row) => row.id === item.id || areItemsSameEntity({ ...row, category: targetCategory }, { ...item, category: targetCategory }, { threshold: 0.88 }))
+        .filter((row) => {
+          const rowDedupeKey =
+            row.canonical_key ||
+            row.work_key ||
+            normalizeSpaces(row.title || "").toLowerCase();
+
+          return row.id === item.id || rowDedupeKey === itemDedupeKey;
+        })
         .map((row) => row.id)
         .filter(Boolean);
 
@@ -3029,6 +3029,7 @@
       const user = await getCurrentUser();
 
       if(!user){
+        invalidateRelatedLibraryItemsCache("");
         demoData[category] = [];
         renderShelf();
         return false;
@@ -3048,11 +3049,21 @@
       }
 
       demoData[category] = [];
-      const uniqueItems = [];
-      const cache = await getWikidataCache();
+      const seen = new Set();
 
       data.forEach(item => {
-        const mappedItem = {
+        const dedupeKey =
+          item.canonical_key ||
+          item.work_key ||
+          (item.title || "").trim().toLowerCase();
+
+        if(seen.has(dedupeKey)){
+          return;
+        }
+
+        seen.add(dedupeKey);
+
+        demoData[category].push({
           id: item.id,
           title: item.title,
           status: item.status || "Planned",
@@ -3064,37 +3075,12 @@
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
-          folder: item.folder_name || "",
-          wikidata_entity_id: item.wikidata_entity_id || "",
-          wikidata_label: item.wikidata_label || "",
-          wikidata_description: item.wikidata_description || "",
-          wikidata_last_enriched_at: item.wikidata_last_enriched_at || "",
-          enrichment_status: item.enrichment_status || "idle",
-          enrichment_confidence: Number(item.enrichment_confidence || 0),
-          enrichment_source: item.enrichment_source || ""
-        };
-        mappedItem.enrichment = buildEnrichmentState({
-          wikidataEntityId: mappedItem.wikidata_entity_id || "",
-          wikidataLabel: mappedItem.wikidata_label || "",
-          wikidataDescription: mappedItem.wikidata_description || "",
-          lastEnrichedAt: mappedItem.wikidata_last_enriched_at || "",
-          status: mappedItem.enrichment_status || "idle",
-          confidence: Number(mappedItem.enrichment_confidence || 0),
-          matchedBy: mappedItem.enrichment_source || "",
-          ...(cache[getItemStorageKey({ ...mappedItem, category })] || {})
+          folder: item.folder_name || ""
         });
-        const existingMatch = findBestMediaEntityMatch(uniqueItems.map((entry) => ({ ...entry, category })), { ...mappedItem, category }, { threshold: 0.88 });
-        if(existingMatch){
-          const existingIndex = uniqueItems.findIndex((entry) => entry.id === existingMatch.id || getItemStorageKey({ ...entry, category }) === getItemStorageKey({ ...existingMatch, category }));
-          uniqueItems[existingIndex] = mergeMediaEntityRecords(uniqueItems[existingIndex], mappedItem);
-        } else {
-          uniqueItems.push(mappedItem);
-        }
       });
-      demoData[category] = uniqueItems;
-      markLibraryStateDirty();
 
       await applyFolderAssignmentsToItems(category);
+      clearRelationCache();
       renderShelf();
       return true;
     }
@@ -3379,13 +3365,31 @@
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
+      await loadCategoryFromSupabase(currentCategory);
     }
 
-    async function addSearchResultToLibrary(item, options = {}){
+    async function addSearchResultToLibrary(item){
       if(!isOwnerControlAllowed()) return;
       if(!item) return;
 
       const targetCategory = item.category;
+
+      if(isDuplicateItem(targetCategory, item.title, item.work_key || "")){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      const existsInDb = await existsInSupabase(
+        targetCategory,
+        item.title,
+        item.work_key || "",
+        item.canonical_key || ""
+      );
+
+      if(existsInDb){
+        alert(t().labels.alreadyExists);
+        return;
+      }
 
       let finalDescription = item.description || "";
       let finalDescriptionRu = item.description_ru || "";
@@ -3420,10 +3424,9 @@
         finalDescriptionOriginal || ""
       );
 
-      if(!saved?.ok) return;
+      if(!saved) return;
 
       insertLocalShelfItem(targetCategory, buildLocalShelfItem({
-        id: saved.id || undefined,
         title: item.title,
         category: targetCategory,
         status: "Planned",
@@ -3432,52 +3435,13 @@
         creator: item.creator || "",
         isbn: item.isbn || "",
         work_key: item.work_key || "",
-        canonical_key: saved.canonicalKey || item.canonical_key || "",
+        canonical_key: item.canonical_key || "",
         description_ru: finalDescriptionRu || "",
         description_original: finalDescriptionOriginal || finalDescriptionEn || "",
         description_en: finalDescriptionEn || ""
       }));
 
-      if(options.skipCategorySync){
-        requestProductRefresh({ forceFull: false });
-      } else {
-        await renderAndSyncCategory(targetCategory);
-      }
-      if(!options.suppressAssist){
-        await handlePostAddRelationshipAssist({
-          category: targetCategory,
-          title: item.title,
-          canonical_key: saved.canonicalKey || item.canonical_key || "",
-          work_key: item.work_key || ""
-        });
-      }
-    }
-
-    function findLibraryItemByIdentity({ category, title = "", canonical_key = "", work_key = "" } = {}){
-      return findBestMediaEntityMatch((demoData[category] || []).map((entry) => ({ ...entry, category })), {
-        category,
-        title,
-        canonical_key,
-        work_key
-      }, { threshold: 0.88 }) || null;
-    }
-
-    async function handlePostAddRelationshipAssist(identity){
-      const item = findLibraryItemByIdentity(identity);
-      if(!item) return;
-      currentCategory = identity.category || currentCategory;
-      const { insight } = await ensureAutomatedRelationsForItem(item);
-      const shouldOpenAssist = insight.totalParts > 1 || insight.missingCount > 0 || insight.candidateLinks.length > 0 || insight.primaryUniverse;
-      if(shouldOpenAssist){
-        renderSeriesInsightModal(item);
-      }
-      if(shouldEnrichItem(item, false)){
-        enrichItemFromWikidata(item, { force: false }).then(() => {
-          requestProductRefresh({ forceFull: false, detailsOnly: currentOpenItemId === item.id });
-        }).catch((error) => {
-          console.error("Deferred relationship assist enrichment error:", error);
-        });
-      }
+      await renderAndSyncCategory(targetCategory);
     }
 
     async function saveManualItem(){
@@ -3493,6 +3457,18 @@
       }
 
       const canonicalKey = buildCanonicalKey(currentCategory, "manual", "", title);
+
+      if(isDuplicateItem(currentCategory, title)){
+        alert(t().labels.alreadyExists);
+        return;
+      }
+
+      const existsInDb = await existsInSupabase(currentCategory, title, "", canonicalKey);
+      if(existsInDb){
+        alert(t().labels.alreadyExists);
+        await loadCategoryFromSupabase(currentCategory);
+        return;
+      }
 
       const translated = await translateDescriptionFields(description);
 
@@ -3510,10 +3486,9 @@
         translated.description_original
       );
 
-      if(!saved?.ok) return;
+      if(!saved) return;
 
       insertLocalShelfItem(currentCategory, buildLocalShelfItem({
-        id: saved.id || undefined,
         title: title,
         category: currentCategory,
         status: "Planned",
@@ -3521,7 +3496,7 @@
         description: description,
         creator: creator,
         isbn: "",
-        canonical_key: saved.canonicalKey || canonicalKey,
+        canonical_key: canonicalKey,
         description_ru: translated.description_ru,
         description_original: translated.description_original || translated.description_en,
         description_en: translated.description_en
@@ -3530,12 +3505,6 @@
       closeManualModal();
       closeAddModal();
       await renderAndSyncCategory(currentCategory);
-      await handlePostAddRelationshipAssist({
-        category: currentCategory,
-        title,
-        canonical_key: saved.canonicalKey || canonicalKey,
-        work_key: ""
-      });
     }
 
     function changeStatusById(id){
@@ -3568,7 +3537,6 @@
 
       const oldStatus = item.status;
       item.status = status;
-      markLibraryStateDirty();
       renderShelf();
       closeStatusModal();
 
@@ -3576,7 +3544,6 @@
 
       if(!updated){
         item.status = oldStatus;
-        markLibraryStateDirty();
         renderShelf();
         alert(t().labels.dbStatusNotSaved);
         return;
@@ -3612,8 +3579,8 @@
       if(!alreadyThere){
         demoData.Blacklist.unshift(movedItem);
       }
-      markLibraryStateDirty();
 
+      clearRelationCache();
       closeStatusModal();
       renderShelf();
 
@@ -3624,7 +3591,6 @@
           demoData[oldCategory].splice(oldIndex, 0, item);
         }
         demoData.Blacklist = demoData.Blacklist.filter(x => x.id !== item.id);
-        markLibraryStateDirty();
         renderShelf();
         alert(t().labels.moveError);
         return;
@@ -3669,6 +3635,7 @@
       }
 
       item.canonical_key = key;
+      clearRelationCache();
       await loadCategoryFromSupabase(currentCategory);
       alert(t().labels.canonicalSaved);
     }
@@ -3830,7 +3797,7 @@
 
       if(index !== -1){
         demoData[currentCategory].splice(index, 1);
-        markLibraryStateDirty();
+        clearRelationCache();
       }
       renderShelf();
 
@@ -3839,7 +3806,6 @@
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, removedItem);
-          markLibraryStateDirty();
         }
         renderShelf();
         alert(t().labels.deleteError);
@@ -3881,7 +3847,7 @@
       const index = (demoData[currentCategory] || []).findIndex(x => x.id === item.id);
       if(index !== -1){
         demoData[currentCategory].splice(index, 1);
-        markLibraryStateDirty();
+        clearRelationCache();
       }
 
       const deleted = await deleteItemFromSupabase(item, currentCategory);
@@ -3889,7 +3855,6 @@
       if(!deleted){
         if(index !== -1){
           demoData[currentCategory].splice(index, 0, item);
-          markLibraryStateDirty();
         }
         alert(t().labels.deleteError);
         return;
@@ -4717,7 +4682,22 @@ function applyPublicLibraryItems(data = []){
   const statuses = new Set();
 
   data.forEach((item) => {
-    const publicItem = {
+    const dedupeKey = item.canonical_key || item.work_key || (item.title || "").trim().toLowerCase();
+    const fullKey = `${item.category}:${dedupeKey}`;
+    if(seen.has(fullKey)){
+      return;
+    }
+    seen.add(fullKey);
+
+    if(!demoData[item.category]){
+      demoData[item.category] = [];
+    }
+
+    if(item.category) categories.add(translateCategory(item.category));
+    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
+    if(item.status) statuses.add(translateStatus(item.status));
+
+    demoData[item.category].push({
       id: item.id,
       title: item.title,
       status: item.status || "Planned",
@@ -4728,30 +4708,9 @@ function applyPublicLibraryItems(data = []){
       creator: item.creator || "",
       work_key: item.work_key || "",
       canonical_key: item.canonical_key || "",
-      folder: item.folder_name || item.folder || "",
-      category: item.category
-    };
-    const fullKey = `${item.category}:${item.id || item.canonical_key || item.work_key || normalizeComparisonText(item.title || "")}`;
-    if(seen.has(fullKey)){
-      return;
-    }
-
-    if(!demoData[item.category]){
-      demoData[item.category] = [];
-    }
-
-    if(findBestMediaEntityMatch(demoData[item.category].map((entry) => ({ ...entry, category: item.category })), publicItem, { threshold: 0.88 })){
-      return;
-    }
-    seen.add(fullKey);
-
-    if(item.category) categories.add(translateCategory(item.category));
-    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
-    if(item.status) statuses.add(translateStatus(item.status));
-
-    demoData[item.category].push(publicItem);
+      folder: item.folder_name || item.folder || ""
+    });
   });
-  markLibraryStateDirty();
 
   currentPublicLibraryMeta = {
     categories: Array.from(categories),
@@ -6111,18 +6070,13 @@ function backToCategory(){
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   updatePrimaryActionVisibility();
-  persistAppRouteState();
 }
 
-async function openCategory(name, options = {}){
+async function openCategory(name){
   closePreferencesPanel();
   isPublicView = false;
   currentCategory = name;
-  if(!options.preserveSearch){
-    resetShelfSearchQuery();
-  } else {
-    syncShelfSearchInput();
-  }
+  resetShelfSearchQuery();
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
@@ -6142,9 +6096,6 @@ async function openCategory(name, options = {}){
 
   await loadCategoryFromSupabase(name);
   updatePrimaryActionVisibility();
-  if(!options.skipRoutePersist){
-    persistAppRouteState();
-  }
 }
 
 async function openCardById(id){
@@ -6201,12 +6152,11 @@ async function openCardById(id){
   }
 
   const statusBtn = document.getElementById("change-status-details-btn");
-  const detailsMoreBtn = document.getElementById("details-more-actions-btn");
   const deleteBtn = document.getElementById("delete-details-btn");
   if(statusBtn) statusBtn.classList.toggle("hidden", isPublicView);
-  if(detailsMoreBtn) detailsMoreBtn.classList.toggle("hidden", isPublicView);
-  if(deleteBtn) deleteBtn.classList.add("hidden");
+  if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
 
+  deferRelatedItemsRender(item, currentCategory);
   updatePrimaryActionVisibility();
 }
 
@@ -6334,15 +6284,13 @@ Object.assign(translations.en.buttons, {
   cancelShort: "Cancel",
   removeFromFolder: "Remove from folder",
   moveToFolder: "Move to folder",
-  manageFolders: "Manage folders",
-  detailsMoreActions: "More actions"
+  manageFolders: "Manage folders"
 });
 Object.assign(translations.ru.buttons, {
   cancelShort: "Отмена",
   removeFromFolder: "Убрать из папки",
   moveToFolder: "Переместить в папку",
-  manageFolders: "Папки",
-  detailsMoreActions: "Ещё действия"
+  manageFolders: "Папки"
 });
 Object.assign(translations.en.labels, {
   foldersEmpty: "No folders yet",
@@ -6490,33 +6438,6 @@ function buildItemActions(item){
       }
     }
   ];
-}
-
-async function runWithActionButton(button, action, pendingLabel = ""){
-  if(!button){
-    return await action();
-  }
-  if(button.dataset.busy === "true") return;
-  const previousLabel = button.textContent;
-  button.dataset.busy = "true";
-  button.disabled = true;
-  if(pendingLabel){
-    button.textContent = pendingLabel;
-  }
-  try {
-    return await action();
-  } finally {
-    button.dataset.busy = "false";
-    button.disabled = false;
-    if(button.isConnected){
-      button.textContent = previousLabel;
-    }
-  }
-}
-
-function openCurrentItemActionsSheet(){
-  if(!currentOpenItemId) return;
-  openItemActionsSheet(currentOpenItemId);
 }
 
 function openItemActionsSheet(id){
@@ -6669,7 +6590,6 @@ function setFolderFilter(value){
   localStorage.setItem("plamut_folder_filter", currentFilterFolder);
   renderFolderRail();
   renderShelf();
-  persistAppRouteState();
 }
 
 async function renderFolderRail(){
@@ -7027,7 +6947,6 @@ async function init(){
     const shareMenu = document.getElementById("share-library-menu");
     const shareButton = document.getElementById("share-library-btn");
     if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
-    if(currentOpenMenuItemId != null && !event.target?.closest?.('.media-menu-wrap')) closeCardMenu();
   });
   document.addEventListener("keydown", (event) => {
     if(event.key === "Escape"){
@@ -7048,2610 +6967,6 @@ async function init(){
     return;
   }
   await initApp();
-  updatePrimaryActionVisibility();
-}
-
-
-const PRODUCT_TRACKER_STATUSES = [
-  "Planned",
-  "Watching",
-  "Reading",
-  "Playing",
-  "On hold",
-  "Done",
-  "Dropped",
-  "Rewatching",
-  "Rereading"
-];
-const PRODUCT_NOW_STATUSES = ["Watching", "Reading", "Playing", "On hold", "Rewatching", "Rereading"];
-const PRODUCT_RELATION_TYPES = ["same_universe", "part_of_series", "prequel", "sequel", "spin_off", "adaptation", "based_on", "related_work", "original_work", "derived_from", "franchise_member"];
-const WIKIDATA_MATCH_HIGH_CONFIDENCE = 0.82;
-const WIKIDATA_MATCH_MEDIUM_CONFIDENCE = 0.62;
-const WIKIDATA_ENRICHMENT_TTL_MS = 1000 * 60 * 60 * 24 * 14;
-const WIKIDATA_ENTITY_API_URL = "https://www.wikidata.org/w/api.php";
-const WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql";
-const WIKIDATA_RELATION_PROPERTY_MAP = {
-  P144: "based_on",
-  P155: "sequel",
-  P156: "prequel",
-  P179: "part_of_series",
-  P941: "derived_from"
-};
-const WIKIDATA_UNIVERSE_PROPERTY_MAP = {
-  P179: "series",
-  P8345: "franchise",
-  P1080: "universe"
-};
-let currentNowSort = "updated";
-let currentUniverseContextItemId = null;
-const wikidataEnrichmentJobs = new Map();
-const wikidataResourceCache = new Map();
-let productRefreshScheduled = false;
-let productRefreshNeedsFull = false;
-let hasRestoredAppRouteState = false;
-let isRestoringAppRouteState = false;
-
-Object.assign(translations.en.statuses, {
-  Watching: "Watching",
-  Reading: "Reading",
-  Playing: "Playing",
-  "On hold": "On hold",
-  Rewatching: "Rewatching",
-  Rereading: "Rereading"
-});
-Object.assign(translations.ru.statuses, {
-  Watching: "Смотрю",
-  Reading: "Читаю",
-  Playing: "Прохожу",
-  "On hold": "На паузе",
-  Rewatching: "Пересматриваю",
-  Rereading: "Перечитываю"
-});
-Object.assign(translations.en.labels, {
-  progress: "Progress",
-  rating: "Rating",
-  note: "Note",
-  startedAt: "Started",
-  completedAt: "Completed",
-  inProgress: "In progress",
-  relatedWorks: "Related works",
-  universes: "Universes",
-  wikidata: "Wikidata",
-  enrichmentReady: "Graph enrichment ready",
-  enrichmentPending: "Searching Wikidata graph…",
-  enrichmentMissing: "No confident Wikidata match yet",
-  enrichmentFailed: "Wikidata enrichment failed",
-  enrichmentSuggested: "Suggested relations",
-  enrichmentRetry: "Retry Wikidata",
-  enrichmentSource: "Source",
-  enrichmentConfidence: "Confidence",
-  enrichmentConfirmed: "Confirmed",
-  enrichmentSuggestedStatus: "Suggested",
-  enrichmentRejected: "Rejected",
-  enrichmentDetach: "Detach",
-  enrichmentConfirm: "Confirm",
-  enrichmentReject: "Reject",
-  enrichmentUniverse: "Universe",
-  enrichmentRelated: "Relations",
-  enrichmentSecondary: "Secondary enrichment layer",
-  enrichmentNoRelations: "No linked works yet",
-  enrichmentLastUpdated: "Last enriched",
-  enrichmentExternal: "External graph link",
-  franchiseMember: "Franchise member"
-});
-Object.assign(translations.ru.labels, {
-  progress: "Прогресс",
-  rating: "Рейтинг",
-  note: "Заметка",
-  startedAt: "Начато",
-  completedAt: "Завершено",
-  inProgress: "В процессе",
-  relatedWorks: "Связанные работы",
-  universes: "Вселенные",
-  wikidata: "Wikidata",
-  enrichmentReady: "Графовое обогащение готово",
-  enrichmentPending: "Ищем связи в графе Wikidata…",
-  enrichmentMissing: "Надёжная сущность Wikidata пока не найдена",
-  enrichmentFailed: "Не удалось обогатить через Wikidata",
-  enrichmentSuggested: "Предлагаемые связи",
-  enrichmentRetry: "Повторить Wikidata",
-  enrichmentSource: "Источник",
-  enrichmentConfidence: "Уверенность",
-  enrichmentConfirmed: "Подтверждено",
-  enrichmentSuggestedStatus: "Предложено",
-  enrichmentRejected: "Отклонено",
-  enrichmentDetach: "Отвязать",
-  enrichmentConfirm: "Подтвердить",
-  enrichmentReject: "Отклонить",
-  enrichmentUniverse: "Вселенная",
-  enrichmentRelated: "Связи",
-  enrichmentSecondary: "Вторичный слой enrichment",
-  enrichmentNoRelations: "Пока нет связанных объектов",
-  enrichmentLastUpdated: "Последнее enrichment",
-  enrichmentExternal: "Внешняя связь графа",
-  franchiseMember: "Часть франшизы"
-});
-
-function buildTrackerStorageKey(item, category = currentCategory){
-  return getItemStorageKey({ ...(item || {}), category: category || item?.category || currentCategory || "" });
-}
-
-async function getTrackerOverrides(){
-  return await getAccountStorageValue("tracker_overrides", {});
-}
-
-async function setTrackerOverrides(value){
-  await setAccountStorageValue("tracker_overrides", value);
-}
-
-async function getUniverseStore(){
-  return normalizeUniverseStore(await getAccountStorageValue("universe_store", { universes: [], memberships: [], links: [], candidates: [], activity: [] }));
-}
-
-async function setUniverseStore(value){
-  await setAccountStorageValue("universe_store", normalizeUniverseStore(value));
-}
-
-function getUniverseIdentityKey(entry = {}){
-  return entry.wikidataEntityId || `${normalizeComparisonText(entry.kind || "universe")}:${buildUniverseSlug(entry.slug || entry.name || "")}`;
-}
-
-function buildRelationIdentityKey(entry = {}){
-  const relationType = normalizeRelationType(entry.relationType || "related_work");
-  const directional = ["prequel", "sequel", "adaptation", "based_on", "original_work", "derived_from"].includes(relationType);
-  const sourceKey = entry.sourceKey || "";
-  const targetKey = entry.targetKey || "";
-  const pairKey = directional ? `${sourceKey}->${targetKey}` : [sourceKey, targetKey].sort().join("::");
-  return `${pairKey}:${relationType}`;
-}
-
-function normalizeUniverseStore(store = {}){
-  const universes = [];
-  const universeMap = new Map();
-  (Array.isArray(store.universes) ? store.universes : []).forEach((entry) => {
-    const key = getUniverseIdentityKey(entry);
-    if(!key) return;
-    const existing = universeMap.get(key);
-    const merged = existing
-      ? {
-          ...existing,
-          ...entry,
-          confidence: Math.max(Number(existing.confidence || 0), Number(entry.confidence || 0)),
-          name: existing.name || entry.name,
-          description: existing.description || entry.description,
-          source: existing.source || entry.source
-        }
-      : { ...entry };
-    universeMap.set(key, merged);
-  });
-  universes.push(...universeMap.values());
-  const idAlias = new Map(universes.map((entry) => [entry.id, getUniverseIdentityKey(entry)]));
-  const canonicalUniverseByKey = new Map(universes.map((entry) => [getUniverseIdentityKey(entry), entry.id]));
-
-  const membershipsMap = new Map();
-  (Array.isArray(store.memberships) ? store.memberships : []).forEach((entry) => {
-    const universeId = canonicalUniverseByKey.get(idAlias.get(entry.universeId) || entry.universeId) || entry.universeId;
-    const normalized = { ...entry, universeId };
-    const key = `${universeId}:${entry.itemKey}`;
-    const existing = membershipsMap.get(key);
-    membershipsMap.set(key, existing && Number(existing.confidence || 0) > Number(normalized.confidence || 0) ? existing : normalized);
-  });
-
-  const linksMap = new Map();
-  (Array.isArray(store.links) ? store.links : []).forEach((entry) => {
-    const key = buildRelationIdentityKey(entry);
-    const existing = linksMap.get(key);
-    linksMap.set(key, existing && Number(existing.confidence || 0) > Number(entry.confidence || 0) ? existing : { ...entry, status: "confirmed" });
-  });
-
-  const candidatesMap = new Map();
-  (Array.isArray(store.candidates) ? store.candidates : []).forEach((entry) => {
-    const key = buildRelationIdentityKey(entry);
-    if(linksMap.has(key)) return;
-    const existing = candidatesMap.get(key);
-    candidatesMap.set(key, existing && Number(existing.confidence || 0) > Number(entry.confidence || 0) ? existing : { ...entry, status: entry.status || "suggested" });
-  });
-
-  return {
-    universes,
-    memberships: Array.from(membershipsMap.values()),
-    links: Array.from(linksMap.values()),
-    candidates: Array.from(candidatesMap.values()),
-    activity: Array.isArray(store.activity) ? store.activity : []
-  };
-}
-
-function buildEnrichmentState(overrides = {}){
-  return {
-    wikidataEntityId: "",
-    wikidataLabel: "",
-    wikidataDescription: "",
-    wikipediaTitle: "",
-    sitelinkUrl: "",
-    aliases: [],
-    matchedBy: "",
-    matchCandidates: [],
-    externalRelations: [],
-    universeHints: [],
-    seriesCatalog: [],
-    status: "idle",
-    confidence: 0,
-    error: "",
-    lastEnrichedAt: "",
-    ...overrides
-  };
-}
-
-async function getWikidataCache(){
-  return await getAccountStorageValue("wikidata_cache", {});
-}
-
-async function setWikidataCache(value){
-  await setAccountStorageValue("wikidata_cache", value);
-}
-
-async function getRelationSummaryCache(){
-  return await getAccountStorageValue("relation_summary_cache", {});
-}
-
-async function setRelationSummaryCache(value){
-  await setAccountStorageValue("relation_summary_cache", value);
-}
-
-function createEmptySeriesInsight(){
-  return {
-    primaryUniverse: null,
-    totalParts: 0,
-    currentIndex: 0,
-    libraryCount: 0,
-    missingCount: 0,
-    nextPart: null,
-    missingEntries: [],
-    catalog: [],
-    candidateLinks: [],
-    confirmedLinks: [],
-    adaptationCount: 0,
-    localInference: {
-      primaryLabel: "",
-      crossMedia: []
-    }
-  };
-}
-
-function buildRelationSummarySnapshot(item, store, insight = null){
-  const resolvedInsight = insight || buildSeriesInsight(item, store);
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const candidateCount = (store?.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).length;
-  const confirmedCount = (store?.links || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).length;
-  return {
-    primaryUniverseName: resolvedInsight.primaryUniverse?.name || resolvedInsight.localInference?.primaryLabel || "",
-    totalParts: resolvedInsight.totalParts || 0,
-    currentIndex: resolvedInsight.currentIndex || 0,
-    libraryCount: resolvedInsight.libraryCount || 0,
-    missingCount: resolvedInsight.missingCount || 0,
-    adaptationCount: resolvedInsight.adaptationCount || 0,
-    candidateCount,
-    confirmedCount,
-    nextPartLabel: resolvedInsight.nextPart?.label || "",
-    updatedAt: new Date().toISOString()
-  };
-}
-
-async function persistRelationSummarySnapshot(item, store, insight = null){
-  if(!item) return;
-  const cache = await getRelationSummaryCache();
-  cache[getItemStorageKey(item, item?.category || currentCategory)] = buildRelationSummarySnapshot(item, store, insight);
-  await setRelationSummaryCache(cache);
-}
-
-async function getCachedRelationSummarySnapshot(item){
-  if(!item) return null;
-  const cache = await getRelationSummaryCache();
-  return cache[getItemStorageKey(item, item?.category || currentCategory)] || null;
-}
-
-function getItemReleaseYear(item){
-  const sources = [
-    item?.release_date,
-    item?.first_air_date,
-    item?.published_at,
-    item?.published_year,
-    item?.year,
-    item?.tracker?.started_at
-  ].filter(Boolean);
-  for(const source of sources){
-    const match = String(source).match(/\b(18|19|20)\d{2}\b/);
-    if(match) return Number(match[0]);
-  }
-  return 0;
-}
-
-function getItemTitleVariants(item){
-  return Array.from(new Set([
-    item?.title,
-    item?.original_title,
-    item?.title_native,
-    item?.title_english,
-    item?.title_romaji,
-    item?.wikidata_label
-  ].map((value) => normalizeSpaces(value || "")).filter(Boolean)));
-}
-
-function normalizeRelationType(type){
-  const value = normalizeComparisonText(type || "").replace(/\s+/g, "_");
-  if(value === "spinoff") return "spin_off";
-  if(value === "spin-off") return "spin_off";
-  if(value === "original") return "original_work";
-  if(value === "source_material") return "original_work";
-  if(value === "sameuniverse") return "same_universe";
-  return PRODUCT_RELATION_TYPES.includes(value) ? value : "related_work";
-}
-
-function formatRelationType(type){
-  const relation = normalizeRelationType(type);
-  const labels = {
-    same_universe: currentLanguage === "ru" ? "Общая вселенная" : "Same universe",
-    part_of_series: currentLanguage === "ru" ? "Часть серии" : "Part of series",
-    prequel: currentLanguage === "ru" ? "Приквел" : "Prequel",
-    sequel: currentLanguage === "ru" ? "Сиквел" : "Sequel",
-    spin_off: currentLanguage === "ru" ? "Спин-офф" : "Spin-off",
-    adaptation: currentLanguage === "ru" ? "Адаптация" : "Adaptation",
-    based_on: currentLanguage === "ru" ? "Основано на" : "Based on",
-    related_work: currentLanguage === "ru" ? "Связанное произведение" : "Related work",
-    original_work: currentLanguage === "ru" ? "Оригинальное произведение" : "Original work",
-    derived_from: currentLanguage === "ru" ? "Производно от" : "Derived from",
-    franchise_member: currentLanguage === "ru" ? "Часть франшизы" : "Franchise member"
-  };
-  return labels[relation] || relation;
-}
-
-function buildUniverseSlug(name = ""){
-  return normalizeSpaces(name)
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яё]+/gi, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function buildUniverseEntityId(seed = ""){
-  return `universe_${buildUniverseSlug(seed) || Date.now()}`;
-}
-
-function categoryMatchesWikidataDescription(category, description = ""){
-  const text = normalizeComparisonText(description || "");
-  if(!text) return true;
-  const rules = {
-    Movies: ["film", "movie", "feature"],
-    Series: ["television series", "tv series", "television program", "miniseries"],
-    Anime: ["anime", "animated series", "manga series"],
-    Manga: ["manga", "comic"],
-    Books: ["book", "novel", "literary work"]
-  };
-  const hints = rules[category] || [];
-  return !hints.length || hints.some((hint) => text.includes(hint));
-}
-
-function buildWikidataSearchQueriesForItem(item){
-  const titles = getItemTitleVariants(item);
-  const creator = normalizeSpaces(item?.creator || "");
-  const year = getItemReleaseYear(item);
-  return titles.flatMap((title) => {
-    const variants = [title];
-    if(creator) variants.push(`${title} ${creator}`);
-    if(year) variants.push(`${title} ${year}`);
-    return variants;
-  }).slice(0, 6);
-}
-
-function scoreWikidataCandidate(item, candidate){
-  const titles = getItemTitleVariants(item).map((value) => normalizeComparisonText(value));
-  const label = normalizeComparisonText(candidate?.label || "");
-  const description = normalizeComparisonText(candidate?.description || "");
-  const aliases = Array.isArray(candidate?.aliases) ? candidate.aliases.map((value) => normalizeComparisonText(value)) : [];
-  let score = 0;
-
-  if(titles.includes(label)) score += 0.55;
-  if(titles.some((title) => label.startsWith(title) || title.startsWith(label))) score += 0.18;
-  if(titles.some((title) => aliases.includes(title))) score += 0.18;
-  if(titles.some((title) => label.includes(title) || title.includes(label))) score += 0.1;
-  if(categoryMatchesWikidataDescription(item?.category, description)) score += 0.12;
-
-  const creator = normalizeComparisonText(item?.creator || "");
-  if(creator && description.includes(creator)) score += 0.08;
-
-  const year = getItemReleaseYear(item);
-  if(year && description.includes(String(year))) score += 0.08;
-
-  if(candidate?.match?.language === currentLanguage) score += 0.04;
-  if(candidate?.displayLanguage === currentLanguage) score += 0.03;
-
-  return Math.max(0, Math.min(0.99, score));
-}
-
-async function fetchJsonWithRetry(url, options = {}, retries = 2){
-  let lastError;
-  for(let attempt = 0; attempt <= retries; attempt += 1){
-    try {
-      return await fetchJson(url, options);
-    } catch (error) {
-      lastError = error;
-      const waitForRetry = attempt < retries && /(429|5\d\d)/.test(String(error?.message || ""));
-      if(!waitForRetry) break;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-    }
-  }
-  throw lastError;
-}
-
-async function getCachedWikidataResource(cacheKey, loader, ttlMs = 1000 * 60 * 60 * 6){
-  const cached = wikidataResourceCache.get(cacheKey);
-  if(cached){
-    if(cached.promise) return await cached.promise;
-    if(Date.now() - cached.timestamp < ttlMs) return cached.value;
-  }
-  const promise = Promise.resolve().then(loader);
-  wikidataResourceCache.set(cacheKey, { promise, timestamp: Date.now() });
-  try {
-    const value = await promise;
-    wikidataResourceCache.set(cacheKey, { value, timestamp: Date.now() });
-    return value;
-  } catch (error) {
-    wikidataResourceCache.delete(cacheKey);
-    throw error;
-  }
-}
-
-async function searchWikidataEntities(query, language = currentLanguage){
-  const url = `${WIKIDATA_ENTITY_API_URL}?action=wbsearchentities&format=json&origin=*&language=${encodeURIComponent(language || "en")}&uselang=${encodeURIComponent(language || "en")}&type=item&limit=8&search=${encodeURIComponent(query)}`;
-  const data = await getCachedWikidataResource(`search:${language}:${query}`, () => fetchJsonWithRetry(url), 1000 * 60 * 60 * 24);
-  return Array.isArray(data?.search) ? data.search : [];
-}
-
-async function fetchWikidataEntitiesByIds(ids = []){
-  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
-  if(!uniqueIds.length) return {};
-  const url = `${WIKIDATA_ENTITY_API_URL}?action=wbgetentities&format=json&origin=*&languages=${encodeURIComponent(currentLanguage === "ru" ? "ru|en" : "en|ru")}&props=labels|descriptions|aliases|claims|sitelinks&ids=${encodeURIComponent(uniqueIds.join("|"))}`;
-  const data = await getCachedWikidataResource(`entities:${currentLanguage}:${uniqueIds.join("|")}`, () => fetchJsonWithRetry(url), WIKIDATA_ENRICHMENT_TTL_MS);
-  return data?.entities || {};
-}
-
-function readWikidataTextValue(map = {}){
-  return map?.[currentLanguage]?.value || map?.ru?.value || map?.en?.value || Object.values(map || {})[0]?.value || "";
-}
-
-function readWikidataAliases(entity = {}){
-  return [
-    ...(entity?.aliases?.[currentLanguage] || []),
-    ...(entity?.aliases?.ru || []),
-    ...(entity?.aliases?.en || [])
-  ].map((entry) => normalizeSpaces(entry?.value || "")).filter(Boolean);
-}
-
-function getWikidataClaimEntityIds(entity = {}, propertyId){
-  return (entity?.claims?.[propertyId] || [])
-    .map((claim) => claim?.mainsnak?.datavalue?.value?.id || "")
-    .filter(Boolean);
-}
-
-async function fetchWikidataGraphForEntity(entityId){
-  const relationQuery = `
-    SELECT ?related ?relatedLabel ?relatedDescription ?property ?direction WHERE {
-      VALUES ?source { wd:${entityId} }
-      {
-        VALUES ?property { wdt:P144 wdt:P155 wdt:P156 wdt:P179 wdt:P8345 wdt:P1080 wdt:P941 }
-        ?source ?property ?related .
-        BIND("outbound" AS ?direction)
-      }
-      UNION
-      {
-        ?related wdt:P144 ?source .
-        BIND(wdt:P144 AS ?property)
-        BIND("inbound" AS ?direction)
-      }
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "${currentLanguage === "ru" ? "ru,en" : "en,ru"}". }
-    }
-    LIMIT 30
-  `;
-  const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(relationQuery)}`;
-  const data = await getCachedWikidataResource(`graph:${entityId}:${currentLanguage}`, () => fetchJsonWithRetry(url, {
-    headers: {
-      Accept: "application/sparql-results+json"
-    }
-  }), WIKIDATA_ENRICHMENT_TTL_MS);
-  return Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
-}
-
-function buildWikidataUniverseHints(entity = {}, relatedEntities = {}){
-  return Object.entries(WIKIDATA_UNIVERSE_PROPERTY_MAP).flatMap(([propertyId, kind]) => {
-    return getWikidataClaimEntityIds(entity, propertyId).map((targetId) => {
-      const target = relatedEntities[targetId] || {};
-      return {
-        wikidataEntityId: targetId,
-        propertyId,
-        kind,
-        name: readWikidataTextValue(target.labels) || targetId,
-        description: readWikidataTextValue(target.descriptions),
-        confidence: 0.78
-      };
-    });
-  });
-}
-
-async function fetchWikidataUniverseCatalog(universeHint, category){
-  if(!universeHint?.wikidataEntityId || !universeHint?.propertyId) return [];
-  const query = `
-    SELECT ?work ?workLabel ?workDescription ?inception WHERE {
-      VALUES (?property ?cluster) { (wdt:${universeHint.propertyId} wd:${universeHint.wikidataEntityId}) }
-      ?work ?property ?cluster .
-      OPTIONAL { ?work wdt:P577 ?inception . }
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "${currentLanguage === "ru" ? "ru,en" : "en,ru"}". }
-    }
-    LIMIT 30
-  `;
-  const url = `${WIKIDATA_SPARQL_URL}?format=json&query=${encodeURIComponent(query)}`;
-  const data = await getCachedWikidataResource(`catalog:${universeHint.propertyId}:${universeHint.wikidataEntityId}:${category}:${currentLanguage}`, () => fetchJsonWithRetry(url, {
-    headers: {
-      Accept: "application/sparql-results+json"
-    }
-  }), WIKIDATA_ENRICHMENT_TTL_MS);
-  const bindings = Array.isArray(data?.results?.bindings) ? data.results.bindings : [];
-  return bindings
-    .map((entry) => ({
-      entityId: (entry?.work?.value || "").split("/").pop() || "",
-      label: entry?.workLabel?.value || "",
-      description: entry?.workDescription?.value || "",
-      releaseDate: entry?.inception?.value || ""
-    }))
-    .filter((entry) => entry.entityId && categoryMatchesWikidataDescription(category, entry.description))
-    .sort((left, right) => String(left.releaseDate || "").localeCompare(String(right.releaseDate || "")) || String(left.label || "").localeCompare(String(right.label || "")));
-}
-
-function mapWikidataBindingsToRelations(bindings = [], currentEntityId){
-  return bindings.map((entry) => {
-    const propertyUri = entry?.property?.value || "";
-    const propertyId = propertyUri.split("/").pop() || "";
-    const relatedUri = entry?.related?.value || "";
-    const relatedEntityId = relatedUri.split("/").pop() || "";
-    const direction = entry?.direction?.value || "outbound";
-    const relationType = propertyId === "P144" && direction === "inbound"
-      ? "adaptation"
-      : (WIKIDATA_RELATION_PROPERTY_MAP[propertyId] || "related_work");
-    return {
-      relatedEntityId,
-      relatedLabel: entry?.relatedLabel?.value || relatedEntityId,
-      relatedDescription: entry?.relatedDescription?.value || "",
-      relationType: normalizeRelationType(relationType),
-      source: "wikidata",
-      confidence: propertyId === "P179" || propertyId === "P8345" || propertyId === "P1080" ? 0.78 : 0.72
-    };
-  }).filter((entry) => entry.relatedEntityId && entry.relatedEntityId !== currentEntityId);
-}
-
-function getLibraryItemsByWikidataEntityId(entityId){
-  return getAllLibraryItems().filter((item) => item?.enrichment?.wikidataEntityId === entityId);
-}
-
-function mergeUniqueBy(items = [], getKey = (value) => value){
-  const seen = new Set();
-  return items.filter((item) => {
-    const key = getKey(item);
-    if(!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-async function persistEnrichmentStateForItem(item){
-  if(!item) return;
-  const cache = await getWikidataCache();
-  const itemKey = getItemStorageKey(item);
-  cache[itemKey] = item.enrichment || buildEnrichmentState();
-  await setWikidataCache(cache);
-
-  if(isPublicView || !item.id) return;
-  const user = await getCurrentUser();
-  if(!user) return;
-
-  const enrichment = buildEnrichmentState(item.enrichment || {});
-  const updatePayload = {
-    wikidata_entity_id: enrichment.wikidataEntityId || null,
-    wikidata_label: enrichment.wikidataLabel || null,
-    wikidata_description: enrichment.wikidataDescription || null,
-    wikidata_last_enriched_at: enrichment.lastEnrichedAt || null,
-    enrichment_status: enrichment.status || "idle",
-    enrichment_confidence: Number(enrichment.confidence || 0),
-    enrichment_source: enrichment.matchedBy || null
-  };
-
-  const { error } = await supabaseClient
-    .from("user_media")
-    .update(updatePayload)
-    .eq("user_id", user.id)
-    .eq("id", item.id);
-
-  if(error){
-    console.error("Supabase enrichment update error:", error);
-  }
-}
-
-function resolveUniverseForHint(store, hint){
-  const existing = (store.universes || []).find((entry) =>
-    entry.wikidataEntityId === hint.wikidataEntityId ||
-    (hint.name && normalizeComparisonText(entry.name) === normalizeComparisonText(hint.name))
-  );
-
-  if(existing){
-    return existing;
-  }
-
-  const universe = {
-    id: buildUniverseEntityId(hint.wikidataEntityId || hint.name || Date.now()),
-    name: hint.name || hint.wikidataEntityId || "Universe",
-    slug: buildUniverseSlug(hint.name || hint.wikidataEntityId || ""),
-    description: hint.description || "",
-    kind: hint.kind || "universe",
-    source: "wikidata",
-    confidence: Number(hint.confidence || 0.7),
-    status: hint.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "confirmed" : "suggested",
-    wikidataEntityId: hint.wikidataEntityId || ""
-  };
-  store.universes = [universe, ...(store.universes || [])];
-  return universe;
-}
-
-function upsertUniverseMembership(store, membership){
-  const key = `${membership.universeId}:${membership.itemKey}`;
-  const existingIndex = (store.memberships || []).findIndex((entry) => `${entry.universeId}:${entry.itemKey}` === key);
-  const normalized = {
-    source: "wikidata",
-    confidence: 0.7,
-    status: "suggested",
-    relationType: "same_universe",
-    createdAt: new Date().toISOString(),
-    ...membership
-  };
-  if(existingIndex >= 0){
-    store.memberships[existingIndex] = { ...store.memberships[existingIndex], ...normalized };
-  } else {
-    store.memberships = [normalized, ...(store.memberships || [])];
-  }
-}
-
-function upsertGraphLink(store, link, asCandidate = false){
-  const collectionName = asCandidate ? "candidates" : "links";
-  const key = buildRelationIdentityKey(link);
-  const collection = Array.isArray(store[collectionName]) ? store[collectionName] : [];
-  const index = collection.findIndex((entry) => buildRelationIdentityKey(entry) === key);
-  const normalized = {
-    id: link.id || `${collectionName}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
-    relationType: normalizeRelationType(link.relationType),
-    source: link.source || "wikidata",
-    confidence: Number(link.confidence || 0.7),
-    status: link.status || (asCandidate ? "suggested" : "confirmed"),
-    createdAt: link.createdAt || new Date().toISOString(),
-    ...link
-  };
-  if(index >= 0){
-    collection[index] = { ...collection[index], ...normalized };
-  } else {
-    collection.unshift(normalized);
-  }
-  store[collectionName] = collection;
-}
-
-async function buildWikidataEnrichmentForItem(item){
-  const queries = buildWikidataSearchQueriesForItem(item);
-  const searches = await Promise.all(queries.map(async (query) => {
-    try {
-      const response = await searchWikidataEntities(query, currentLanguage);
-      return response.map((entry) => ({
-        ...entry,
-        aliases: Array.isArray(entry.aliases) ? entry.aliases : [],
-        displayLanguage: currentLanguage
-      }));
-    } catch (error) {
-      console.error("Wikidata search error:", error);
-      return [];
-    }
-  }));
-
-  const rankedCandidates = mergeUniqueBy(searches.flat(), (entry) => entry.id)
-    .map((candidate) => ({ ...candidate, confidence: scoreWikidataCandidate(item, candidate) }))
-    .sort((left, right) => right.confidence - left.confidence);
-
-  const best = rankedCandidates[0];
-  if(!best || best.confidence < WIKIDATA_MATCH_MEDIUM_CONFIDENCE){
-    return buildEnrichmentState({
-      status: rankedCandidates.length ? "suggested" : "missing",
-      confidence: Number(best?.confidence || 0),
-      matchCandidates: rankedCandidates.slice(0, 5),
-      error: rankedCandidates.length ? "" : "No confident candidate"
-    });
-  }
-
-  const entityMap = await fetchWikidataEntitiesByIds([best.id]);
-  const entity = entityMap[best.id] || {};
-  const relatedIds = [
-    ...Object.keys(WIKIDATA_UNIVERSE_PROPERTY_MAP).flatMap((propertyId) => getWikidataClaimEntityIds(entity, propertyId)),
-    ...Object.keys(WIKIDATA_RELATION_PROPERTY_MAP).flatMap((propertyId) => getWikidataClaimEntityIds(entity, propertyId))
-  ];
-  const relatedEntities = await fetchWikidataEntitiesByIds(relatedIds);
-  const graphBindings = await fetchWikidataGraphForEntity(best.id);
-  const universeHints = buildWikidataUniverseHints(entity, relatedEntities);
-  const seriesCatalog = mergeUniqueBy((await Promise.all(
-    universeHints
-      .filter((hint) => hint.kind === "series" || hint.kind === "franchise")
-      .slice(0, 2)
-      .map((hint) => fetchWikidataUniverseCatalog(hint, item?.category))
-  )).flat(), (entry) => entry.entityId);
-  const externalRelations = mapWikidataBindingsToRelations(graphBindings, best.id);
-
-  return buildEnrichmentState({
-    wikidataEntityId: best.id,
-    wikidataLabel: readWikidataTextValue(entity.labels) || best.label || "",
-    wikidataDescription: readWikidataTextValue(entity.descriptions) || best.description || "",
-    wikipediaTitle: entity?.sitelinks?.enwiki?.title || entity?.sitelinks?.ruwiki?.title || "",
-    sitelinkUrl: entity?.sitelinks?.enwiki?.title
-      ? `https://en.wikipedia.org/wiki/${encodeURIComponent(entity.sitelinks.enwiki.title.replace(/ /g, "_"))}`
-      : entity?.sitelinks?.ruwiki?.title
-        ? `https://ru.wikipedia.org/wiki/${encodeURIComponent(entity.sitelinks.ruwiki.title.replace(/ /g, "_"))}`
-        : "",
-    aliases: readWikidataAliases(entity),
-    matchedBy: best.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "auto" : "candidate",
-    matchCandidates: rankedCandidates.slice(0, 5),
-    externalRelations,
-    universeHints,
-    seriesCatalog,
-    status: best.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "ready" : "suggested",
-    confidence: Number(best.confidence || 0),
-    error: "",
-    lastEnrichedAt: new Date().toISOString()
-  });
-}
-
-async function applyWikidataGraphToUniverseStore(item){
-  if(!item?.enrichment?.wikidataEntityId) return;
-  const store = await getUniverseStore();
-  const itemKey = getItemStorageKey(item);
-  const enrichment = buildEnrichmentState(item.enrichment || {});
-
-  enrichment.universeHints.forEach((hint) => {
-    const universe = resolveUniverseForHint(store, hint);
-    upsertUniverseMembership(store, {
-      universeId: universe.id,
-      itemKey,
-      relationType: hint.kind === "series" ? "part_of_series" : "same_universe",
-      source: "wikidata",
-      confidence: Number(hint.confidence || enrichment.confidence || 0.7),
-      status: hint.confidence >= WIKIDATA_MATCH_HIGH_CONFIDENCE ? "confirmed" : "suggested",
-      wikidataEntityId: hint.wikidataEntityId || ""
-    });
-  });
-
-  const allItems = getAllLibraryItems();
-  const currentEntityId = enrichment.wikidataEntityId;
-  const currentUniverseIds = new Set(enrichment.universeHints.map((entry) => entry.wikidataEntityId));
-
-  allItems
-    .filter((candidate) => getItemStorageKey(candidate) !== itemKey)
-    .forEach((candidate) => {
-      const candidateEnrichment = buildEnrichmentState(candidate.enrichment || {});
-      if(!candidateEnrichment.wikidataEntityId) return;
-
-      const relation = enrichment.externalRelations.find((entry) => entry.relatedEntityId === candidateEnrichment.wikidataEntityId);
-      const sharedUniverse = candidateEnrichment.universeHints?.find((hint) => currentUniverseIds.has(hint.wikidataEntityId));
-      const inferredCrossMedia = !relation && normalizeComparisonText(candidate.title || "") === normalizeComparisonText(item.title || "") && candidate.category !== item.category
-        ? inferCrossMediaRelationType(item, candidate)
-        : "";
-
-      if(relation){
-        upsertGraphLink(store, {
-          sourceKey: itemKey,
-          targetKey: getItemStorageKey(candidate),
-          relationType: relation.relationType,
-          source: relation.source,
-          confidence: relation.confidence,
-          wikidataEntityId: currentEntityId,
-          layer: getRelationLayerInfo(relation, item, candidate).key
-        }, relation.confidence < WIKIDATA_MATCH_HIGH_CONFIDENCE);
-      } else if(inferredCrossMedia){
-        upsertGraphLink(store, {
-          sourceKey: itemKey,
-          targetKey: getItemStorageKey(candidate),
-          relationType: inferredCrossMedia,
-          source: "inferred",
-          confidence: 0.66,
-          wikidataEntityId: currentEntityId,
-          layer: getRelationLayerInfo({ relationType: inferredCrossMedia }, item, candidate).key
-        }, true);
-      } else if(sharedUniverse){
-        upsertGraphLink(store, {
-          sourceKey: itemKey,
-          targetKey: getItemStorageKey(candidate),
-          relationType: candidate.category !== item.category ? "franchise_member" : "same_universe",
-          source: "inferred",
-          confidence: 0.68,
-          wikidataEntityId: sharedUniverse.wikidataEntityId,
-          layer: candidate.category !== item.category ? "franchise" : "series"
-        }, true);
-      }
-    });
-
-  await setUniverseStore(store);
-}
-
-async function ensureItemEnrichmentHydrated(item){
-  if(!item) return buildEnrichmentState();
-  const cache = await getWikidataCache();
-  const cached = cache[getItemStorageKey(item)] || {};
-  item.enrichment = buildEnrichmentState({
-    wikidataEntityId: item.wikidata_entity_id || "",
-    wikidataLabel: item.wikidata_label || "",
-    wikidataDescription: item.wikidata_description || "",
-    lastEnrichedAt: item.wikidata_last_enriched_at || "",
-    status: item.enrichment_status || "idle",
-    confidence: Number(item.enrichment_confidence || 0),
-    matchedBy: item.enrichment_source || "",
-    ...(item.enrichment || {}),
-    ...cached
-  });
-  return item.enrichment;
-}
-
-function shouldEnrichItem(item, force = false){
-  if(force) return true;
-  const enrichment = buildEnrichmentState(item?.enrichment || {});
-  if(!enrichment.lastEnrichedAt) return true;
-  const age = Date.now() - new Date(enrichment.lastEnrichedAt).getTime();
-  return !Number.isFinite(age) || age > WIKIDATA_ENRICHMENT_TTL_MS || enrichment.status === "failed" || enrichment.status === "missing";
-}
-
-async function enrichItemFromWikidata(item, options = {}){
-  if(!item) return null;
-  await ensureItemEnrichmentHydrated(item);
-  if(!shouldEnrichItem(item, options.force)) return item.enrichment;
-
-  const itemKey = getItemStorageKey(item);
-  if(wikidataEnrichmentJobs.has(itemKey)){
-    return await wikidataEnrichmentJobs.get(itemKey);
-  }
-
-  const job = (async () => {
-    item.enrichment = buildEnrichmentState({ ...(item.enrichment || {}), status: "pending", error: "" });
-    try {
-      const enrichment = await buildWikidataEnrichmentForItem(item);
-      item.enrichment = enrichment;
-      await persistEnrichmentStateForItem(item);
-      if(enrichment.wikidataEntityId){
-        await applyWikidataGraphToUniverseStore(item);
-      }
-      return enrichment;
-    } catch (error) {
-      console.error("Wikidata enrichment pipeline error:", error);
-      item.enrichment = buildEnrichmentState({
-        ...(item.enrichment || {}),
-        status: "failed",
-        error: error?.message || "Wikidata enrichment failed",
-        lastEnrichedAt: new Date().toISOString()
-      });
-      await persistEnrichmentStateForItem(item);
-      return item.enrichment;
-    } finally {
-      wikidataEnrichmentJobs.delete(itemKey);
-    }
-  })();
-
-  wikidataEnrichmentJobs.set(itemKey, job);
-  return await job;
-}
-
-async function triggerBackgroundWikidataEnrichment(items = [], options = {}){
-  const queue = items.filter(Boolean).slice(0, options.limit || 4);
-  for(const item of queue){
-    if(!shouldEnrichItem(item, options.force)) continue;
-    enrichItemFromWikidata(item, { force: options.force }).catch((error) => {
-      console.error("Background Wikidata enrichment error:", error);
-    });
-  }
-}
-
-function getTrackerConfigByCategory(category){
-  switch(category){
-    case "Books": return { unit: "pages", label: "Страницы" };
-    case "Movies": return { unit: "viewed", label: "Просмотр" };
-    case "Series":
-    case "Anime": return { unit: "episodes", label: "Серии" };
-    case "Manga": return { unit: "chapters", label: "Главы" };
-    default: return { unit: "percent", label: "%" };
-  }
-}
-
-function buildDefaultTracker(category, status = "Planned"){
-  const config = getTrackerConfigByCategory(category);
-  return {
-    status,
-    started_at: "",
-    completed_at: "",
-    rating: "",
-    note: "",
-    progress_current: config.unit === "viewed" ? 0 : 0,
-    progress_total: config.unit === "viewed" ? 1 : 0,
-    progress_unit: config.unit,
-    progress_label: config.label,
-    revisit_count: 0,
-    last_updated_at: "",
-    watched_on: ""
-  };
-}
-
-function normalizeTracker(item){
-  const base = buildDefaultTracker(item?.category || currentCategory || "", item?.status || "Planned");
-  const tracker = item?.tracker || {};
-  const merged = { ...base, ...tracker };
-  merged.status = item?.status || merged.status || "Planned";
-  return merged;
-}
-
-function computeProgressPercent(item){
-  const tracker = normalizeTracker(item);
-  if(tracker.progress_unit === "viewed") return tracker.progress_current ? 100 : 0;
-  const total = Number(tracker.progress_total || 0);
-  const current = Number(tracker.progress_current || 0);
-  if(!total || total <= 0) return current ? Math.min(100, current) : 0;
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
-}
-
-function formatTrackerProgress(item){
-  const tracker = normalizeTracker(item);
-  const current = Number(tracker.progress_current || 0);
-  const total = Number(tracker.progress_total || 0);
-  if(tracker.progress_unit === "viewed"){
-    return current ? "Просмотрено" : "Не просмотрено";
-  }
-  if(total > 0) return `${current}/${total} ${tracker.progress_label.toLowerCase()}`;
-  return current ? `${current} ${tracker.progress_label.toLowerCase()}` : t().labels.progress;
-}
-
-function isNowStatus(status){
-  return PRODUCT_NOW_STATUSES.includes(status || "");
-}
-
-async function applyTrackerOverridesToCategory(category){
-  const overrides = await getTrackerOverrides();
-  (demoData[category] || []).forEach((item) => {
-    const key = buildTrackerStorageKey(item, category);
-    item.tracker = { ...buildDefaultTracker(category, item.status || "Planned"), ...(overrides[key] || {}), ...(item.tracker || {}) };
-    if(item.tracker.status && item.status !== item.tracker.status){
-      item.status = item.tracker.status;
-    }
-  });
-}
-
-async function saveTrackerOverrideForItem(item){
-  if(!item) return;
-  const overrides = await getTrackerOverrides();
-  const key = buildTrackerStorageKey(item, item.category || currentCategory);
-  overrides[key] = normalizeTracker(item);
-  await setTrackerOverrides(overrides);
-}
-
-async function recordProductActivity(kind, item, payload = {}){
-  const store = await getUniverseStore();
-  const entry = {
-    id: `activity_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
-    kind,
-    itemKey: item ? buildTrackerStorageKey(item, item.category || currentCategory) : "",
-    itemTitle: item?.title || "",
-    category: item?.category || currentCategory || "",
-    timestamp: new Date().toISOString(),
-    payload
-  };
-  store.activity = [entry, ...(store.activity || [])].slice(0, 80);
-  await setUniverseStore(store);
-}
-
-async function rebuildStatusFilterOptions(){
-  const select = document.getElementById("status-filter");
-  if(!select) return;
-  const previous = currentFilterStatus || "All";
-  select.innerHTML = "";
-  const values = ["All", ...PRODUCT_TRACKER_STATUSES];
-  values.forEach((value) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value === "All" ? t().statuses.All : translateStatus(value);
-    if(value === previous) option.selected = true;
-    select.appendChild(option);
-  });
-}
-
-async function updateAllProductData(){
-  for(const category of Object.keys(demoData)){
-    await applyTrackerOverridesToCategory(category);
-  }
-}
-
-function getAllLibraryItems(){
-  return Object.entries(demoData).flatMap(([category, items]) => (items || []).map((item) => ({ ...item, category })));
-}
-
-function getNowItems(){
-  let items = getAllLibraryItems().filter((item) => isNowStatus(item.status));
-  items = items.map((item) => ({ ...item, tracker: normalizeTracker(item), progressPercent: computeProgressPercent(item) }));
-  switch(currentNowSort){
-    case "category":
-      items.sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.title).localeCompare(String(b.title)));
-      break;
-    case "progress":
-      items.sort((a, b) => b.progressPercent - a.progressPercent);
-      break;
-    case "started":
-      items.sort((a, b) => String(b.tracker.started_at || "").localeCompare(String(a.tracker.started_at || "")));
-      break;
-    default:
-      items.sort((a, b) => String(b.tracker.last_updated_at || "").localeCompare(String(a.tracker.last_updated_at || "")));
-      break;
-  }
-  return items;
-}
-
-    function getStatsSnapshot(){
-      if(cachedStatsSnapshot && cachedStatsSnapshotVersion === libraryStateVersion){
-        return cachedStatsSnapshot;
-      }
-      const items = getAllLibraryItems();
-      const byCategory = {};
-      items.forEach((item) => {
-        if(!byCategory[item.category]) byCategory[item.category] = { total: 0, done: 0, inProgress: 0, planned: 0, dropped: 0, ratings: [] };
-        const bucket = byCategory[item.category];
-    const tracker = normalizeTracker(item);
-    bucket.total += 1;
-    if(item.status === "Done") bucket.done += 1;
-    if(isNowStatus(item.status)) bucket.inProgress += 1;
-    if(item.status === "Planned") bucket.planned += 1;
-    if(item.status === "Dropped") bucket.dropped += 1;
-    if(tracker.rating) bucket.ratings.push(Number(tracker.rating));
-  });
-  const totalCompletedThisYear = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(String(new Date().getFullYear()))).length;
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const consumedThisMonth = items.filter((item) => normalizeTracker(item).completed_at?.startsWith(monthKey)).length;
-      cachedStatsSnapshot = {
-        byCategory,
-        total: items.length,
-        now: items.filter((item) => isNowStatus(item.status)).length,
-        completed: items.filter((item) => item.status === "Done").length,
-        dropped: items.filter((item) => item.status === "Dropped").length,
-        consumedThisMonth,
-        totalCompletedThisYear
-      };
-      cachedStatsSnapshotVersion = libraryStateVersion;
-      return cachedStatsSnapshot;
-    }
-
-async function renderHomeNowSection(){
-  const container = document.getElementById("home-now-grid");
-  if(!container) return;
-  const items = getNowItems().slice(0, 4);
-  container.innerHTML = items.length ? items.map((item) => `
-    <article class="dashboard-card">
-      <div class="media-meta-chips">
-        <span class="meta-chip is-status">${escapeHtml(translateStatus(item.status))}</span>
-        <span class="meta-chip">${escapeHtml(translateCategory(item.category))}</span>
-      </div>
-      <h3 class="dashboard-card-title">${escapeHtml(item.title)}</h3>
-      <div class="now-card-meta">${escapeHtml(formatTrackerProgress(item))}</div>
-      <div class="now-card-progress"><span style="width:${item.progressPercent}%"></span></div>
-      <div class="now-card-actions">
-        <button class="button button-secondary" type="button" onclick="openTrackerModalById(${item.id}, '${item.category}')">${escapeHtml(t().labels.progress)}</button>
-        <button class="button button-ghost" type="button" onclick="openCardFromSection(${item.id}, '${item.category}')">${escapeHtml(t().buttons.open)}</button>
-      </div>
-    </article>
-  `).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-}
-
-async function renderHomeStatsSection(){
-  const container = document.getElementById("home-stats-grid");
-  if(!container) return;
-  const stats = getStatsSnapshot();
-  const cards = [
-    [t().labels.allItems, stats.total],
-    [t().labels.inProgress, stats.now],
-    [translateStatus("Done"), stats.completed],
-    ["Месяц", stats.consumedThisMonth]
-  ];
-  container.innerHTML = cards.map(([label, value]) => `
-    <article class="stat-card">
-      <div class="stat-card-value">${escapeHtml(String(value))}</div>
-      <div class="stat-card-label">${escapeHtml(String(label))}</div>
-    </article>
-  `).join("");
-}
-
-async function renderLibraryRootScreen(){
-  const container = document.getElementById("library-summary-grid");
-  if(!container) return;
-  const stats = getStatsSnapshot();
-  const cards = [
-    [t().labels.allItems, stats.total],
-    [translateCategory("Books"), stats.byCategory?.Books?.total || 0],
-    [translateCategory("Movies"), stats.byCategory?.Movies?.total || 0],
-    [translateCategory("Series"), stats.byCategory?.Series?.total || 0],
-    [translateCategory("Anime"), stats.byCategory?.Anime?.total || 0],
-    [translateCategory("Manga"), stats.byCategory?.Manga?.total || 0]
-  ];
-  container.innerHTML = cards.map(([label, value]) => `
-    <article class="stat-card">
-      <div class="stat-card-value">${escapeHtml(String(value))}</div>
-      <div class="stat-card-label">${escapeHtml(String(label))}</div>
-    </article>
-  `).join("");
-}
-
-async function renderActivityLists(){
-  const store = await getUniverseStore();
-  const html = (store.activity || []).slice(0, 8).map((entry) => `
-    <article class="activity-card">
-      <div>${escapeHtml(entry.itemTitle || "Plamut")}</div>
-      <div class="activity-card-meta">${escapeHtml(entry.kind)} · ${escapeHtml((entry.timestamp || "").slice(0, 10))}</div>
-    </article>
-  `).join("") || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-  ["home-activity-list", "stats-activity-list"].forEach((id) => {
-    const node = document.getElementById(id);
-    if(node) node.innerHTML = html;
-  });
-}
-
-async function renderNowScreen(){
-  const container = document.getElementById("now-list");
-  if(!container) return;
-  const items = getNowItems();
-  container.innerHTML = items.length ? items.map((item) => `
-    <article class="now-card">
-      <div class="media-meta-chips">
-        <span class="meta-chip is-status">${escapeHtml(translateStatus(item.status))}</span>
-        <span class="meta-chip">${escapeHtml(translateCategory(item.category))}</span>
-        ${item.folder ? `<span class="meta-chip is-folder">${escapeHtml(item.folder)}</span>` : ""}
-      </div>
-      <h3 class="now-card-title">${escapeHtml(item.title)}</h3>
-      <div class="now-card-meta">${escapeHtml(formatTrackerProgress(item))}</div>
-      <div class="now-card-progress"><span style="width:${item.progressPercent}%"></span></div>
-      <div class="now-card-actions">
-        <button class="button button-secondary" type="button" onclick="openTrackerModalById(${item.id}, '${item.category}')">Обновить прогресс</button>
-        <button class="button button-secondary" type="button" onclick="changeStatusByCategory(${item.id}, '${item.category}')">${escapeHtml(t().buttons.changeStatus)}</button>
-        <button class="button button-ghost" type="button" onclick="openCardFromSection(${item.id}, '${item.category}')">${escapeHtml(t().buttons.open)}</button>
-      </div>
-    </article>
-  `).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-}
-
-async function renderStatsScreen(){
-  const summary = document.getElementById("stats-summary-grid");
-  const categoryGrid = document.getElementById("stats-category-grid");
-  if(!summary || !categoryGrid) return;
-  const stats = getStatsSnapshot();
-  summary.innerHTML = [
-    [t().labels.allItems, stats.total],
-    [t().labels.inProgress, stats.now],
-    [translateStatus("Done"), stats.completed],
-    [translateStatus("Dropped"), stats.dropped],
-    ["За месяц", stats.consumedThisMonth],
-    ["За год", stats.totalCompletedThisYear]
-  ].map(([label, value]) => `<article class="stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
-  categoryGrid.innerHTML = Object.entries(stats.byCategory).map(([category, data]) => {
-    const avg = data.ratings.length ? (data.ratings.reduce((sum, v) => sum + v, 0) / data.ratings.length).toFixed(1) : "—";
-    return `
-      <article class="stat-card">
-        <div class="dashboard-card-title">${escapeHtml(translateCategory(category))}</div>
-        <div class="activity-card-meta">Всего: ${data.total}</div>
-        <div class="activity-card-meta">Завершено: ${data.done}</div>
-        <div class="activity-card-meta">В процессе: ${data.inProgress}</div>
-        <div class="activity-card-meta">План: ${data.planned}</div>
-        <div class="activity-card-meta">Брошено: ${data.dropped}</div>
-        <div class="activity-card-meta">Средний рейтинг: ${avg}</div>
-      </article>`;
-  }).join("");
-}
-
-async function renderUniversesScreen(){
-  const container = document.getElementById("universes-list");
-  if(!container) return;
-  const store = await getUniverseStore();
-  const items = getAllLibraryItems();
-  container.innerHTML = (store.universes || []).length ? (store.universes || []).map((universe) => {
-    const members = (store.memberships || []).filter((membership) => membership.universeId === universe.id && membership.status !== "rejected");
-    const memberTitles = members.map((membership) => items.find((item) => buildTrackerStorageKey(item, item.category) === membership.itemKey)?.title).filter(Boolean).slice(0, 4);
-    const suggestedCount = members.filter((membership) => membership.status === "suggested").length;
-    return `
-      <article class="universe-card">
-        <h3 class="universe-card-title">${escapeHtml(universe.name)}</h3>
-        <div class="universe-card-meta">${escapeHtml(universe.description || "")}</div>
-        <div class="now-card-meta">Объектов: ${members.length} · ${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(universe.source || "user")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(universe.confidence || 0.7))}</div>
-        ${suggestedCount ? `<div class="activity-card-meta">${escapeHtml(t().labels.enrichmentSuggestedStatus)}: ${suggestedCount}</div>` : ""}
-        <div class="linked-list">${memberTitles.map((title) => `<div class="link-chip"><strong>${escapeHtml(title)}</strong></div>`).join("")}</div>
-      </article>`;
-  }).join("") : `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-}
-
-async function renderTrackerSummaryForCurrentItem(){
-  const container = document.getElementById("tracker-summary-grid");
-  if(!container) return;
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item){ container.innerHTML = ""; return; }
-  const tracker = normalizeTracker(item);
-  const cards = [
-    [translateStatus(item.status), t().labels.statusLabel],
-    [formatTrackerProgress(item), t().labels.progress],
-    [tracker.rating || "—", t().labels.rating],
-    [tracker.started_at || "—", t().labels.startedAt],
-    [tracker.completed_at || "—", t().labels.completedAt]
-  ];
-  container.innerHTML = cards.map(([value,label]) => `<article class="tracker-stat-card"><div class="stat-card-value">${escapeHtml(String(value))}</div><div class="stat-card-label">${escapeHtml(String(label))}</div></article>`).join("");
-}
-
-function parseSequenceToken(value = ""){
-  const normalized = normalizeComparisonText(value).trim();
-  if(!normalized) return 0;
-  if(/^\d+$/.test(normalized)) return Number(normalized);
-  const romans = { i: 1, v: 5, x: 10, l: 50, c: 100 };
-  let total = 0;
-  let previous = 0;
-  for(const char of normalized.split("").reverse()){
-    const current = romans[char] || 0;
-    if(!current) return 0;
-    if(current < previous){
-      total -= current;
-    } else {
-      total += current;
-      previous = current;
-    }
-  }
-  return total;
-}
-
-function extractSeriesFingerprint(title = ""){
-  const source = normalizeSpaces(title || "");
-  if(!source) return { baseKey: "", baseLabel: "", sequenceNumber: 0 };
-  const patterns = [
-    /(.*?)(?:\s*[#№]\s*|\s+(?:book|volume|vol\.?|part|chapter|season|episode|том|книга|часть|глава|сезон|эпизод)\s+)(\d+|[ivxlcdm]+)$/i,
-    /(.*?)(?:\s*[\(\[])(\d+|[ivxlcdm]+)(?:[\)\]])$/i,
-    /(.*?)(?:\s+)(\d+|[ivxlcdm]+)$/i
-  ];
-  let baseLabel = source;
-  let sequenceNumber = 0;
-  for(const pattern of patterns){
-    const match = source.match(pattern);
-    if(match){
-      const parsed = parseSequenceToken(match[2]);
-      if(parsed){
-        baseLabel = normalizeSpaces(match[1] || source);
-        sequenceNumber = parsed;
-        break;
-      }
-    }
-  }
-  baseLabel = normalizeSpaces(baseLabel.split(/[:–—]/)[0] || baseLabel);
-  const baseKey = normalizeComparisonText(baseLabel)
-    .replace(/\b(the|a|an|book|volume|part|chapter|season|episode|том|книга|часть|глава|сезон|эпизод)\b/g, " ")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return {
-    baseKey: baseKey.length >= 4 ? baseKey : "",
-    baseLabel: normalizeSpaces(baseLabel || source),
-    sequenceNumber
-  };
-}
-
-function buildLocalRelationInference(item, allItems = getAllLibraryItems()){
-  const fingerprint = extractSeriesFingerprint(item?.title || item?.original_title || "");
-  if(!fingerprint.baseKey){
-    return {
-      fingerprint,
-      seriesEntries: [],
-      sameCategory: [],
-      crossMedia: [],
-      candidateLinks: [],
-      primaryLabel: ""
-    };
-  }
-  const peers = allItems
-    .filter((candidate) => getItemStorageKey(candidate, candidate.category) !== getItemStorageKey(item, item?.category || currentCategory))
-    .map((candidate) => ({ item: candidate, fingerprint: extractSeriesFingerprint(candidate.title || candidate.original_title || "") }))
-    .filter((entry) => entry.fingerprint.baseKey && entry.fingerprint.baseKey === fingerprint.baseKey);
-  const sameCategory = peers.filter((entry) => entry.item.category === item.category);
-  const crossMedia = peers.filter((entry) => entry.item.category !== item.category);
-  const orderedSeries = [{ item, fingerprint }, ...sameCategory]
-    .sort((left, right) => {
-      const leftOrder = left.fingerprint.sequenceNumber || getItemReleaseYear(left.item) || Number.MAX_SAFE_INTEGER;
-      const rightOrder = right.fingerprint.sequenceNumber || getItemReleaseYear(right.item) || Number.MAX_SAFE_INTEGER;
-      return leftOrder - rightOrder || String(left.item.title || "").localeCompare(String(right.item.title || ""));
-    })
-    .map((entry) => ({
-      entityId: getItemStorageKey(entry.item, entry.item.category),
-      label: entry.item.title || entry.fingerprint.baseLabel,
-      releaseDate: entry.item.release_date || entry.item.first_air_date || entry.item.published_at || String(getItemReleaseYear(entry.item) || ""),
-      sequenceNumber: entry.fingerprint.sequenceNumber || 0,
-      category: entry.item.category,
-      item: entry.item
-    }));
-
-  const candidateLinks = [];
-  sameCategory.forEach((entry) => {
-    const currentSeq = fingerprint.sequenceNumber || 0;
-    const targetSeq = entry.fingerprint.sequenceNumber || 0;
-    let relationType = "part_of_series";
-    if(currentSeq && targetSeq){
-      relationType = targetSeq > currentSeq ? "sequel" : targetSeq < currentSeq ? "prequel" : "part_of_series";
-    }
-    candidateLinks.push({ item: entry.item, relationType, confidence: currentSeq && targetSeq ? 0.82 : 0.68, layer: "series" });
-  });
-  crossMedia.forEach((entry) => {
-    const relationType = inferCrossMediaRelationType(item, entry.item) || "franchise_member";
-    const exactTitle = normalizeComparisonText(entry.item.title || "") === normalizeComparisonText(item.title || "");
-    const sequenceAligned = !fingerprint.sequenceNumber || !entry.fingerprint.sequenceNumber || fingerprint.sequenceNumber === entry.fingerprint.sequenceNumber;
-    const confidence = exactTitle && sequenceAligned ? 0.92 : exactTitle ? 0.84 : 0.72;
-    candidateLinks.push({ item: entry.item, relationType, confidence, layer: relationType === "franchise_member" ? "franchise" : "adaptation" });
-  });
-
-  return {
-    fingerprint,
-    primaryLabel: fingerprint.baseLabel,
-    seriesEntries: orderedSeries,
-    sameCategory,
-    crossMedia,
-    candidateLinks
-  };
-}
-
-function catalogEntryMatchesItem(entry, candidate){
-  if(!entry || !candidate) return false;
-  const entryId = entry.entityId || "";
-  return entryId === buildEnrichmentState(candidate.enrichment || {}).wikidataEntityId || entryId === getItemStorageKey(candidate, candidate.category);
-}
-
-async function ensureLocalUniverseInferenceForItem(item){
-  if(!item) return null;
-  const allItems = getAllLibraryItems();
-  const inference = buildLocalRelationInference(item, allItems);
-  if(!inference.fingerprint.baseKey || (!inference.seriesEntries.length && !inference.candidateLinks.length)) return inference;
-  const store = await getUniverseStore();
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const seriesUniverseId = `local_series_${buildUniverseSlug(`${item.category || currentCategory}-${inference.primaryLabel || inference.fingerprint.baseKey}`)}`;
-  const franchiseUniverseId = `local_franchise_${buildUniverseSlug(inference.primaryLabel || inference.fingerprint.baseKey)}`;
-
-  if(inference.seriesEntries.length > 1){
-    if(!(store.universes || []).some((entry) => entry.id === seriesUniverseId)){
-      store.universes = [{
-        id: seriesUniverseId,
-        name: inference.primaryLabel,
-        slug: buildUniverseSlug(inference.primaryLabel),
-        description: currentLanguage === "ru" ? "Локально распознанная серия" : "Locally inferred series",
-        kind: "series",
-        source: "local-inference",
-        confidence: 0.74,
-        status: "suggested",
-        wikidataEntityId: ""
-      }, ...(store.universes || [])];
-    }
-    inference.seriesEntries.forEach((entry) => {
-      upsertUniverseMembership(store, {
-        universeId: seriesUniverseId,
-        itemKey: getItemStorageKey(entry.item, entry.item.category),
-        relationType: "part_of_series",
-        source: "local-inference",
-        confidence: entry.sequenceNumber ? 0.82 : 0.68,
-        status: "suggested"
-      });
-    });
-  }
-
-  if(inference.crossMedia.length){
-    if(!(store.universes || []).some((entry) => entry.id === franchiseUniverseId)){
-      store.universes = [{
-        id: franchiseUniverseId,
-        name: inference.primaryLabel,
-        slug: buildUniverseSlug(inference.primaryLabel),
-        description: currentLanguage === "ru" ? "Локально распознанная франшиза" : "Locally inferred franchise",
-        kind: "franchise",
-        source: "local-inference",
-        confidence: 0.72,
-        status: "suggested",
-        wikidataEntityId: ""
-      }, ...(store.universes || [])];
-    }
-    upsertUniverseMembership(store, {
-      universeId: franchiseUniverseId,
-      itemKey,
-      relationType: "same_universe",
-      source: "local-inference",
-      confidence: 0.72,
-      status: "suggested"
-    });
-    inference.crossMedia.forEach((entry) => {
-      upsertUniverseMembership(store, {
-        universeId: franchiseUniverseId,
-        itemKey: getItemStorageKey(entry.item, entry.item.category),
-        relationType: "same_universe",
-        source: "local-inference",
-        confidence: 0.72,
-        status: "suggested"
-      });
-    });
-  }
-
-  inference.candidateLinks.forEach((entry) => {
-    upsertGraphLink(store, {
-      sourceKey: itemKey,
-      targetKey: getItemStorageKey(entry.item, entry.item.category),
-      relationType: entry.relationType,
-      source: "local-inference",
-      confidence: entry.confidence,
-      layer: entry.layer
-    }, entry.confidence < WIKIDATA_MATCH_HIGH_CONFIDENCE);
-  });
-
-  await setUniverseStore(store);
-  return inference;
-}
-
-function buildSeriesInsight(item, store){
-  const enrichment = buildEnrichmentState(item?.enrichment || {});
-  const allItems = getAllLibraryItems();
-  const localInference = buildLocalRelationInference(item, allItems);
-  const fallbackCatalog = localInference.seriesEntries.map((entry) => ({
-    entityId: entry.entityId,
-    label: entry.label,
-    releaseDate: entry.releaseDate,
-    source: "local-inference"
-  }));
-  const catalog = mergeUniqueBy([
-    ...(Array.isArray(enrichment.seriesCatalog) ? enrichment.seriesCatalog : []),
-    ...fallbackCatalog
-  ], (entry) => entry.entityId || entry.label);
-  const primaryUniverse = enrichment.universeHints.find((hint) => hint.kind === "series")
-    || enrichment.universeHints[0]
-    || (localInference.primaryLabel ? { name: localInference.primaryLabel, kind: localInference.crossMedia.length ? "franchise" : "series", confidence: 0.72 } : null);
-  const currentEntityId = enrichment.wikidataEntityId || getItemStorageKey(item, item?.category || currentCategory);
-  const currentIndex = catalog.findIndex((entry) => entry.entityId === currentEntityId);
-  const libraryCatalogEntries = catalog.filter((entry) => allItems.some((candidate) => catalogEntryMatchesItem(entry, candidate)));
-  const missingEntries = catalog.filter((entry) => !allItems.some((candidate) => catalogEntryMatchesItem(entry, candidate)));
-  const nextPart = currentIndex >= 0 ? catalog[currentIndex + 1] || null : missingEntries[0] || null;
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const candidateLinks = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey);
-  const confirmedLinks = (store.links || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey);
-  const adaptationCount = [...candidateLinks, ...confirmedLinks].filter((entry) => ["adaptation", "based_on", "spin_off", "related_work", "franchise_member"].includes(normalizeRelationType(entry.relationType))).length;
-
-  return {
-    primaryUniverse,
-    totalParts: catalog.length,
-    currentIndex: currentIndex >= 0 ? currentIndex + 1 : 0,
-    libraryCount: libraryCatalogEntries.length,
-    missingCount: missingEntries.length,
-    nextPart,
-    missingEntries,
-    catalog,
-    candidateLinks,
-    confirmedLinks,
-    adaptationCount,
-    localInference
-  };
-}
-
-function renderSeriesInsightCard(item, insight){
-  if(!insight.primaryUniverse && !insight.totalParts && !insight.candidateLinks.length){
-    return "";
-  }
-  const missingPreview = insight.missingEntries.slice(0, 3).map((entry) => `<span class="meta-chip">${escapeHtml(entry.label)}</span>`).join("");
-  return `
-    <article class="series-insight-card">
-      <div class="series-insight-heading">
-        <div>
-          <div class="series-insight-label">${escapeHtml(currentLanguage === "ru" ? "Серия / франшиза" : "Series / franchise")}</div>
-          <div class="series-insight-title">${escapeHtml(insight.primaryUniverse?.name || t().labels.wikidata)}</div>
-        </div>
-        ${insight.totalParts ? `<span class="meta-chip">${escapeHtml(`${insight.currentIndex || "?"} / ${insight.totalParts}`)}</span>` : ""}
-      </div>
-      <div class="series-insight-stats">
-        ${insight.totalParts ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.totalParts))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "частей в серии" : "parts in series")}</span></div>` : ""}
-        ${insight.libraryCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.libraryCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "у вас в библиотеке" : "in your library")}</span></div>` : ""}
-        ${insight.missingCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.missingCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "не хватает" : "missing")}</span></div>` : ""}
-        ${insight.adaptationCount ? `<div class="series-insight-stat"><strong>${escapeHtml(String(insight.adaptationCount))}</strong><span>${escapeHtml(currentLanguage === "ru" ? "связанных адаптаций" : "related adaptations")}</span></div>` : ""}
-      </div>
-      ${insight.nextPart ? `<div class="series-insight-next">${escapeHtml(currentLanguage === "ru" ? "Следующая часть" : "Next part")}: <strong>${escapeHtml(insight.nextPart.label)}</strong></div>` : ""}
-      ${missingPreview ? `<div class="series-insight-missing">${missingPreview}</div>` : ""}
-      <div class="series-insight-actions">
-        ${insight.catalog.length ? `<button class="button button-secondary" type="button" onclick="openSeriesInsightModalByCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Показать все части" : "Show all parts")}</button>` : ""}
-        ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem(this)">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
-        ${insight.candidateLinks.length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions(this)">${escapeHtml(currentLanguage === "ru" ? "Подтвердить связи" : "Confirm links")}</button>` : ""}
-      </div>
-    </article>
-  `;
-}
-
-function inferCrossMediaRelationType(sourceItem, targetItem){
-  if(!sourceItem || !targetItem || sourceItem.category === targetItem.category) return "";
-  const sourceCategory = sourceItem.category;
-  const targetCategory = targetItem.category;
-  const sourceIsOriginal = ["Books", "Manga"].includes(sourceCategory);
-  const targetIsAdaptation = ["Movies", "Series", "Anime"].includes(targetCategory);
-  if(sourceIsOriginal && targetIsAdaptation) return "adaptation";
-  if(targetIsAdaptation && ["Movies", "Series", "Anime"].includes(sourceCategory) && ["Books", "Manga"].includes(targetCategory)) return "based_on";
-  return "franchise_member";
-}
-
-function getRelationLayerInfo(relation, item, targetItem){
-  const relationType = normalizeRelationType(relation?.relationType || "");
-  if(["adaptation", "based_on", "original_work", "derived_from"].includes(relationType) || (item?.category && targetItem?.category && item.category !== targetItem.category && !["part_of_series", "same_universe", "franchise_member"].includes(relationType))){
-    return {
-      key: "adaptation",
-      title: currentLanguage === "ru" ? "Адаптации и кросс-медиа" : "Adaptations & cross-media"
-    };
-  }
-  if(["franchise_member", "same_universe"].includes(relationType)){
-    return {
-      key: "franchise",
-      title: currentLanguage === "ru" ? "Франшиза / вселенная" : "Franchise / universe"
-    };
-  }
-  return {
-    key: "series",
-    title: currentLanguage === "ru" ? "Серия и порядок" : "Series & order"
-  };
-}
-
-function formatConfidence(value){
-  const score = Math.round(Number(value || 0) * 100);
-  return `${score}%`;
-}
-
-function formatEnrichmentStatus(status){
-  const labels = {
-    ready: t().labels.enrichmentReady,
-    pending: t().labels.enrichmentPending,
-    missing: t().labels.enrichmentMissing,
-    failed: t().labels.enrichmentFailed,
-    suggested: t().labels.enrichmentSuggestedStatus
-  };
-  return labels[status] || t().labels.enrichmentSecondary;
-}
-
-function getCurrentItemUniverseGraphSnapshot(item, store){
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const memberships = (store.memberships || []).filter((membership) => membership.itemKey === itemKey && membership.status !== "rejected");
-  const confirmedLinks = (store.links || []).filter((link) => link.sourceKey === itemKey || link.targetKey === itemKey).map((entry) => ({ ...entry, status: "confirmed" }));
-  const candidateLinks = (store.candidates || []).filter((link) => (link.sourceKey === itemKey || link.targetKey === itemKey) && link.status !== "rejected").map((entry) => ({ ...entry, status: entry.status || "suggested" }));
-  return { itemKey, memberships, confirmedLinks, candidateLinks };
-}
-
-function hasStoredRelationsForItem(item, store){
-  const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
-  return Boolean(snapshot.memberships.length || snapshot.confirmedLinks.length || snapshot.candidateLinks.length);
-}
-
-function scheduleBackgroundRelationRefresh(item){
-  if(!item) return;
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  if(wikidataEnrichmentJobs.has(itemKey) || !shouldEnrichItem(item, false)) return;
-  const run = () => enrichItemFromWikidata(item, { force: false }).then(async () => {
-    relationAutomationMemo.delete(itemKey);
-    await requestProductRefresh({ forceFull: false, detailsOnly: currentOpenItemId === item.id });
-  }).catch((error) => {
-    console.error("Deferred relation refresh error:", error);
-  });
-  if(window.requestIdleCallback){
-    window.requestIdleCallback(run, { timeout: 900 });
-  } else {
-    window.setTimeout(run, 120);
-  }
-}
-
-function renderUniverseMembershipCards(memberships = [], universes = []){
-  return memberships.map((membership) => {
-    const universe = universes.find((entry) => entry.id === membership.universeId);
-    if(!universe) return "";
-    return `
-      <article class="relation-card">
-        <div class="relation-card-main">
-          <div class="relation-card-title">${escapeHtml(universe.name)}</div>
-          <div class="relation-card-meta">${escapeHtml(formatRelationType(membership.relationType))} · ${escapeHtml(universe.kind || "universe")}</div>
-          <div class="relation-card-submeta">${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(membership.source || universe.source || "user")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(membership.confidence || universe.confidence || 0.7))}</div>
-        </div>
-        ${isPublicView ? "" : `<div class="relation-card-actions">
-          <button class="button button-ghost" type="button" onclick="detachUniverseMembership('${escapeHtml(membership.universeId)}', this)">${escapeHtml(t().labels.enrichmentDetach)}</button>
-        </div>`}
-      </article>
-    `;
-  }).join("");
-}
-
-function renderRelationCards(relations = [], items = [], itemKey = ""){
-  return relations.map((relation) => {
-    const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
-    const target = items.find((candidate) => getItemStorageKey(candidate, candidate.category) === targetKey);
-    const targetTitle = target?.title || relation.relatedLabel || t().labels.enrichmentExternal;
-    const targetMeta = target ? translateCategory(target.category) : (relation.relatedDescription || t().labels.enrichmentExternal);
-    const actions = isPublicView
-      ? ""
-      : relation.status === "suggested"
-      ? `
-        <button class="button button-secondary" type="button" onclick="confirmRelationCandidate('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentConfirm)}</button>
-        <button class="button button-ghost" type="button" onclick="rejectRelationCandidate('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentReject)}</button>
-      `
-      : `<button class="button button-ghost" type="button" onclick="detachConfirmedRelation('${escapeHtml(relation.id)}', this)">${escapeHtml(t().labels.enrichmentDetach)}</button>`;
-
-    return `
-      <article class="relation-card ${relation.status === "suggested" ? "is-suggested" : ""}">
-        <div class="relation-card-main">
-          <div class="relation-card-title">${escapeHtml(targetTitle)}</div>
-          <div class="relation-card-meta">${escapeHtml(formatRelationType(relation.relationType))} · ${escapeHtml(targetMeta)}</div>
-          <div class="relation-card-submeta">${escapeHtml(t().labels.enrichmentSource)}: ${escapeHtml(relation.source || "wikidata")} · ${escapeHtml(t().labels.enrichmentConfidence)}: ${escapeHtml(formatConfidence(relation.confidence || 0))}</div>
-        </div>
-        <div class="relation-card-actions">${actions}</div>
-      </article>
-    `;
-  }).join("");
-}
-
-function renderGroupedRelationSections(relations = [], items = [], item, itemKey, emptyLabel){
-  if(!relations.length){
-    return `<div class="small">${escapeHtml(emptyLabel)}</div>`;
-  }
-  const grouped = new Map();
-  relations.forEach((relation) => {
-    const targetKey = relation.sourceKey === itemKey ? relation.targetKey : relation.sourceKey;
-    const target = items.find((candidate) => getItemStorageKey(candidate, candidate.category) === targetKey);
-    const layer = relation.layer || getRelationLayerInfo(relation, item, target).key;
-    if(!grouped.has(layer)){
-      grouped.set(layer, {
-        title: getRelationLayerInfo(relation, item, target).title,
-        entries: []
-      });
-    }
-    grouped.get(layer).entries.push(relation);
-  });
-  return Array.from(grouped.values()).map((group) => `
-    <section class="relation-layer-group">
-      <div class="relation-layer-title">${escapeHtml(group.title)}</div>
-      <div class="relation-group">${renderRelationCards(group.entries, items, itemKey)}</div>
-    </section>
-  `).join("");
-}
-
-async function promoteHighConfidenceRelationsForItem(item, store = null){
-  if(!item) return false;
-  const resolvedStore = store || await getUniverseStore();
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  let changed = false;
-
-  (resolvedStore.candidates || []).slice().forEach((entry) => {
-    const touchesItem = entry.sourceKey === itemKey || entry.targetKey === itemKey;
-    if(!touchesItem || Number(entry.confidence || 0) < 0.9) return;
-    resolvedStore.candidates = (resolvedStore.candidates || []).filter((candidate) => candidate.id !== entry.id);
-    upsertGraphLink(resolvedStore, { ...entry, status: "confirmed", confidence: Math.max(0.9, Number(entry.confidence || 0.9)) }, false);
-    changed = true;
-  });
-
-  resolvedStore.memberships = (resolvedStore.memberships || []).map((entry) => {
-    if(entry.itemKey !== itemKey || Number(entry.confidence || 0) < 0.86 || entry.status === "confirmed") return entry;
-    changed = true;
-    return { ...entry, status: "confirmed", confidence: Math.max(0.86, Number(entry.confidence || 0.86)) };
-  });
-
-  if(changed){
-    await setUniverseStore(resolvedStore);
-  }
-  return changed;
-}
-
-async function ensureAutomatedRelationsForItem(item, options = {}){
-  if(!item) return { store: await getUniverseStore(), insight: createEmptySeriesInsight() };
-  await ensureItemEnrichmentHydrated(item);
-  const itemKey = getItemStorageKey(item, item?.category || currentCategory);
-  const memoEntry = relationAutomationMemo.get(itemKey);
-  const memoIsFresh = memoEntry && memoEntry.libraryStateVersion === libraryStateVersion && (Date.now() - memoEntry.timestamp) < 30000;
-
-  if(!options.force && memoIsFresh){
-    const store = await getUniverseStore();
-    if(!hasStoredRelationsForItem(item, store)){
-      scheduleBackgroundRelationRefresh(item);
-    }
-    return { store, insight: buildSeriesInsight(item, store) };
-  }
-
-  await ensureLocalUniverseInferenceForItem(item);
-  let store = await getUniverseStore();
-  if(await promoteHighConfidenceRelationsForItem(item, store)){
-    store = await getUniverseStore();
-  }
-  const insight = buildSeriesInsight(item, store);
-  await persistRelationSummarySnapshot(item, store, insight);
-  relationAutomationMemo.set(itemKey, {
-    timestamp: Date.now(),
-    libraryStateVersion,
-    lastEnrichedAt: buildEnrichmentState(item.enrichment || {}).lastEnrichedAt || ""
-  });
-  if(!hasStoredRelationsForItem(item, store)){
-    scheduleBackgroundRelationRefresh(item);
-  }
-  return { store, insight };
-}
-
-function renderRelationSummaryLoadingState(item){
-  const container = document.getElementById("details-relations-summary");
-  if(!container) return;
-  container.innerHTML = `
-    <article class="relation-summary-card is-loading">
-      <div class="relation-summary-head">
-        <div>
-          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
-          <div class="relation-summary-title">${escapeHtml(item?.title || (currentLanguage === "ru" ? "Связи" : "Relations"))}</div>
-        </div>
-        <span class="meta-chip">${escapeHtml(currentLanguage === "ru" ? "Загрузка" : "Loading")}</span>
-      </div>
-      <div class="relation-summary-note">${escapeHtml(currentLanguage === "ru" ? "Сначала показываем краткую сводку, затем догружаем серию, адаптации и подсказки." : "Showing a lightweight summary first, then loading series, adaptation and suggestion details.")}</div>
-    </article>`;
-}
-
-function renderRelationSummaryCard(item, insight, snapshot, enrichment){
-  const metrics = [
-    insight.totalParts ? [insight.currentIndex ? `${insight.currentIndex}/${insight.totalParts}` : String(insight.totalParts), currentLanguage === "ru" ? "позиция / серия" : "position / series"] : null,
-    [String(insight.libraryCount || 0), currentLanguage === "ru" ? "в библиотеке" : "in library"],
-    [String(insight.missingCount || 0), currentLanguage === "ru" ? "ещё добавить" : "still missing"],
-    [String((snapshot.candidateLinks || []).length), currentLanguage === "ru" ? "ожидают подтверждения" : "pending confirmations"]
-  ].filter(Boolean);
-  const chips = [
-    insight.primaryUniverse?.name,
-    insight.localInference?.crossMedia?.length ? (currentLanguage === "ru" ? `адаптации: ${insight.localInference.crossMedia.length}` : `adaptations: ${insight.localInference.crossMedia.length}`) : "",
-    enrichment.status === "pending" ? (currentLanguage === "ru" ? "связи догружаются" : "relations loading") : "",
-    enrichment.status === "failed" ? (currentLanguage === "ru" ? "fallback активен" : "fallback active") : ""
-  ].filter(Boolean);
-  const noteParts = [];
-  if(insight.nextPart?.label) noteParts.push(currentLanguage === "ru" ? `Следующая часть: ${insight.nextPart.label}` : `Next part: ${insight.nextPart.label}`);
-  if(insight.localInference?.crossMedia?.length) noteParts.push(currentLanguage === "ru" ? `Найдены кросс-медиа связи: ${insight.localInference.crossMedia.length}` : `Cross-media matches found: ${insight.localInference.crossMedia.length}`);
-  if(!noteParts.length) noteParts.push(currentLanguage === "ru" ? "Показываем только ключевые связи, всё остальное спрятано ниже." : "Only essential relation signals are shown here; everything else is tucked below.");
-  return `
-    <article class="relation-summary-card">
-      <div class="relation-summary-top">
-        <div>
-          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
-          <div class="relation-summary-title">${escapeHtml(insight.primaryUniverse?.name || insight.localInference?.primaryLabel || (currentLanguage === "ru" ? "Серия и связи" : "Series & relations"))}</div>
-        </div>
-        <span class="meta-chip">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</span>
-      </div>
-      <div class="relation-summary-metrics">
-        ${metrics.map(([value, label]) => `<div class="relation-summary-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("")}
-      </div>
-      <div class="relation-summary-note">${escapeHtml(noteParts.join(" · "))}</div>
-      ${chips.length ? `<div class="relation-summary-chips">${chips.map((chip) => `<span class="meta-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
-      <div class="relation-summary-actions">
-        <div class="relation-summary-helper">${escapeHtml(currentLanguage === "ru" ? "Основной экран показывает только то, что нужно прямо сейчас." : "The main screen now shows only what matters for the current step.")}</div>
-        <div class="section-heading-actions">
-          ${insight.catalog.length ? `<button class="button button-secondary" type="button" onclick="openSeriesInsightModalByCurrentItem()">${escapeHtml(currentLanguage === "ru" ? "Все части" : "All parts")}</button>` : ""}
-          ${insight.missingCount ? `<button class="button button-primary" type="button" onclick="addMissingSeriesPartsForCurrentItem(this)">${escapeHtml(currentLanguage === "ru" ? "Добавить недостающие" : "Add missing")}</button>` : ""}
-          ${(snapshot.candidateLinks || []).length ? `<button class="button button-secondary" type="button" onclick="confirmAllCurrentItemSuggestions(this)">${escapeHtml(currentLanguage === "ru" ? "Подтвердить подсказки" : "Confirm suggestions")}</button>` : ""}
-        </div>
-      </div>
-    </article>`;
-}
-
-function renderCachedRelationSummaryCard(item, snapshot, enrichment){
-  if(!snapshot) return "";
-  const metrics = [
-    snapshot.totalParts ? [snapshot.currentIndex ? `${snapshot.currentIndex}/${snapshot.totalParts}` : String(snapshot.totalParts), currentLanguage === "ru" ? "позиция / серия" : "position / series"] : null,
-    [String(snapshot.libraryCount || 0), currentLanguage === "ru" ? "в библиотеке" : "in library"],
-    [String(snapshot.missingCount || 0), currentLanguage === "ru" ? "ещё добавить" : "still missing"],
-    [String(snapshot.candidateCount || 0), currentLanguage === "ru" ? "ожидают подтверждения" : "pending confirmations"]
-  ].filter(Boolean);
-  const chips = [
-    snapshot.primaryUniverseName,
-    snapshot.adaptationCount ? (currentLanguage === "ru" ? `адаптации: ${snapshot.adaptationCount}` : `adaptations: ${snapshot.adaptationCount}`) : "",
-    enrichment.status === "pending" ? (currentLanguage === "ru" ? "обновляем связи" : "refreshing relations") : ""
-  ].filter(Boolean);
-  const note = snapshot.nextPartLabel
-    ? (currentLanguage === "ru" ? `Следующая часть: ${snapshot.nextPartLabel}` : `Next part: ${snapshot.nextPartLabel}`)
-    : (currentLanguage === "ru" ? "Показываем сохранённую сводку, пока обновляются подробности." : "Showing the saved summary while the detailed graph refreshes.");
-  return `
-    <article class="relation-summary-card is-cached">
-      <div class="relation-summary-top">
-        <div>
-          <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
-          <div class="relation-summary-title">${escapeHtml(snapshot.primaryUniverseName || item?.title || (currentLanguage === "ru" ? "Серия и связи" : "Series & relations"))}</div>
-        </div>
-        <span class="meta-chip">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</span>
-      </div>
-      <div class="relation-summary-metrics">
-        ${metrics.map(([value, label]) => `<div class="relation-summary-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("")}
-      </div>
-      <div class="relation-summary-note">${escapeHtml(note)}</div>
-      ${chips.length ? `<div class="relation-summary-chips">${chips.map((chip) => `<span class="meta-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
-    </article>`;
-}
-
-function renderRelationSummaryFallback(error){
-  const container = document.getElementById("details-relations-summary");
-  if(!container) return;
-  container.innerHTML = `
-    <article class="relation-summary-card">
-      <div class="relation-summary-eyebrow">${escapeHtml(currentLanguage === "ru" ? "Умные связи" : "Smart relations")}</div>
-      <div class="relation-summary-empty">${escapeHtml(currentLanguage === "ru" ? "Не удалось загрузить полный граф связей, но карточка продолжает работать." : "The full relation graph could not be loaded, but the card still works.")}</div>
-      <div class="relation-summary-note">${escapeHtml(error?.message || "")}</div>
-    </article>`;
-}
-
-async function renderUniverseDetailsForCurrentItem(){
-  const container = document.getElementById("details-universe-list");
-  const meta = document.getElementById("details-enrichment-meta");
-  const summary = document.getElementById("details-relations-summary");
-  const suggested = document.getElementById("details-suggested-relations");
-  const suggestedWrap = document.getElementById("details-suggested-relations-wrap");
-  const browser = document.getElementById("details-relations-browser");
-  const retryButton = document.getElementById("retry-wikidata-btn");
-  const manualLinkButton = document.getElementById("open-universe-modal-btn");
-  if(!container || !meta || !summary || !suggested || !suggestedWrap || !browser) return;
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item){
-    container.innerHTML = "";
-    meta.innerHTML = "";
-    summary.innerHTML = "";
-    suggested.innerHTML = "";
-    return;
-  }
-
-  try {
-    const { store, insight } = await ensureAutomatedRelationsForItem(item);
-    const enrichment = buildEnrichmentState(item.enrichment || {});
-    const items = getAllLibraryItems();
-    const snapshot = getCurrentItemUniverseGraphSnapshot(item, store);
-
-    if(retryButton){
-      retryButton.classList.toggle("hidden", isPublicView);
-      retryButton.disabled = enrichment.status === "pending";
-      retryButton.textContent = enrichment.status === "pending" ? t().labels.enrichmentPending : t().labels.enrichmentRetry;
-    }
-    if(manualLinkButton){
-      manualLinkButton.classList.toggle("hidden", isPublicView);
-    }
-
-    meta.innerHTML = `
-      <article class="enrichment-state-card ${enrichment.status === "ready" ? "is-ready" : enrichment.status === "failed" ? "is-error" : ""}">
-        <div class="enrichment-state-header">
-          <div>
-            <div class="enrichment-state-title">${escapeHtml(enrichment.wikidataLabel || insight.primaryUniverse?.name || enrichment.wikidataEntityId || t().labels.wikidata)}</div>
-            <div class="enrichment-state-meta">${escapeHtml(formatEnrichmentStatus(enrichment.status))}</div>
-          </div>
-          <span class="meta-chip">${escapeHtml(formatConfidence(enrichment.confidence || 0))}</span>
-        </div>
-        <div class="enrichment-state-copy">${escapeHtml(enrichment.wikidataDescription || enrichment.error || (currentLanguage === "ru" ? "Если внешний граф недоступен, продолжаем со связями из локальной библиотеки." : "If the external graph is unavailable, local library inference stays active."))}</div>
-        <div class="enrichment-state-footer">
-          <span>${escapeHtml(t().labels.enrichmentLastUpdated)}: ${escapeHtml(enrichment.lastEnrichedAt ? enrichment.lastEnrichedAt.slice(0, 10) : "—")}</span>
-          ${enrichment.sitelinkUrl ? `<a href="${escapeHtml(enrichment.sitelinkUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t().labels.wikidata)}</a>` : ""}
-        </div>
-      </article>`;
-
-    summary.innerHTML = renderRelationSummaryCard(item, insight, snapshot, enrichment);
-
-    const membershipHtml = renderUniverseMembershipCards(snapshot.memberships, store.universes || []);
-    const relationHtml = renderGroupedRelationSections(snapshot.confirmedLinks, items, item, snapshot.itemKey, t().labels.enrichmentNoRelations);
-    container.innerHTML = membershipHtml || snapshot.confirmedLinks.length
-      ? `${membershipHtml ? `<div class="relation-group">${membershipHtml}</div>` : ""}${relationHtml}`
-      : `<div class="small">${escapeHtml(currentLanguage === "ru" ? "Подтверждённых связей пока нет. Используйте подсказки ниже или дождитесь фонового enrichment." : "No confirmed links yet. Use the suggestions below or wait for background enrichment." )}</div>`;
-
-    suggested.innerHTML = renderGroupedRelationSections(snapshot.candidateLinks, items, item, snapshot.itemKey, t().labels.noResults);
-    suggestedWrap.classList.toggle("hidden", snapshot.candidateLinks.length === 0);
-    browser.open = snapshot.candidateLinks.length > 0 || snapshot.confirmedLinks.length > 0;
-  } catch (error) {
-    console.error("Universe details render error:", error);
-    meta.innerHTML = "";
-    container.innerHTML = `<div class="small">${escapeHtml(currentLanguage === "ru" ? "Связи временно недоступны." : "Relations are temporarily unavailable.")}</div>`;
-    suggested.innerHTML = "";
-    suggestedWrap.classList.add("hidden");
-    renderRelationSummaryFallback(error);
-  }
-}
-
-async function retryCurrentItemWikidataEnrichment(button = null){
-  return await runWithActionButton(button, async () => {
-    const item = getItemById(currentCategory, currentOpenItemId);
-    if(!item) return;
-    await enrichItemFromWikidata(item, { force: true });
-    await renderUniverseDetailsForCurrentItem();
-    await renderUniversesScreen();
-  }, currentLanguage === "ru" ? "Обновляем…" : "Refreshing…");
-}
-
-function renderSeriesInsightModal(item){
-  const modal = document.getElementById("series-insight-modal");
-  const body = document.getElementById("series-insight-body");
-  if(!modal || !body || !item) return;
-  const storePromise = getUniverseStore();
-  storePromise.then((store) => {
-    const insight = buildSeriesInsight(item, store);
-    body.innerHTML = `
-      <div class="series-insight-modal-summary">${renderSeriesInsightCard(item, insight)}</div>
-      ${insight.catalog.length ? `<div class="series-insight-list">${insight.catalog.map((entry, index) => `<article class="series-insight-row ${entry.entityId === buildEnrichmentState(item.enrichment || {}).wikidataEntityId ? "is-current" : ""}"><div><strong>${escapeHtml(entry.label)}</strong><div class="small">${escapeHtml(entry.releaseDate ? entry.releaseDate.slice(0, 10) : "—")}</div></div><span class="meta-chip">${escapeHtml(String(index + 1))}</span></article>`).join("")}</div>` : ""}
-    `;
-    modal.classList.remove("hidden");
-  });
-}
-
-function openSeriesInsightModalByCurrentItem(){
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  renderSeriesInsightModal(item);
-}
-
-function closeSeriesInsightModal(){
-  document.getElementById("series-insight-modal")?.classList.add("hidden");
-}
-
-async function confirmAllCurrentItemSuggestions(button = null){
-  return await runWithActionButton(button, async () => {
-    const store = await getUniverseStore();
-    const item = getItemById(currentCategory, currentOpenItemId);
-    if(!item) return;
-    const itemKey = getItemStorageKey(item);
-    const candidateIds = (store.candidates || []).filter((entry) => entry.sourceKey === itemKey || entry.targetKey === itemKey).map((entry) => entry.id);
-    for(const candidateId of candidateIds){
-      const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
-      if(index < 0) continue;
-      const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
-      store.candidates.splice(index, 1);
-      upsertGraphLink(store, candidate, false);
-    }
-    store.memberships = (store.memberships || []).map((entry) => entry.itemKey === itemKey && entry.status === "suggested" ? { ...entry, status: "confirmed", confidence: Math.max(0.8, Number(entry.confidence || 0.7)) } : entry);
-    await setUniverseStore(store);
-    await renderUniverseDetailsForCurrentItem();
-    await renderUniversesScreen();
-  }, currentLanguage === "ru" ? "Подтверждаем…" : "Confirming…");
-}
-
-async function addMissingSeriesPartsForCurrentItem(limit = 3, button = null){
-  if(limit instanceof HTMLElement){
-    button = limit;
-    limit = 3;
-  }
-  return await runWithActionButton(button, async () => {
-    const item = getItemById(currentCategory, currentOpenItemId);
-    if(!item) return;
-    const store = await getUniverseStore();
-    const insight = buildSeriesInsight(item, store);
-    const candidates = insight.missingEntries.slice(0, limit);
-    if(!candidates.length) return;
-    for(const entry of candidates){
-      try {
-        const results = dedupeSearchResults(await searchByCategory(currentCategory, entry.label, 5));
-        const best = results.find((candidate) => normalizeComparisonText(candidate.title) === normalizeComparisonText(entry.label)) || results[0];
-        if(best){
-          await addSearchResultToLibrary(best, { suppressAssist: true, skipCategorySync: true });
-        }
-      } catch (error) {
-        console.error("Series quick-add error:", error);
-      }
-    }
-    await loadCategoryFromSupabase(currentCategory);
-    await renderUniverseDetailsForCurrentItem();
-    renderSeriesInsightModal(item);
-  }, currentLanguage === "ru" ? "Добавляем…" : "Adding…");
-}
-
-async function confirmRelationCandidate(candidateId, button = null){
-  return await runWithActionButton(button, async () => {
-    const store = await getUniverseStore();
-    const index = (store.candidates || []).findIndex((entry) => entry.id === candidateId);
-    if(index < 0) return;
-    const candidate = { ...store.candidates[index], status: "confirmed", confidence: Math.max(0.8, Number(store.candidates[index].confidence || 0.7)) };
-    store.candidates.splice(index, 1);
-    upsertGraphLink(store, candidate, false);
-    await setUniverseStore(store);
-    await renderUniverseDetailsForCurrentItem();
-    await renderUniversesScreen();
-  }, currentLanguage === "ru" ? "Сохраняем…" : "Saving…");
-}
-
-async function rejectRelationCandidate(candidateId, button = null){
-  return await runWithActionButton(button, async () => {
-    const store = await getUniverseStore();
-    store.candidates = (store.candidates || []).map((entry) => entry.id === candidateId ? { ...entry, status: "rejected" } : entry);
-    await setUniverseStore(store);
-    await renderUniverseDetailsForCurrentItem();
-  }, currentLanguage === "ru" ? "Отклоняем…" : "Rejecting…");
-}
-
-async function detachConfirmedRelation(relationId, button = null){
-  return await runWithActionButton(button, async () => {
-    const store = await getUniverseStore();
-    store.links = (store.links || []).filter((entry) => entry.id !== relationId);
-    await setUniverseStore(store);
-    await renderUniverseDetailsForCurrentItem();
-    await renderUniversesScreen();
-  }, currentLanguage === "ru" ? "Обновляем…" : "Updating…");
-}
-
-async function detachUniverseMembership(universeId, button = null){
-  return await runWithActionButton(button, async () => {
-    const item = getItemById(currentCategory, currentOpenItemId);
-    if(!item) return;
-    const store = await getUniverseStore();
-    const itemKey = getItemStorageKey(item, currentCategory);
-    store.memberships = (store.memberships || []).filter((entry) => !(entry.universeId === universeId && entry.itemKey === itemKey));
-    await setUniverseStore(store);
-    await renderUniverseDetailsForCurrentItem();
-    await renderUniversesScreen();
-  }, currentLanguage === "ru" ? "Обновляем…" : "Updating…");
-}
-
-function getActiveProductView(){
-  if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
-  if(!document.getElementById("category-screen")?.classList.contains("hidden")) return "category";
-  if(!document.getElementById("now-screen")?.classList.contains("hidden")) return "now";
-  if(!document.getElementById("library-screen")?.classList.contains("hidden")) return "library";
-  if(!document.getElementById("stats-screen")?.classList.contains("hidden")) return "stats";
-  if(!document.getElementById("universes-screen")?.classList.contains("hidden")) return "universes";
-  if(!document.getElementById("auth-screen")?.classList.contains("hidden")) return "auth";
-  return "dashboard";
-}
-
-function buildAppRouteState(){
-  return {
-    view: getActiveProductView(),
-    category: currentCategory || "",
-    itemId: currentOpenItemId || "",
-    filterStatus: currentFilterStatus || "All",
-    filterFolder: currentFilterFolder || "All",
-    searchQuery: currentShelfSearchQuery || "",
-    nowSort: currentNowSort || "updated"
-  };
-}
-
-function buildAppRouteHash(state = {}){
-  const params = new URLSearchParams();
-  if(state.filterStatus && state.filterStatus !== "All") params.set("status", state.filterStatus);
-  if(state.filterFolder && state.filterFolder !== "All") params.set("folder", state.filterFolder);
-  if(state.searchQuery) params.set("q", state.searchQuery);
-  if(state.nowSort && state.nowSort !== "updated") params.set("sort", state.nowSort);
-  const query = params.toString();
-  if(state.view === "details" && state.category && state.itemId) return `#details/${encodeURIComponent(state.category)}/${encodeURIComponent(state.itemId)}${query ? `?${query}` : ""}`;
-  if(state.view === "category" && state.category) return `#category/${encodeURIComponent(state.category)}${query ? `?${query}` : ""}`;
-  if(state.view === "library") return `#library${query ? `?${query}` : ""}`;
-  if(state.view === "now") return `#now${query ? `?${query}` : ""}`;
-  if(state.view === "stats") return `#stats${query ? `?${query}` : ""}`;
-  if(state.view === "universes") return `#universes${query ? `?${query}` : ""}`;
-  if(state.view === "auth") return "#auth";
-  return query ? `#dashboard?${query}` : "#dashboard";
-}
-
-function parseAppRouteState(){
-  const rawHash = window.location.hash || "";
-  if(rawHash.startsWith("#details/") || rawHash.startsWith("#category/") || rawHash.startsWith("#library") || rawHash.startsWith("#now") || rawHash.startsWith("#stats") || rawHash.startsWith("#universes") || rawHash.startsWith("#dashboard") || rawHash.startsWith("#auth")){
-    const [pathPart, queryPart = ""] = rawHash.slice(1).split("?");
-    const params = new URLSearchParams(queryPart);
-    const segments = pathPart.split("/").filter(Boolean);
-    const view = segments[0] || "dashboard";
-    return {
-      view,
-      category: segments[1] ? decodeURIComponent(segments[1]) : "",
-      itemId: segments[2] ? decodeURIComponent(segments[2]) : "",
-      filterStatus: params.get("status") || "All",
-      filterFolder: params.get("folder") || "All",
-      searchQuery: params.get("q") || "",
-      nowSort: params.get("sort") || "updated"
-    };
-  }
-  try {
-    return JSON.parse(localStorage.getItem("plamut_app_route_state") || "null");
-  } catch (_error) {
-    return null;
-  }
-}
-
-function persistAppRouteState(){
-  if(isPublicShareRoute() || isPublicView || isRestoringAppRouteState) return;
-  const state = buildAppRouteState();
-  localStorage.setItem("plamut_app_route_state", JSON.stringify(state));
-  const nextHash = buildAppRouteHash(state);
-  if(window.location.hash !== nextHash){
-    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash}`;
-    window.history.replaceState(window.history.state || {}, "", nextUrl);
-  }
-}
-
-async function restoreAppRouteState(){
-  if(hasRestoredAppRouteState || isPublicShareRoute()) return false;
-  const state = parseAppRouteState();
-  hasRestoredAppRouteState = true;
-  if(!state?.view) return false;
-  isRestoringAppRouteState = true;
-  currentFilterStatus = state.filterStatus || "All";
-  currentFilterFolder = state.filterFolder || "All";
-  currentShelfSearchQuery = normalizeSpaces(state.searchQuery || "");
-  currentNowSort = state.nowSort || "updated";
-  try {
-    switch(state.view){
-      case "details":
-        if(state.category){
-          await openCategory(state.category, { preserveSearch: true, skipRoutePersist: true });
-          if(state.itemId){
-            await openCardById(Number(state.itemId));
-            return true;
-          }
-        }
-        break;
-      case "category":
-        if(state.category){
-          await openCategory(state.category, { preserveSearch: true, skipRoutePersist: true });
-          return true;
-        }
-        break;
-      case "library":
-        showLibraryRoot();
-        return true;
-      case "now":
-        showNowScreen();
-        return true;
-      case "stats":
-        showStatsScreen();
-        return true;
-      case "universes":
-        showUniversesScreen();
-        return true;
-      case "auth":
-        showAuthScreen();
-        return true;
-      default:
-        showDashboardScreen();
-        return true;
-    }
-  } finally {
-    isRestoringAppRouteState = false;
-    syncShelfSearchInput();
-    persistAppRouteState();
-  }
-  return false;
-}
-
-function requestProductRefresh(options = {}){
-  productRefreshNeedsFull = productRefreshNeedsFull || Boolean(options.forceFull);
-  if(productRefreshScheduled) return;
-  productRefreshScheduled = true;
-  requestAnimationFrame(async () => {
-    const forceFull = productRefreshNeedsFull;
-    productRefreshScheduled = false;
-    productRefreshNeedsFull = false;
-    const view = getActiveProductView();
-    try {
-      if(forceFull || view === "dashboard"){
-        const homeTasks = [];
-        if(document.getElementById("home-now-grid")) homeTasks.push(renderHomeNowSection());
-        if(document.getElementById("home-stats-grid")) homeTasks.push(renderHomeStatsSection());
-        if(document.getElementById("home-activity-list")) homeTasks.push(renderActivityLists());
-        if(homeTasks.length){
-          await Promise.all(homeTasks);
-        }
-      }
-      if(forceFull || view === "library") {
-        await renderLibraryRootScreen();
-      }
-      if(forceFull || view === "now"){
-        await renderNowScreen();
-      }
-      if(forceFull || view === "stats"){
-        await Promise.all([renderStatsScreen(), renderActivityLists()]);
-      }
-      if(forceFull || view === "universes"){
-        await renderUniversesScreen();
-      }
-      if(forceFull || view === "details" || options.detailsOnly){
-        await Promise.all([renderTrackerSummaryForCurrentItem(), renderUniverseDetailsForCurrentItem()]);
-      }
-    } catch (error) {
-      console.error("Product refresh error:", error);
-    }
-  });
-}
-
-function updateBottomNavState(section){
-  const map = {
-    dashboard: "nav-home-btn",
-    now: "nav-now-btn",
-    library: "nav-library-btn",
-    stats: "nav-stats-btn",
-    universes: "nav-universes-btn"
-  };
-  Object.values(map).forEach((id) => document.getElementById(id)?.classList.remove("is-active"));
-  if(map[section]) document.getElementById(map[section])?.classList.add("is-active");
-}
-
-function hideAllScreens(){
-  ["home-screen", "library-screen", "now-screen", "stats-screen", "universes-screen", "category-screen", "details-screen", "auth-screen", "public-share-screen"].forEach((id) => document.getElementById(id)?.classList.add("hidden"));
-  closeFolderModal();
-}
-
-function showDashboardScreen(){
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("home-screen")?.classList.remove("hidden");
-  updateBottomNavState("dashboard");
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function showNowScreen(){
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("now-screen")?.classList.remove("hidden");
-  updateBottomNavState("now");
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function showStatsScreen(){
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("stats-screen")?.classList.remove("hidden");
-  updateBottomNavState("stats");
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function showUniversesScreen(){
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("universes-screen")?.classList.remove("hidden");
-  updateBottomNavState("universes");
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function showLibraryRoot(){
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("library-screen")?.classList.remove("hidden");
-  updateBottomNavState("library");
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function goHome(){
-  showDashboardScreen();
-}
-
-function openCardFromSection(id, category){
-  currentCategory = category;
-  openCardById(id);
-}
-
-function changeStatusByCategory(id, category){
-  currentCategory = category;
-  changeStatusById(id);
-}
-
-function setNowSort(value){
-  currentNowSort = value || "updated";
-  requestProductRefresh({ forceFull: false });
-  persistAppRouteState();
-}
-
-function openTrackerModalByCurrentItem(){
-  if(!currentOpenItemId) return;
-  openTrackerModalById(currentOpenItemId, currentCategory);
-}
-
-function openTrackerModalById(id, category = currentCategory){
-  currentCategory = category;
-  const item = getItemById(category, id);
-  if(!item) return;
-  const tracker = normalizeTracker(item);
-  currentOpenItemId = id;
-  const statusInput = document.getElementById("tracker-status-input");
-  if(statusInput){
-    statusInput.innerHTML = PRODUCT_TRACKER_STATUSES.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(translateStatus(status))}</option>`).join("");
-    statusInput.value = item.status || tracker.status || "Planned";
-  }
-  setValueIfPresent("tracker-started-input", tracker.started_at || "");
-  setValueIfPresent("tracker-completed-input", tracker.completed_at || "");
-  setValueIfPresent("tracker-rating-input", tracker.rating || "");
-  setValueIfPresent("tracker-progress-current-input", tracker.progress_current || "");
-  setValueIfPresent("tracker-progress-total-input", tracker.progress_total || "");
-  setValueIfPresent("tracker-repeat-input", tracker.revisit_count || 0);
-  const note = document.getElementById("tracker-note-input");
-  if(note) note.value = tracker.note || "";
-  document.getElementById("tracker-modal")?.classList.remove("hidden");
-}
-
-function closeTrackerModal(){
-  document.getElementById("tracker-modal")?.classList.add("hidden");
-}
-
-async function saveTrackerFromModal(){
-  const item = getItemById(currentCategory, currentOpenItemId);
-  if(!item) return;
-  const tracker = normalizeTracker(item);
-  tracker.status = document.getElementById("tracker-status-input")?.value || item.status || tracker.status;
-  tracker.started_at = document.getElementById("tracker-started-input")?.value || "";
-  tracker.completed_at = document.getElementById("tracker-completed-input")?.value || "";
-  tracker.rating = document.getElementById("tracker-rating-input")?.value || "";
-  tracker.progress_current = Number(document.getElementById("tracker-progress-current-input")?.value || 0);
-  tracker.progress_total = Number(document.getElementById("tracker-progress-total-input")?.value || 0);
-  tracker.revisit_count = Number(document.getElementById("tracker-repeat-input")?.value || 0);
-  tracker.note = document.getElementById("tracker-note-input")?.value || "";
-  tracker.last_updated_at = new Date().toISOString();
-  item.tracker = tracker;
-  item.status = tracker.status;
-  await saveTrackerOverrideForItem(item);
-  await recordProductActivity("tracker_updated", item, { status: tracker.status, progress: tracker.progress_current });
-  renderShelf();
-  renderNowScreen();
-  renderStatsScreen();
-  renderHomeNowSection();
-  renderHomeStatsSection();
-  renderActivityLists();
-  await renderTrackerSummaryForCurrentItem();
-  closeTrackerModal();
-}
-
-function buildUniverseOptions(excludeKey = ""){
-  const items = getAllLibraryItems().filter((item) => buildTrackerStorageKey(item, item.category) !== excludeKey);
-  return [`<option value="">—</option>`, ...items.map((item) => `<option value="${escapeHtml(buildTrackerStorageKey(item, item.category))}">${escapeHtml(item.title)} (${escapeHtml(translateCategory(item.category))})</option>`)].join("");
-}
-
-function openUniverseEditor(){
-  currentUniverseContextItemId = currentOpenItemId;
-  const relationInput = document.getElementById("universe-item-relation-input");
-  const relatedItemInput = document.getElementById("universe-related-item-input");
-  const linkTypeInput = document.getElementById("universe-link-type-input");
-  if(relationInput) relationInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatRelationType(type))}</option>`).join("");
-  if(linkTypeInput) linkTypeInput.innerHTML = PRODUCT_RELATION_TYPES.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatRelationType(type))}</option>`).join("");
-  if(relatedItemInput) relatedItemInput.innerHTML = buildUniverseOptions(currentOpenItemId ? buildTrackerStorageKey(getItemById(currentCategory, currentOpenItemId), currentCategory) : "");
-  renderUniverseModalExisting();
-  document.getElementById("universe-modal")?.classList.remove("hidden");
-}
-
-function openUniverseEditorByCurrentItem(){
-  openUniverseEditor();
-}
-
-function closeUniverseModal(){
-  document.getElementById("universe-modal")?.classList.add("hidden");
-}
-
-async function renderUniverseModalExisting(){
-  const container = document.getElementById("universe-modal-existing");
-  if(!container) return;
-  const store = await getUniverseStore();
-  container.innerHTML = (store.universes || []).map((universe) => `<article class="link-chip"><strong>${escapeHtml(universe.name)}</strong><span class="small">${escapeHtml(universe.slug || "")}</span></article>`).join("") || `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-}
-
-async function saveUniverseFromModal(){
-  const store = await getUniverseStore();
-  const name = normalizeSpaces(document.getElementById("universe-name-input")?.value || "");
-  const slug = normalizeSpaces(document.getElementById("universe-slug-input")?.value || buildUniverseSlug(name));
-  const description = normalizeSpaces(document.getElementById("universe-description-input")?.value || "");
-  let universeId = "";
-  if(name){
-    universeId = buildUniverseEntityId(slug || name || Date.now());
-    const exists = (store.universes || []).find((entry) => entry.id === universeId || entry.slug === slug || entry.name === name);
-    if(!exists){
-      store.universes = [{
-        id: universeId,
-        name,
-        slug,
-        description,
-        kind: "universe",
-        source: "user",
-        confidence: 1,
-        status: "confirmed",
-        wikidataEntityId: ""
-      }, ...(store.universes || [])];
-    } else {
-      universeId = exists.id;
-    }
-  }
-  const item = currentUniverseContextItemId ? getItemById(currentCategory, currentUniverseContextItemId) : null;
-  if(item && universeId){
-    const itemKey = buildTrackerStorageKey(item, currentCategory);
-    if(!(store.memberships || []).some((entry) => entry.universeId === universeId && entry.itemKey === itemKey)){
-      store.memberships = [{
-        universeId,
-        itemKey,
-        relationType: normalizeRelationType(document.getElementById("universe-item-relation-input")?.value || "same_universe"),
-        source: "user",
-        confidence: 1,
-        status: "confirmed",
-        createdAt: new Date().toISOString()
-      }, ...(store.memberships || [])];
-    }
-    const relatedKey = document.getElementById("universe-related-item-input")?.value || "";
-    if(relatedKey){
-      upsertGraphLink(store, {
-        sourceKey: itemKey,
-        targetKey: relatedKey,
-        relationType: normalizeRelationType(document.getElementById("universe-link-type-input")?.value || "related_work"),
-        source: "user",
-        confidence: 1,
-        status: "confirmed"
-      }, false);
-    }
-    await recordProductActivity("universe_linked", item, { universeId, relatedKey });
-  }
-  await setUniverseStore(store);
-  renderUniversesScreen();
-  renderUniverseDetailsForCurrentItem();
-  closeUniverseModal();
-}
-
-function refreshProductArchitectureViews(){
-  requestProductRefresh({ forceFull: false });
-}
-
-const productArchitectureApplyTranslations = applyTranslations;
-applyTranslations = function applyTranslationsProductArchitecture(){
-  productArchitectureApplyTranslations();
-  [
-    ["now-section-title", "Сейчас"],
-    ["now-section-note", "Продолжайте с места, где остановились"],
-    ["open-now-screen-btn", "Открыть"],
-    ["stats-section-title", "Статистика"],
-    ["stats-section-note", "Сводка по библиотеке и активности"],
-    ["open-stats-screen-btn", "Открыть"],
-    ["activity-section-title", currentLanguage === "ru" ? "Продолжить" : "Continue"],
-    ["activity-section-note", currentLanguage === "ru" ? "Последние изменения и то, к чему стоит вернуться." : "Recent changes and items worth returning to."],
-    ["now-screen-title", "Сейчас"],
-    ["stats-screen-title", "Статистика"],
-    ["universes-screen-title", "Вселенные"],
-    ["tracker-section-title", "Трекер"],
-    ["tracker-section-note", "Прогресс, рейтинг и заметка"],
-    ["open-tracker-modal-btn", "Обновить"],
-    ["details-universe-title", "Связи и вселенные"],
-    ["details-universe-note", "Франшизы, циклы и связанные работы"],
-    ["retry-wikidata-btn", t().labels.enrichmentRetry],
-    ["open-universe-modal-btn", "Связать вручную"],
-    ["details-suggested-relations-summary", t().labels.enrichmentSuggested],
-    ["details-relation-advanced-summary", "Расширенное редактирование"],
-    ["tracker-modal-title", "Трекер"],
-    ["tracker-status-label", "Статус"],
-    ["tracker-started-label", "Дата начала"],
-    ["tracker-completed-label", "Дата завершения"],
-    ["tracker-rating-label", "Рейтинг"],
-    ["tracker-progress-current-label", "Текущий прогресс"],
-    ["tracker-progress-total-label", "Всего"],
-    ["tracker-repeat-label", "Повтор / пересмотр"],
-    ["tracker-note-label", "Заметка"],
-    ["tracker-cancel-btn", t().buttons.cancel],
-    ["tracker-save-btn", t().buttons.save],
-    ["universe-modal-title", "Связи вселенных"],
-    ["universe-name-label", "Вселенная / франшиза"],
-    ["universe-slug-label", "Slug"],
-    ["universe-description-label", "Описание"],
-    ["universe-item-label", "Привязать текущий объект"],
-    ["universe-related-item-label", "Связать с другим объектом"],
-    ["universe-link-type-label", "Тип связи"],
-    ["universe-cancel-btn", t().buttons.cancel],
-    ["universe-save-btn", t().buttons.save],
-    ["nav-home-btn", "Главная"],
-    ["nav-now-btn", "Сейчас"],
-    ["nav-library-btn", "Библиотека"],
-    ["nav-stats-btn", "Статистика"],
-    ["nav-universes-btn", "Вселенные"],
-    ["add-universe-btn", "+ Вселенная"],
-    ["stats-activity-title", "История активности"],
-    ["stats-activity-note", "Что вы меняли в библиотеке недавно"],
-    ["home-shortcuts-title", currentLanguage === "ru" ? "Быстрые переходы" : "Quick routes"],
-    ["home-shortcuts-note", currentLanguage === "ru" ? "Главная отвечает только на вопрос, что делать сейчас." : "Home only answers what deserves attention right now."],
-    ["home-shortcut-now", currentLanguage === "ru" ? "Сейчас" : "Now"],
-    ["home-shortcut-library", currentLanguage === "ru" ? "Библиотека" : "Library"],
-    ["home-shortcut-universes", currentLanguage === "ru" ? "Связи" : "Relations"],
-    ["home-shortcut-stats", currentLanguage === "ru" ? "Статистика" : "Stats"],
-    ["home-summary-title", currentLanguage === "ru" ? "Краткая сводка" : "Snapshot"],
-    ["home-summary-note", currentLanguage === "ru" ? "Только ключевые цифры по библиотеке." : "Only the key numbers from your library."],
-    ["library-screen-title", currentLanguage === "ru" ? "Библиотека" : "Library"],
-    ["back-library-root-btn", "←"],
-    ["series-insight-modal-title", "Серия и подсказки"],
-    ["series-insight-modal-note", "Система сама нашла серию, связанные части и быстрые действия."],
-    ["series-insight-close-btn", t().buttons.close || "Закрыть"],
-    ["details-more-actions-btn", t().buttons.detailsMoreActions || "Ещё действия"],
-    ["details-relations-browser-summary", currentLanguage === "ru" ? "Подробнее о связях" : "Relation details"]
-  ].forEach(([id, value]) => setTextIfPresent(id, value));
-  rebuildStatusFilterOptions();
-  refreshProductArchitectureViews();
-};
-
-const productArchitectureOpenCardById = openCardById;
-openCardById = async function openCardByIdWithArchitecture(id){
-  await productArchitectureOpenCardById(id);
-  const item = getItemById(currentCategory, id);
-  if(item){
-    renderRelationSummaryLoadingState(item);
-    const cachedSummary = await getCachedRelationSummarySnapshot(item);
-    await ensureItemEnrichmentHydrated(item);
-    const summary = document.getElementById("details-relations-summary");
-    if(summary && cachedSummary){
-      summary.innerHTML = renderCachedRelationSummaryCard(item, cachedSummary, buildEnrichmentState(item.enrichment || {}));
-    }
-    if(shouldEnrichItem(item, false)){
-      enrichItemFromWikidata(item, { force: false }).then(() => {
-        requestProductRefresh({ forceFull: false, detailsOnly: true });
-      }).catch((error) => {
-        console.error("Deferred card enrichment error:", error);
-      });
-    }
-  }
-  await renderTrackerSummaryForCurrentItem();
-  const scheduledRender = window.requestIdleCallback
-    ? () => window.requestIdleCallback(() => renderUniverseDetailsForCurrentItem().catch((error) => console.error("Deferred relation render error:", error)), { timeout: 250 })
-    : () => window.setTimeout(() => renderUniverseDetailsForCurrentItem().catch((error) => console.error("Deferred relation render error:", error)), 16);
-  scheduledRender();
-  persistAppRouteState();
-};
-
-const productArchitectureShowAuthorizedUI = showAuthorizedUI;
-showAuthorizedUI = async function showAuthorizedUIWithArchitecture(){
-  await updateAllProductData();
-  await productArchitectureShowAuthorizedUI();
-  if(!(await restoreAppRouteState())){
-    updateBottomNavState("dashboard");
-    requestProductRefresh({ forceFull: false });
-    persistAppRouteState();
-  }
-};
-
-const productArchitectureLoadCategory = loadCategoryFromSupabase;
-loadCategoryFromSupabase = async function loadCategoryFromSupabaseWithArchitecture(category){
-  const result = await productArchitectureLoadCategory(category);
-  await applyTrackerOverridesToCategory(category);
-  await rebuildStatusFilterOptions();
-  await triggerBackgroundWikidataEnrichment(demoData[category] || [], { limit: 3 });
-  refreshProductArchitectureViews();
-  return result;
-};
-
-const productArchitectureRenderShelf = renderShelf;
-renderShelf = function renderShelfWithArchitecture(){
-  productArchitectureRenderShelf();
-  refreshProductArchitectureViews();
-};
-
-async function init(){
-  applyThemeMode();
-  await updateAllProductData();
-  applyTranslations();
-  updateHeaderCompactState();
-  systemThemeMedia.addEventListener("change", () => {
-    if(currentThemeMode === "system") applyThemeMode();
-  });
-  window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
-  window.addEventListener("resize", () => {
-    if(!isMobileViewport()) closeItemActionsSheet();
-  });
-  document.addEventListener("click", (event) => {
-    const profileMenu = document.getElementById("profile-menu");
-    const profileButton = document.getElementById("profile-btn");
-    if(profileMenu && !profileMenu.classList.contains("hidden") && !profileMenu.contains(event.target) && !profileButton?.contains(event.target)) closeProfileMenu();
-    const shareMenu = document.getElementById("share-library-menu");
-    const shareButton = document.getElementById("share-library-btn");
-    if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
-  });
-  document.addEventListener("keydown", (event) => {
-    if(event.key === "Escape"){
-      closePreferencesPanel();
-      closeShareItemModal();
-      closeFolderModal();
-      closeTrackerModal();
-      closeUniverseModal();
-      toggleHomeAddPanel(false);
-    }
-  });
-  window.addEventListener("error", (event) => showRuntimeError(event?.message || "Unknown script error"));
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event?.reason;
-    showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
-  });
-  if(isPublicShareRoute()){
-    await initPublicSharePage();
-    updatePrimaryActionVisibility();
-    return;
-  }
-  await initApp();
-  updateBottomNavState(getActiveProductView() === "category" || getActiveProductView() === "details" ? "library" : getActiveProductView());
-  requestProductRefresh({ forceFull: false });
   updatePrimaryActionVisibility();
 }
 
