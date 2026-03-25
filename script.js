@@ -5848,14 +5848,7 @@ function handlePrimaryAddAction(){
 function updatePrimaryActionVisibility(){
   const fab = document.getElementById("global-add-fab");
   if(!fab) return;
-  const isAuthorized = Boolean(document.getElementById("header-profile-menu-wrap") && !document.getElementById("header-profile-menu-wrap").classList.contains("hidden"));
-  const homeVisible = !document.getElementById("home-screen")?.classList.contains("hidden");
-  const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
-  const categoryVisible = !document.getElementById("category-screen")?.classList.contains("hidden");
-  const detailsVisible = !document.getElementById("details-screen")?.classList.contains("hidden");
-  const authVisible = !document.getElementById("auth-screen")?.classList.contains("hidden");
-  const canShow = isAuthorized && !isPublicView && !detailsVisible && !authVisible && (homeVisible || libraryVisible || (categoryVisible && currentCategory !== "Blacklist"));
-  fab.classList.toggle("hidden", !canShow);
+  fab.classList.add("hidden");
 }
 
 function setAuthorizedButtons(isAuthorized){
