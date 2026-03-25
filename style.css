@@ -2533,6 +2533,40 @@ body.sheet-open {
   gap: 10px;
 }
 
+.details-relations-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.relations-screen {
+  display: grid;
+  gap: 14px;
+}
+
+.relations-header-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent 12%);
+}
+
+.relations-current-item-title {
+  margin-top: 6px;
+  font-weight: 600;
+}
+
+.relations-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.relations-group-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
 .related-work-card {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
