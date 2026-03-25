@@ -5814,6 +5814,21 @@ function openCurrentPublicCardFromMenu(){
   openCurrentPublicCard();
 }
 
+function closeDetailsMenu(){
+  document.getElementById("details-menu")?.classList.add("hidden");
+}
+
+function toggleDetailsMenu(event){
+  if(event){
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const menu = document.getElementById("details-menu");
+  if(!menu) return;
+  const shouldOpen = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !shouldOpen);
+}
+
 async function copyPublicShareLinkFromMenu(){
   await copyTextValue(getCurrentShareUrl());
   closeShareMenu();
@@ -5847,6 +5862,11 @@ function handlePrimaryAddAction(){
 
 function updatePrimaryActionVisibility(){
   const fab = document.getElementById("global-add-fab");
+  const libraryLaunch = document.querySelector(".home-library-launch-wrap");
+  const homeVisible = !document.getElementById("home-screen")?.classList.contains("hidden");
+  if(libraryLaunch){
+    libraryLaunch.classList.toggle("hidden", !homeVisible);
+  }
   if(!fab) return;
   fab.classList.add("hidden");
 }
@@ -6151,6 +6171,7 @@ async function openCategory(name){
 
 async function openCardById(id){
   closeCardMenu();
+  closeDetailsMenu();
   closePreferencesPanel();
   currentOpenItemId = id;
   const item = getItemById(currentCategory, id);
@@ -6204,8 +6225,10 @@ async function openCardById(id){
 
   const statusBtn = document.getElementById("change-status-details-btn");
   const deleteBtn = document.getElementById("delete-details-btn");
+  const detailsActions = document.getElementById("details-toolbar-actions");
   if(statusBtn) statusBtn.classList.toggle("hidden", isPublicView);
   if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
+  if(detailsActions) detailsActions.classList.toggle("hidden", isPublicView);
 
   deferRelatedItemsRender(item, currentCategory);
   updatePrimaryActionVisibility();
@@ -6911,6 +6934,9 @@ applyTranslations = function applyTranslationsMobileRefine(){
   setTextIfPresent("library-screen-title", t().home.libraryTitle);
   setTextIfPresent("back-library-home-btn", t().buttons.backHome);
   setTextIfPresent("filter-toggle-btn", currentLanguage === "ru" ? "Фильтр" : "Filter");
+  setTextIfPresent("details-menu-folder-btn", t().buttons.addToFolder);
+  setTextIfPresent("details-menu-status-btn", t().buttons.changeStatus);
+  setTextIfPresent("details-menu-delete-btn", t().buttons.delete);
   const librarySearchInput = document.getElementById("library-search-input");
   if(librarySearchInput) librarySearchInput.placeholder = t().modals.searchPlaceholder;
   setTextIfPresent("share-sheet-title", t().topbar.shareLibrary);
@@ -6941,6 +6967,7 @@ refreshAccountCollectionsUI = function refreshAccountCollectionsUIWithFolders(){
 function closePreferencesPanel(){
   closeProfileMenu();
   closeShareMenu();
+  closeDetailsMenu();
   closeShareSheet();
   closeFolderManagerSheet();
   closeItemActionsSheet();
@@ -6974,6 +7001,9 @@ async function init(){
     const shareMenu = document.getElementById("share-library-menu");
     const shareButton = document.getElementById("share-library-btn");
     if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)) closeShareMenu();
+    const detailsMenu = document.getElementById("details-menu");
+    const detailsButton = document.getElementById("details-menu-btn");
+    if(detailsMenu && !detailsMenu.classList.contains("hidden") && !detailsMenu.contains(event.target) && !detailsButton?.contains(event.target)) closeDetailsMenu();
   });
   document.addEventListener("keydown", (event) => {
     if(event.key === "Escape"){
