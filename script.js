@@ -2277,6 +2277,52 @@ async function fetchWikidataRelations(item){
   }
 }
 
+async function fetchTmdbMovieRelations(item){
+  if(item?.category !== "Movies") return [];
+
+  const workKey = String(item?.work_key || "");
+  const match = workKey.match(/^tmdb:movie:(\d+)$/);
+  if(!match) return [];
+
+  const movieId = match[1];
+
+  try {
+    const details = await fetchJson(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${TMDB_API_KEY}&language=${currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
+    const collectionId = details?.belongs_to_collection?.id;
+    if(!collectionId) return [];
+
+    const collection = await fetchJson(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${TMDB_API_KEY}&language=${currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
+    const parts = Array.isArray(collection?.parts) ? collection.parts : [];
+    if(!parts.length) return [];
+
+    const currentId = String(movieId);
+
+    const relations = parts
+      .filter((part) => String(part.id) !== currentId)
+      .sort((a, b) => (a.release_date || "").localeCompare(b.release_date || ""))
+      .map((part) => ({
+        title: part.title || "",
+        category: "Movies",
+        cover: part.poster_path ? `https://image.tmdb.org/t/p/w500${part.poster_path}` : "",
+        description: part.overview || "",
+        description_ru: currentLanguage === "ru" ? (part.overview || "") : "",
+        description_en: currentLanguage === "en" ? (part.overview || "") : "",
+        work_key: `tmdb:movie:${part.id}`,
+        canonical_key: buildCanonicalKey("Movies", "tmdb", `movie:${part.id}`, part.title || ""),
+        year: part.release_date ? Number(String(part.release_date).slice(0, 4)) : null,
+        relation_type: "same_series",
+        source: "tmdb_collection",
+        confidence: 0.95
+      }));
+
+    console.log("RELATIONS BUILD: tmdb external", relations);
+    return relations;
+  } catch (error) {
+    console.error("RELATIONS BUILD: tmdb fetch error", error);
+    return [];
+  }
+}
+
    async function buildRelationsInBackground(item, category, reason = "card_open"){
   const lockKey = `${category}:${item.id}`;
   if(relationBuildLocks.has(lockKey)){
@@ -2294,7 +2340,13 @@ async function fetchWikidataRelations(item){
         wikidata_entity_id: item?.wikidata_entity_id
       });
 
-      const externalRelations = await fetchWikidataRelations(item);
+      let externalRelations = [];
+
+if(category === "Movies"){
+  externalRelations = await fetchTmdbMovieRelations(item);
+} else {
+  externalRelations = await fetchWikidataRelations(item);
+}
 
 let candidates = [];
 if(externalRelations.length){
