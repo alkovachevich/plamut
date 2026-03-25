@@ -2216,42 +2216,21 @@ async function fetchWikidataRelations(item){
     updateDetailsRelationsState("building");
 
     try {
-      console.log("RELATIONS BUILD: start", {
+      console.log("RELATIONS BUILD: NEW VERSION RUNNING", {
         reason,
         title: item?.title,
         category,
-        canonical_key: item?.canonical_key,
-        work_key: item?.work_key,
-        wikidata_entity_id: item?.wikidata_entity_id,
-        year: item?.year,
-        release_year: item?.release_year
+        wikidata_entity_id: item?.wikidata_entity_id
       });
 
-      const externalRelations = await fetchWikidataRelations(item);
-      console.log("RELATIONS BUILD: external", externalRelations);
-
-      let candidates = [];
-
-      if(externalRelations.length){
-        candidates = externalRelations.map((entry) => ({
-          title: entry.wikidata_entity_id,
-          wikidata_entity_id: entry.wikidata_entity_id,
-          relation_type: entry.relation_type,
-          source: entry.source,
-          confidence: entry.confidence,
-          category
-        }));
-      } else {
-        const libraryRelated = await getRelatedItemsForItem(item, category);
-        console.log("RELATIONS BUILD: fallback library", libraryRelated);
-        candidates = libraryRelated;
-      }
+      const libraryRelated = await getRelatedItemsForItem(item, category);
+      console.log("RELATIONS BUILD: fallback library", libraryRelated);
 
       const sourceCanonicalKey = buildEntityCanonicalKey(item, category);
       const sourceWorkKey = item?.work_key || null;
       const sourceId = item?.id || null;
 
-      const normalized = candidates
+      const normalized = libraryRelated
         .filter((entry) => {
           const entryCanonicalKey = buildEntityCanonicalKey(entry, entry.category || category);
           const sameCanonical = entryCanonicalKey && sourceCanonicalKey && entryCanonicalKey === sourceCanonicalKey;
