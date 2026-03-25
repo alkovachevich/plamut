@@ -100,11 +100,8 @@
           <div class="hero-badge" id="hero-badge">Your personal universe</div>
           <h1 class="home-title">Plamut</h1>
           <div class="subtitle" id="home-subtitle"></div>
-        </div>
-
-        <div class="home-actions">
-          <button id="home-open-library-btn" class="button button-secondary" type="button" onclick="openLibraryScreen()">Библиотека</button>
-          <div class="header-panel-wrap share-menu-wrap">
+          <button id="home-open-library-btn" class="button button-primary home-library-btn" type="button" onclick="openLibraryScreen()">Библиотека</button>
+          <div class="header-panel-wrap share-menu-wrap home-share-wrap">
             <button id="share-library-btn" class="button button-secondary share-library-btn" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
               <button class="button button-secondary header-popover-button" type="button" onclick="copyPublicShareLinkFromMenu()" id="share-library-copy-action">Copy link</button>
@@ -115,6 +112,9 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="home-actions">
           <button id="home-add-btn" class="button button-primary" type="button" onclick="toggleHomeAddPanel()">Добавить</button>
         </div>
       </section>
