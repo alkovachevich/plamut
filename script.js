@@ -2225,25 +2225,40 @@
   const emptyEl = document.getElementById("relations-empty");
   if(!groupsEl || !loadingEl || !emptyEl) return;
 
+  console.log("RELATIONS: screen open", {
+    item,
+    category,
+    canonical_key: item?.canonical_key,
+    work_key: item?.work_key,
+    release_year: item?.release_year,
+    year: item?.year
+  });
+
   groupsEl.innerHTML = "";
   emptyEl.classList.add("hidden");
   loadingEl.classList.remove("hidden");
 
   let payload = await loadRelationsFromDb(item, category);
+  console.log("RELATIONS: first DB load", payload);
 
   if(!payload.relations.length && payload.status !== "building"){
+    console.log("RELATIONS: starting background build");
     await buildRelationsInBackground(item, category, "relations_screen_open");
     payload = await loadRelationsFromDb(item, category);
+    console.log("RELATIONS: second DB load after build", payload);
   }
 
   loadingEl.classList.add("hidden");
 
   if(!payload.relations.length){
+    console.log("RELATIONS: still empty after build");
     emptyEl.classList.remove("hidden");
     return;
   }
 
   const grouped = groupRelationsByType(payload.relations);
+  console.log("RELATIONS: grouped relations", grouped);
+
   grouped.forEach((relations, type) => {
     const section = document.createElement("section");
     section.className = "section";
