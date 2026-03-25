@@ -1979,84 +1979,108 @@
     }
 
     async function persistRelationsToDb(item, category, relatedItems = [], status = "ready"){
-      const canonicalKey = buildEntityCanonicalKey(item, category);
-      const baseEntityPayload = {
-        canonical_key: canonicalKey,
-        category,
-        title_primary: item.title || "",
-        title_ru: currentLanguage === "ru" ? (item.title || "") : "",
-        title_en: currentLanguage === "en" ? (item.title || "") : "",
-        year: item.year || null,
-        cover_url: item.cover || "",
-        relations_status: status,
-        relations_built_at: new Date().toISOString()
-      };
+  const canonicalKey = buildEntityCanonicalKey(item, category);
 
-      const { data: fromEntity, error: fromError } = await supabaseClient
-        .from("media_entities")
-        .upsert(baseEntityPayload, { onConflict: "canonical_key" })
-        .select("id, canonical_key")
-        .single();
+  const baseEntityPayload = {
+    canonical_key: canonicalKey,
+    category,
+    title_primary: item.title || "",
+    title_ru: currentLanguage === "ru" ? (item.title || "") : "",
+    title_en: currentLanguage === "en" ? (item.title || "") : "",
+    year: getItemYear(item),
+    cover_url: item.cover || "",
+    relations_status: status,
+    relations_built_at: new Date().toISOString()
+  };
 
-      if(fromError || !fromEntity?.id){
-        return false;
-      }
+  const { data: fromEntity, error: fromError } = await supabaseClient
+    .from("media_entities")
+    .upsert(baseEntityPayload, { onConflict: "canonical_key" })
+    .select("id, canonical_key")
+    .single();
 
-      await supabaseClient.from("media_relations").delete().eq("from_entity_id", fromEntity.id);
+  if(fromError || !fromEntity?.id){
+    console.error("persistRelationsToDb: fromEntity error", fromError, baseEntityPayload);
+    return false;
+  }
 
-      const relationRows = [];
-      const seen = new Set();
-      for(let index = 0; index < relatedItems.length; index += 1){
-        const relatedItem = relatedItems[index];
-        const relatedCanonicalKey = buildEntityCanonicalKey(relatedItem, relatedItem.category || category);
-        const sourceExternalId = `${relatedItem.source || "library"}:${relatedItem.work_key || relatedCanonicalKey}`;
-        const fallbackTitleKey = `${normalizeRelationKey(relatedItem.title)}:${relatedItem.year || ""}:${relatedItem.category || ""}`;
-        const dedupeKey = relatedCanonicalKey || sourceExternalId || fallbackTitleKey;
-        if(!dedupeKey || seen.has(dedupeKey) || relatedCanonicalKey === canonicalKey){
-          continue;
-        }
-        seen.add(dedupeKey);
+  await supabaseClient
+    .from("media_relations")
+    .delete()
+    .eq("from_entity_id", fromEntity.id);
 
-        const { data: toEntity } = await supabaseClient
-          .from("media_entities")
-          .upsert({
-            canonical_key: relatedCanonicalKey,
-            category: relatedItem.category || category,
-            title_primary: relatedItem.title || "",
-            title_ru: currentLanguage === "ru" ? (relatedItem.title || "") : "",
-            title_en: currentLanguage === "en" ? (relatedItem.title || "") : "",
-            year: relatedItem.year || null,
-            cover_url: relatedItem.cover || "",
-            relations_status: "not_built"
-          }, { onConflict: "canonical_key" })
-          .select("id")
-          .single();
+  const relationRows = [];
+  const seen = new Set();
 
-        if(!toEntity?.id || toEntity.id === fromEntity.id){
-          continue;
-        }
+  for(let index = 0; index < relatedItems.length; index += 1){
+    const relatedItem = relatedItems[index];
+    const relatedCategory = relatedItem.category || category;
+    const relatedCanonicalKey = buildEntityCanonicalKey(relatedItem, relatedCategory);
+    const sourceExternalId = `${relatedItem.source || "library"}:${relatedItem.work_key || relatedCanonicalKey}`;
+    const fallbackTitleKey = `${normalizeRelationKey(relatedItem.title || "")}:${getItemYear(relatedItem) || ""}:${relatedCategory || ""}`;
+    const dedupeKey = relatedCanonicalKey || sourceExternalId || fallbackTitleKey;
 
-        relationRows.push({
-          from_entity_id: fromEntity.id,
-          to_entity_id: toEntity.id,
-          relation_type: relatedItem.relation_type || "related_work",
-          source: relatedItem.source || "library",
-          confidence: relatedItem.confidence || 0.7,
-          sort_order: index,
-          metadata_json: {
-            source_external_id: sourceExternalId,
-            fallback_title_key: fallbackTitleKey
-          }
-        });
-      }
-
-      if(relationRows.length){
-        await supabaseClient.from("media_relations").upsert(relationRows, {
-          onConflict: "from_entity_id,to_entity_id,relation_type"
-        });
-      }
-      return true;
+    if(!dedupeKey || seen.has(dedupeKey) || relatedCanonicalKey === canonicalKey){
+      continue;
     }
+
+    seen.add(dedupeKey);
+
+    const relatedEntityPayload = {
+      canonical_key: relatedCanonicalKey,
+      category: relatedCategory,
+      title_primary: relatedItem.title || "",
+      title_ru: currentLanguage === "ru" ? (relatedItem.title || "") : "",
+      title_en: currentLanguage === "en" ? (relatedItem.title || "") : "",
+      year: getItemYear(relatedItem),
+      cover_url: relatedItem.cover || "",
+      relations_status: "not_built"
+    };
+
+    const { data: toEntity, error: toError } = await supabaseClient
+      .from("media_entities")
+      .upsert(relatedEntityPayload, { onConflict: "canonical_key" })
+      .select("id")
+      .single();
+
+    if(toError){
+      console.error("persistRelationsToDb: toEntity error", toError, relatedEntityPayload);
+      continue;
+    }
+
+    if(!toEntity?.id || toEntity.id === fromEntity.id){
+      continue;
+    }
+
+    relationRows.push({
+      from_entity_id: fromEntity.id,
+      to_entity_id: toEntity.id,
+      relation_type: relatedItem.relation_type || "related_work",
+      source: relatedItem.source || "library",
+      confidence: relatedItem.confidence || 0.7,
+      sort_order: index,
+      metadata_json: {
+        source_external_id: sourceExternalId,
+        fallback_title_key: fallbackTitleKey
+      }
+    });
+  }
+
+  if(relationRows.length){
+    const { error: relationError } = await supabaseClient
+      .from("media_relations")
+      .upsert(relationRows, {
+        onConflict: "from_entity_id,to_entity_id,relation_type"
+      });
+
+    if(relationError){
+      console.error("persistRelationsToDb: relationRows error", relationError, relationRows);
+      return false;
+    }
+  }
+
+  return true;
+}
 
     async function buildRelationsInBackground(item, category, reason = "card_open"){
       const lockKey = `${category}:${item.id}`;
