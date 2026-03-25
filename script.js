@@ -2082,6 +2082,70 @@
   return true;
 }
 
+async function fetchWikidataRelations(item){
+  const wikidataId = item?.wikidata_entity_id;
+  if(!wikidataId) return [];
+
+  try {
+    const url = `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    const entity = json?.entities?.[wikidataId];
+    if(!entity?.claims) return [];
+
+    const relations = [];
+
+    // P155 → follows (продолжение)
+    const sequel = entity.claims.P155 || [];
+    sequel.forEach(c => {
+      const id = c?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          wikidata_entity_id: id,
+          relation_type: "sequel",
+          source: "wikidata",
+          confidence: 0.9
+        });
+      }
+    });
+
+    // P156 → followed by (приквел)
+    const prequel = entity.claims.P156 || [];
+    prequel.forEach(c => {
+      const id = c?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          wikidata_entity_id: id,
+          relation_type: "prequel",
+          source: "wikidata",
+          confidence: 0.9
+        });
+      }
+    });
+
+    // P144 → based on (адаптация)
+    const basedOn = entity.claims.P144 || [];
+    basedOn.forEach(c => {
+      const id = c?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          wikidata_entity_id: id,
+          relation_type: "adaptation_of",
+          source: "wikidata",
+          confidence: 0.85
+        });
+      }
+    });
+
+    return relations;
+
+  } catch (e){
+    console.error("Wikidata fetch error", e);
+    return [];
+  }
+}
+
    async function buildRelationsInBackground(item, category, reason = "card_open"){
   const lockKey = `${category}:${item.id}`;
   if(relationBuildLocks.has(lockKey)){
@@ -2092,59 +2156,49 @@
     updateDetailsRelationsState("building");
 
     try {
-      console.log("RELATIONS BUILD: start", {
-        reason,
-        title: item?.title,
-        category,
-        canonical_key: item?.canonical_key,
-        work_key: item?.work_key,
-        year: item?.year,
-        release_year: item?.release_year
-      });
+      console.log("RELATIONS BUILD: start", item.title);
 
-      const libraryRelated = await getRelatedItemsForItem(item, category);
-      console.log("RELATIONS BUILD: libraryRelated", libraryRelated);
+      // 🔥 1. Пытаемся получить внешние связи
+      const externalRelations = await fetchWikidataRelations(item);
+      console.log("RELATIONS BUILD: external", externalRelations);
 
-      let fallbackCandidates = libraryRelated;
+      let candidates = [];
 
-      if(!fallbackCandidates.length){
-        const apiResults = await searchByCategory(category, item.title || "", 3);
-        console.log("RELATIONS BUILD: apiResults raw", apiResults);
-
-        fallbackCandidates = apiResults.map((entry) => ({
-          ...entry,
-          relation_type: "related_work",
-          source: "api_fallback",
-          confidence: 0.35
+      if(externalRelations.length){
+        // преобразуем в формат системы
+        candidates = externalRelations.map(r => ({
+          title: r.wikidata_entity_id,
+          wikidata_entity_id: r.wikidata_entity_id,
+          relation_type: r.relation_type,
+          source: r.source,
+          confidence: r.confidence
         }));
+      } else {
+        // 🔁 fallback — старая логика
+        const libraryRelated = await getRelatedItemsForItem(item, category);
+        console.log("RELATIONS BUILD: fallback library", libraryRelated);
+        candidates = libraryRelated;
       }
 
-      console.log("RELATIONS BUILD: fallbackCandidates", fallbackCandidates);
-
+      // фильтрация "самого себя"
       const sourceCanonicalKey = buildEntityCanonicalKey(item, category);
-      const sourceWorkKey = item?.work_key || null;
-      const sourceId = item?.id || null;
 
-      const normalized = fallbackCandidates
-        .filter((entry) => {
-          const entryCanonicalKey = buildEntityCanonicalKey(entry, entry.category || category);
-          const sameCanonical = entryCanonicalKey && sourceCanonicalKey && entryCanonicalKey === sourceCanonicalKey;
-          const sameWorkKey = entry?.work_key && sourceWorkKey && entry.work_key === sourceWorkKey;
-          const sameId = entry?.id && sourceId && entry.id === sourceId;
-
-          return !sameCanonical && !sameWorkKey && !sameId;
+      const normalized = candidates
+        .filter(entry => {
+          const key = buildEntityCanonicalKey(entry, entry.category || category);
+          return key !== sourceCanonicalKey;
         })
-        .slice(0, 12)
-        .map((entry) => ({ ...entry, relation_type: entry.relation_type || "related_work" }));
+        .slice(0, 12);
 
       console.log("RELATIONS BUILD: normalized", normalized);
 
       const saved = await persistRelationsToDb(item, category, normalized, "ready");
-      console.log("RELATIONS BUILD: persist result", saved);
+      console.log("RELATIONS BUILD: saved", saved);
 
       updateDetailsRelationsState(saved ? "ready" : "error");
+
     } catch (error) {
-      console.error(`Relation build error (${reason}):`, error);
+      console.error("Relation build error:", error);
       updateDetailsRelationsState("error");
       await persistRelationsToDb(item, category, [], "error");
     } finally {
