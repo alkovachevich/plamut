@@ -2082,42 +2082,68 @@
   return true;
 }
 
-    async function buildRelationsInBackground(item, category, reason = "card_open"){
-      const lockKey = `${category}:${item.id}`;
-      if(relationBuildLocks.has(lockKey)){
-        return relationBuildLocks.get(lockKey);
+   async function buildRelationsInBackground(item, category, reason = "card_open"){
+  const lockKey = `${category}:${item.id}`;
+  if(relationBuildLocks.has(lockKey)){
+    return relationBuildLocks.get(lockKey);
+  }
+
+  const task = (async () => {
+    updateDetailsRelationsState("building");
+
+    try {
+      console.log("RELATIONS BUILD: start", {
+        reason,
+        title: item?.title,
+        category,
+        canonical_key: item?.canonical_key,
+        work_key: item?.work_key,
+        year: item?.year,
+        release_year: item?.release_year
+      });
+
+      const libraryRelated = await getRelatedItemsForItem(item, category);
+      console.log("RELATIONS BUILD: libraryRelated", libraryRelated);
+
+      let fallbackCandidates = libraryRelated;
+
+      if(!fallbackCandidates.length){
+        const apiResults = await searchByCategory(category, item.title || "", 3);
+        console.log("RELATIONS BUILD: apiResults raw", apiResults);
+
+        fallbackCandidates = apiResults.map((entry) => ({
+          ...entry,
+          relation_type: "related_work",
+          source: "api_fallback",
+          confidence: 0.35
+        }));
       }
 
-      const task = (async () => {
-        updateDetailsRelationsState("building");
-        try {
-          const libraryRelated = await getRelatedItemsForItem(item, category);
-          const fallbackCandidates = libraryRelated.length
-            ? libraryRelated
-            : (await searchByCategory(category, item.title || "", 3)).map((entry) => ({
-              ...entry,
-              relation_type: "related_work",
-              source: "api_fallback",
-              confidence: 0.35
-            }));
-          const normalized = fallbackCandidates
-            .filter((entry) => normalizeRelationKey(entry.title) !== normalizeRelationKey(item.title))
-            .slice(0, 12)
-            .map((entry) => ({ ...entry, relation_type: entry.relation_type || "related_work" }));
-          const saved = await persistRelationsToDb(item, category, normalized, "ready");
-          updateDetailsRelationsState(saved ? "ready" : "error");
-        } catch (error) {
-          console.error(`Relation build error (${reason}):`, error);
-          updateDetailsRelationsState("error");
-          await persistRelationsToDb(item, category, [], "error");
-        } finally {
-          relationBuildLocks.delete(lockKey);
-        }
-      })();
+      console.log("RELATIONS BUILD: fallbackCandidates", fallbackCandidates);
 
-      relationBuildLocks.set(lockKey, task);
-      return task;
+      const normalized = fallbackCandidates
+        .filter((entry) => normalizeRelationKey(entry.title) !== normalizeRelationKey(item.title))
+        .slice(0, 12)
+        .map((entry) => ({ ...entry, relation_type: entry.relation_type || "related_work" }));
+
+      console.log("RELATIONS BUILD: normalized", normalized);
+
+      const saved = await persistRelationsToDb(item, category, normalized, "ready");
+      console.log("RELATIONS BUILD: persist result", saved);
+
+      updateDetailsRelationsState(saved ? "ready" : "error");
+    } catch (error) {
+      console.error(`Relation build error (${reason}):`, error);
+      updateDetailsRelationsState("error");
+      await persistRelationsToDb(item, category, [], "error");
+    } finally {
+      relationBuildLocks.delete(lockKey);
     }
+  })();
+
+  relationBuildLocks.set(lockKey, task);
+  return task;
+}
 
     async function openRelatedItemFromDetails(id, category){
       if(!id || !category) return;
