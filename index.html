@@ -100,7 +100,6 @@
           <div class="hero-badge" id="hero-badge">Your personal universe</div>
           <h1 class="home-title">Plamut</h1>
           <div class="subtitle" id="home-subtitle"></div>
-          <button id="home-open-library-btn" class="button button-primary home-library-btn" type="button" onclick="openLibraryScreen()">Библиотека</button>
           <div class="header-panel-wrap share-menu-wrap home-share-wrap">
             <button id="share-library-btn" class="button button-secondary share-library-btn" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
@@ -150,6 +149,9 @@
           <div class="card category-card" onclick="openCategory('Blacklist')" id="cat-blacklist"></div>
         </div>
       </section>
+    </div>
+    <div class="home-library-launch-wrap">
+      <button id="home-open-library-btn" class="button button-primary home-library-btn" type="button" onclick="openLibraryScreen()">Библиотека</button>
     </div>
 
     <div id="library-screen" class="hidden screen-panel">
@@ -215,6 +217,16 @@
         <div class="toolbar-primary">
           <button class="button button-ghost" onclick="backToCategory()" id="back-shelf-btn"></button>
         </div>
+        <div class="toolbar-actions" id="details-toolbar-actions">
+          <div class="details-menu-wrap">
+            <button class="button button-secondary details-menu-btn" type="button" onclick="toggleDetailsMenu(event)" id="details-menu-btn">⋯</button>
+            <div id="details-menu" class="header-popover hidden" role="menu">
+              <button id="details-menu-folder-btn" class="button button-secondary header-popover-button" type="button" onclick="openFolderModalByCurrentItem()">Add to folder</button>
+              <button id="details-menu-status-btn" class="button button-secondary header-popover-button" type="button" onclick="changeStatusFromDetails()">Change status</button>
+              <button id="details-menu-delete-btn" class="button button-danger header-popover-button" type="button" onclick="deleteCurrentItem()">Delete</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="details-layout">
@@ -248,7 +260,7 @@
           <div class="section" id="details-folder-section">
             <h3 id="details-folder-title">Folder</h3>
             <div class="folder-assignment-row">
-              <button class="button button-secondary" type="button" onclick="openFolderModalByCurrentItem()" id="open-folder-modal-btn">Add to folder</button>
+              <button class="button button-secondary hidden" type="button" onclick="openFolderModalByCurrentItem()" id="open-folder-modal-btn">Add to folder</button>
               <div class="small" id="details-folder-current">No folder</div>
             </div>
           </div>
@@ -259,7 +271,7 @@
             <button class="button button-secondary" onclick="saveCanonicalKey()">Save</button>
           </div>
 
-          <div class="section details-actions">
+          <div class="section details-actions hidden">
             <button class="button button-primary" onclick="changeStatusFromDetails()" id="change-status-details-btn"></button>
             <button class="button button-danger" onclick="deleteCurrentItem()" id="delete-details-btn"></button>
           </div>
