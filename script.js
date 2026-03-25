@@ -1,4 +1,10 @@
-   
+   import {
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  GOOGLE_BOOKS_API_KEY,
+  TMDB_API_KEY,
+  supabaseClient
+} from "./js/config.js";
 
     const translations = {
       en: {
