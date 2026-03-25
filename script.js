@@ -1230,6 +1230,7 @@
 
     function hideAllScreens(){
       document.getElementById("home-screen").classList.add("hidden");
+      document.getElementById("library-screen")?.classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
       document.getElementById("details-screen").classList.add("hidden");
       document.getElementById("auth-screen").classList.add("hidden");
@@ -5835,6 +5836,10 @@ function handlePrimaryAddAction(){
     toggleHomeAddPanel();
     return;
   }
+  if(document.getElementById("library-screen") && !document.getElementById("library-screen").classList.contains("hidden")){
+    openAddModal();
+    return;
+  }
   if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !isPublicView && currentCategory !== "Blacklist"){
     openAddModal();
   }
@@ -5845,10 +5850,11 @@ function updatePrimaryActionVisibility(){
   if(!fab) return;
   const isAuthorized = Boolean(document.getElementById("header-profile-menu-wrap") && !document.getElementById("header-profile-menu-wrap").classList.contains("hidden"));
   const homeVisible = !document.getElementById("home-screen")?.classList.contains("hidden");
+  const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
   const categoryVisible = !document.getElementById("category-screen")?.classList.contains("hidden");
   const detailsVisible = !document.getElementById("details-screen")?.classList.contains("hidden");
   const authVisible = !document.getElementById("auth-screen")?.classList.contains("hidden");
-  const canShow = isAuthorized && !isPublicView && !detailsVisible && !authVisible && (homeVisible || (categoryVisible && currentCategory !== "Blacklist"));
+  const canShow = isAuthorized && !isPublicView && !detailsVisible && !authVisible && (homeVisible || libraryVisible || (categoryVisible && currentCategory !== "Blacklist"));
   fab.classList.toggle("hidden", !canShow);
 }
 
@@ -6061,7 +6067,57 @@ function goHome(){
   isPublicView = false;
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
+  toggleCategoryFilters(false);
   updatePrimaryActionVisibility();
+}
+
+async function openLibraryScreen(){
+  closePreferencesPanel();
+  toggleHomeAddPanel(false);
+  isPublicView = false;
+  hideAllScreens();
+  document.getElementById("library-screen")?.classList.remove("hidden");
+  await renderLibraryCategories();
+  updatePrimaryActionVisibility();
+}
+
+async function ensureLibraryDataLoaded(){
+  const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  for(const category of categories){
+    if(!(demoData[category] || []).length){
+      await loadCategoryFromSupabase(category);
+    }
+  }
+}
+
+async function renderLibraryCategories(){
+  const grid = document.getElementById("library-categories-grid");
+  if(!grid) return;
+  await ensureLibraryDataLoaded();
+  const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
+  const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  grid.innerHTML = "";
+
+  categories.forEach((category) => {
+    const items = demoData[category] || [];
+    const count = query
+      ? items.filter((item) => normalizeComparisonText(item.title || "").includes(query)).length
+      : items.length;
+    if(query && count === 0) return;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card category-card library-category-card";
+    card.onclick = () => openCategory(category);
+    card.innerHTML = `<span>${escapeHtml(translateCategory(category))}</span><span class="small">${count}</span>`;
+    grid.appendChild(card);
+  });
+}
+
+function toggleCategoryFilters(force){
+  const panel = document.getElementById("filter-toolbar");
+  if(!panel || currentCategory === "Blacklist") return;
+  const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !shouldOpen);
 }
 
 function backToCategory(){
@@ -6081,6 +6137,8 @@ async function openCategory(name){
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   document.getElementById("category-title").textContent = translateCategory(name);
+  document.getElementById("back-home-btn").onclick = openLibraryScreen;
+  toggleCategoryFilters(false);
 
   const addFolderBtn = document.getElementById("add-folder-btn");
   if(addFolderBtn){
@@ -6807,6 +6865,7 @@ function renderShelf(){
   }
 
   const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
+  const isUserCreatedItem = (item) => String(item?.canonical_key || "").includes("-manual-");
   const createCard = (item) => {
     const coverHtml = item.cover
       ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
@@ -6815,7 +6874,8 @@ function renderShelf(){
     const chips = [
       buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
       buildChip(translateCategory(currentCategory), "is-category"),
-      buildChip(item.folder || "", "is-folder")
+      buildChip(item.folder || "", "is-folder"),
+      isUserCreatedItem(item) ? buildChip(currentLanguage === "ru" ? "Пользовательское" : "Custom", "is-custom") : ""
     ].join("");
     const menuHtml = isPublicView ? "" : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
       <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
@@ -6844,49 +6904,22 @@ function renderShelf(){
     return card;
   };
 
-  const folders = [];
-  const ungroupedItems = [];
-  const grouped = new Map();
-  items.forEach((item) => {
-    const folder = getItemFolder(item);
-    if(!folder){
-      ungroupedItems.push(item);
-      return;
-    }
-    if(!grouped.has(folder)){
-      grouped.set(folder, []);
-      folders.push(folder);
-    }
-    grouped.get(folder).push(item);
-  });
-
-  const showUngroupedBlock = currentFilterFolder === "All" || currentFilterFolder === "__ungrouped__";
-  if(ungroupedItems.length && showUngroupedBlock){
-    const defaultSection = document.createElement("section");
-    defaultSection.className = "folder-block";
-    defaultSection.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(t().labels.ungroupedItems)}</span><span class="small">${ungroupedItems.length}</span></h3>`;
-    const defaultGrid = document.createElement("div");
-    defaultGrid.className = "shelf";
-    ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
-    defaultSection.appendChild(defaultGrid);
-    shelf.appendChild(defaultSection);
-  }
-
-  folders.forEach((folder) => {
-    const section = document.createElement("section");
-    section.className = "folder-block";
-    section.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(folder)}</span><span class="small">${grouped.get(folder).length}</span></h3>`;
-    const folderGrid = document.createElement("div");
-    folderGrid.className = "shelf";
-    grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
-    section.appendChild(folderGrid);
-    shelf.appendChild(section);
-  });
+  const sortedItems = [...items].sort((a, b) => (b.id || 0) - (a.id || 0));
+  const grid = document.createElement("div");
+  grid.className = "shelf";
+  sortedItems.forEach((item) => grid.appendChild(createCard(item)));
+  shelf.appendChild(grid);
 }
 
 const mobileRefineApplyTranslations = applyTranslations;
 applyTranslations = function applyTranslationsMobileRefine(){
   mobileRefineApplyTranslations();
+  setTextIfPresent("home-open-library-btn", currentLanguage === "ru" ? "Библиотека" : "Library");
+  setTextIfPresent("library-screen-title", t().home.libraryTitle);
+  setTextIfPresent("back-library-home-btn", t().buttons.backHome);
+  setTextIfPresent("filter-toggle-btn", currentLanguage === "ru" ? "Фильтр" : "Filter");
+  const librarySearchInput = document.getElementById("library-search-input");
+  if(librarySearchInput) librarySearchInput.placeholder = t().modals.searchPlaceholder;
   setTextIfPresent("share-sheet-title", t().topbar.shareLibrary);
   setTextIfPresent("share-sheet-subtitle", t().share.libraryHint);
   setTextIfPresent("share-sheet-copy-btn", t().share.copyLink);
@@ -6900,6 +6933,7 @@ applyTranslations = function applyTranslationsMobileRefine(){
   setTextIfPresent("folder-manager-create-btn", t().profile.createFolder);
   setTextIfPresent("folder-manager-cancel-btn", t().buttons.cancel);
   setTextIfPresent("item-actions-cancel-btn", t().buttons.cancel);
+  renderLibraryCategories();
   renderFolderRail();
   renderFolderManagerList();
 };
