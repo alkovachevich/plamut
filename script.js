@@ -533,6 +533,10 @@
     let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
     let currentSavedLibraryState = { saved: false, source: "none" };
     const relationCache = new Map();
+    const categorySearchCache = new Map();
+    const categorySearchInFlight = new Map();
+    const bookDescriptionCache = new Map();
+    let activeCategorySearchToken = 0;
     let relatedLibraryItemsCache = { userId: "", items: [], loaded: false, promise: null };
 
     const demoData = {
@@ -570,6 +574,11 @@
     function clearRelationCache(){
       relationCache.clear();
       invalidateRelatedLibraryItemsCache(relatedLibraryItemsCache.userId);
+    }
+
+    function clearSearchCaches(){
+      categorySearchCache.clear();
+      categorySearchInFlight.clear();
     }
 
     function getRelationCacheKey(item, category = currentCategory){
@@ -716,6 +725,18 @@
         hasCyrillic: hasCyrillic(text),
         hasLatin: hasLatin(text)
       };
+    }
+
+    function normalizeLanguageCode(value){
+      const code = String(value || "").trim().toLowerCase();
+      if(code.startsWith("ru")) return "ru";
+      if(code.startsWith("en")) return "en";
+      return "";
+    }
+
+    function getSystemBrowserLanguage(){
+      const list = Array.isArray(navigator.languages) ? navigator.languages : [];
+      return normalizeLanguageCode(list[0] || navigator.language || "");
     }
 
     function detectISBN(value){
@@ -1619,10 +1640,17 @@
 
     function pickBestDescription(item, lang){
       if(!item) return "";
-      if(lang === "ru" && item.description_ru) return item.description_ru;
-      if(lang === "en" && item.description_original) return item.description_original;
-      if(lang === "en" && item.description_en) return item.description_en;
-      return item.description || item.description_ru || item.description_original || item.description_en || "";
+      const appLang = normalizeLanguageCode(lang);
+      const systemLang = getSystemBrowserLanguage();
+      const sequence = Array.from(new Set([appLang, systemLang, "en"].filter(Boolean)));
+
+      for(const candidate of sequence){
+        if(candidate === "ru" && item.description_ru) return item.description_ru;
+        if(candidate === "en" && item.description_en) return item.description_en;
+        if(candidate === "en" && item.description_original) return item.description_original;
+      }
+
+      return item.description || item.description_ru || item.description_en || item.description_original || "";
     }
 
     function buildCanonicalKey(category, source, rawId, title){
@@ -2112,11 +2140,88 @@
       return items.filter(item => {
         const key = item.category === "Books"
           ? buildBookIdentityKey(item)
-          : (item.canonical_key || item.work_key || (item.category + ":" + (item.title || "").trim().toLowerCase()));
+          : (
+            item.canonical_key
+            || item.work_key
+            || [
+              item.category,
+              normalizeComparisonText(item.title || ""),
+              normalizeComparisonText(item.title_original || item.original_title || ""),
+              normalizeComparisonText(item.title_en || ""),
+              normalizeComparisonText(item.title_ru || ""),
+              normalizeComparisonText(item.creator || "")
+            ].join(":")
+          );
         if(seen.has(key)) return false;
         seen.add(key);
         return true;
       });
+    }
+
+    function mapUserMediaRowToSearchResult(row, category){
+      return {
+        id: row.id,
+        title: row.title || "",
+        category: category,
+        creator: row.creator || "",
+        cover: row.cover_url || "",
+        description: row.description || "",
+        description_ru: row.description_ru || "",
+        description_original: row.description_original || row.description_en || "",
+        description_en: row.description_en || "",
+        work_key: row.work_key || "",
+        canonical_key: row.canonical_key || "",
+        title_ru: row.title_ru || "",
+        title_en: row.title_en || "",
+        title_original: row.title_original || ""
+      };
+    }
+
+    function itemMatchesQuery(item, queryMeta){
+      if(!queryMeta?.comparison && !queryMeta?.isbn) return false;
+      if(queryMeta?.isbn){
+        const itemIsbn = detectISBN(item.isbn || item.work_key || "");
+        if(itemIsbn && itemIsbn === queryMeta.isbn) return true;
+      }
+      const haystack = normalizeComparisonText([
+        item.title,
+        item.title_ru,
+        item.title_en,
+        item.title_original,
+        item.original_title,
+        item.creator,
+        item.description_ru,
+        item.description_original,
+        item.description_en
+      ].filter(Boolean).join(" "));
+      return haystack.includes(queryMeta.comparison || "");
+    }
+
+    async function searchLocalSupabaseCached(category, queryMeta, limit = 10){
+      const localItems = (demoData[category] || []).filter((item) => itemMatchesQuery(item, queryMeta));
+      const user = await getCurrentUser();
+      if(!user){
+        return dedupeSearchResults(localItems).slice(0, limit);
+      }
+
+      const { data, error } = await supabaseClient
+        .from("user_media")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("category", category)
+        .order("id", { ascending: false })
+        .limit(250);
+
+      if(error){
+        console.error("Supabase local search error:", error);
+        return dedupeSearchResults(localItems).slice(0, limit);
+      }
+
+      const fromDb = (data || [])
+        .map((row) => mapUserMediaRowToSearchResult(row, category))
+        .filter((item) => itemMatchesQuery(item, queryMeta));
+
+      return dedupeSearchResults([...localItems, ...fromDb]).slice(0, limit);
     }
 
     async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
@@ -2349,6 +2454,10 @@
     }
 
     async function buildBookDescriptions(title, author, workKey, isbn = ""){
+      const cacheKey = [normalizeComparisonText(title), normalizeComparisonText(author), String(workKey || "").trim(), detectISBN(isbn)].join("|");
+      if(bookDescriptionCache.has(cacheKey)){
+        return { ...bookDescriptionCache.get(cacheKey) };
+      }
       let description = "";
       let description_ru = "";
       let description_original = "";
@@ -2403,12 +2512,14 @@
         description = description_ru || description_original || description_en || "";
       }
 
-      return {
+      const payload = {
         description: description || "",
         description_ru: description_ru || "",
         description_original: description_original || description_en || "",
         description_en: description_en || description_original || ""
       };
+      bookDescriptionCache.set(cacheKey, payload);
+      return { ...payload };
     }
 
     async function translateDescriptionFields(description){
@@ -2502,6 +2613,9 @@
             description: overview,
             description_ru: looksLikeRussian(overview) ? overview : "",
             description_en: looksLikeEnglish(overview) ? overview : "",
+            title_original: mediaType === "tv" ? (item.original_name || "") : (item.original_title || ""),
+            title_en: mediaType === "tv" ? (item.name || "") : (item.title || ""),
+            title_ru: "",
             work_key: `tmdb:${mediaType}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "tmdb", `${mediaType}:${externalId}`, title)
           };
@@ -2535,6 +2649,9 @@
             description: synopsis,
             description_ru: looksLikeRussian(synopsis) ? synopsis : "",
             description_en: looksLikeEnglish(synopsis) ? synopsis : "",
+            title_original: item.title_japanese || "",
+            title_en: item.title_english || "",
+            title_ru: "",
             work_key: `jikan:${kind}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "jikan", `${kind}:${externalId}`, title)
           };
@@ -2597,6 +2714,9 @@
             description,
             description_ru: looksLikeRussian(description) ? description : "",
             description_en: looksLikeEnglish(description) ? description : "",
+            title_original: item.title?.native || "",
+            title_en: item.title?.english || "",
+            title_ru: "",
             work_key: `anilist:${kind.toLowerCase()}:${item.id}`,
             canonical_key: buildCanonicalKey(category, "anilist", `${kind.toLowerCase()}:${item.id}`, title)
           };
@@ -2620,26 +2740,50 @@
     }
 
     async function searchByCategory(category, query, limit = 10){
-      if(category === "Books"){
-        return await searchBooksApi(query, limit);
+      const queryMeta = normalizeQuery(query);
+      if(!queryMeta.text && !queryMeta.isbn){
+        return [];
+      }
+      const cacheKey = [category, currentLanguage, queryMeta.comparison || queryMeta.isbn || ""].join("|");
+      if(categorySearchCache.has(cacheKey)){
+        return categorySearchCache.get(cacheKey).slice(0, limit);
+      }
+      if(categorySearchInFlight.has(cacheKey)){
+        return (await categorySearchInFlight.get(cacheKey)).slice(0, limit);
       }
 
-      const searchQueries = await buildSearchQueries(query);
-      let combined = [];
+      const searchPromise = (async () => {
+        const localResults = await searchLocalSupabaseCached(category, queryMeta, limit);
+        if(localResults.length > 0){
+          return dedupeSearchResults(localResults).slice(0, limit);
+        }
 
-      for(const q of searchQueries){
-        let results = [];
-        if(category === "Books") results = await searchBooksApi(q, limit);
-        if(category === "Movies") results = await searchTMDbApi(q, "movie", limit);
-        if(category === "Series") results = await searchTMDbApi(q, "tv", limit);
-        if(category === "Anime") results = await searchAnimeApi(q, limit);
-        if(category === "Manga") results = await searchMangaApi(q, limit);
+        if(category === "Books"){
+          return await searchBooksApi(query, limit);
+        }
 
-        combined = dedupeSearchResults([...combined, ...results]);
-        if(combined.length >= limit) break;
-      }
+        const searchQueries = await buildSearchQueries(queryMeta);
+        let combined = [];
 
-      return combined.slice(0, limit);
+        for(const q of searchQueries){
+          let results = [];
+          if(category === "Movies") results = await searchTMDbApi(q, "movie", limit);
+          if(category === "Series") results = await searchTMDbApi(q, "tv", limit);
+          if(category === "Anime") results = await searchAnimeApi(q, limit);
+          if(category === "Manga") results = await searchMangaApi(q, limit);
+
+          combined = dedupeSearchResults([...combined, ...results]);
+          if(combined.length >= limit) break;
+        }
+
+        return dedupeSearchResults(combined).slice(0, limit);
+      })();
+
+      categorySearchInFlight.set(cacheKey, searchPromise);
+      const resolved = await searchPromise;
+      categorySearchInFlight.delete(cacheKey);
+      categorySearchCache.set(cacheKey, resolved.slice(0, limit));
+      return resolved.slice(0, limit);
     }
 
     function isDuplicateItem(category, title, workKey = ""){
@@ -2796,6 +2940,7 @@
       if(!alreadyExists){
         demoData[category].unshift(item);
         clearRelationCache();
+        clearSearchCaches();
       }
     }
 
@@ -3073,6 +3218,9 @@
           description_ru: item.description_ru || "",
           description_original: item.description_original || item.description_en || "",
           description_en: item.description_en || "",
+          title_ru: item.title_ru || "",
+          title_en: item.title_en || "",
+          title_original: item.title_original || "",
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
@@ -3082,6 +3230,7 @@
 
       await applyFolderAssignmentsToItems(category);
       clearRelationCache();
+      clearSearchCaches();
       renderShelf();
       return true;
     }
@@ -3298,6 +3447,7 @@
 
     async function renderCategorySearchResults() {
       clearTimeout(searchTimer);
+      const searchToken = ++activeCategorySearchToken;
 
       searchTimer = setTimeout(async () => {
         const container = document.getElementById("search-results");
@@ -3317,6 +3467,7 @@
 
         try {
           const results = dedupeSearchResults(await searchByCategory(currentCategory, query, 10));
+          if(searchToken !== activeCategorySearchToken) return;
           currentSearchResults = results;
 
           if(results.length === 0){
@@ -3350,6 +3501,7 @@
           });
         } catch (error) {
           console.error("Category search error:", error);
+          if(searchToken !== activeCategorySearchToken) return;
           container.innerHTML = `
             <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
             <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
@@ -3398,11 +3550,14 @@
       let finalDescriptionEn = item.description_en || "";
 
       if(targetCategory === "Books"){
-        const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "", item.isbn || "");
-        finalDescription = built.description || "";
-        finalDescriptionRu = built.description_ru || "";
-        finalDescriptionOriginal = built.description_original || built.description_en || "";
-        finalDescriptionEn = built.description_en || built.description_original || "";
+        const hasLocalized = Boolean(finalDescriptionRu && (finalDescriptionOriginal || finalDescriptionEn) && finalDescription);
+        if(!hasLocalized){
+          const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "", item.isbn || "");
+          finalDescription = finalDescription || built.description || "";
+          finalDescriptionRu = finalDescriptionRu || built.description_ru || "";
+          finalDescriptionOriginal = finalDescriptionOriginal || built.description_original || built.description_en || "";
+          finalDescriptionEn = finalDescriptionEn || built.description_en || built.description_original || "";
+        }
       } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
         const translated = await translateDescriptionFields(finalDescription);
         finalDescription = translated.description || finalDescription;
