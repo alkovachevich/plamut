@@ -6921,10 +6921,7 @@ function renderShelf(){
   };
 
   const sortedItems = [...items].sort((a, b) => (b.id || 0) - (a.id || 0));
-  const grid = document.createElement("div");
-  grid.className = "shelf";
-  sortedItems.forEach((item) => grid.appendChild(createCard(item)));
-  shelf.appendChild(grid);
+  sortedItems.forEach((item) => shelf.appendChild(createCard(item)));
 }
 
 const mobileRefineApplyTranslations = applyTranslations;
