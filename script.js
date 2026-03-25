@@ -3177,9 +3177,7 @@
       const user = await getCurrentUser();
 
       if(!user){
-        invalidateRelatedLibraryItemsCache("");
-        demoData[category] = [];
-        renderShelf();
+        console.warn("Skip Supabase category load without authorized user:", category);
         return false;
       }
 
@@ -4504,6 +4502,34 @@ async function ensureCurrentProfileData(){
     }
   }
 
+  if(!profile?.public_share_token){
+    const fallbackToken = generateToken(24);
+    try {
+      const { error: fallbackUpsertError } = await supabaseClient
+        .from("profiles")
+        .upsert({
+          id: user.id,
+          public_share_token: fallbackToken,
+          public_share_enabled: true,
+          is_public: true
+        });
+      if(fallbackUpsertError){
+        throw fallbackUpsertError;
+      }
+      profile = {
+        ...(profile || {}),
+        ...(await fetchProfileByUserId(user.id) || {}),
+        public_share_token: fallbackToken
+      };
+    } catch (error) {
+      console.error("Fallback share token save error:", error);
+      profile = {
+        ...(profile || {}),
+        public_share_token: fallbackToken
+      };
+    }
+  }
+
   currentProfileData = profile
     ? {
         ...profile,
@@ -4583,7 +4609,7 @@ async function upsertCurrentProfilePatch(patch = {}){
 
 function applyShareSettingsToOwnerPanels(profile = {}){
   const token = profile.nfc_token || profile.public_share_token || "";
-  const url = token ? buildPublicShareUrl(token) : "";
+  const url = buildPublicShareUrl(token || "");
   const enabled = isShareEnabled(profile);
   const title = profile.public_card_title || profile.display_name || profile.username || "";
   const bio = profile.public_card_bio || "";
@@ -5456,6 +5482,13 @@ async function changePassword(){
     applyShareSettingsToOwnerPanels(data);
   } catch (error) {
     console.error("Load profile error:", error);
+    const user = await getCurrentUser();
+    if(user){
+      const fallbackAvatar = user.user_metadata?.avatar_url || "";
+      const fallbackName = user.user_metadata?.full_name || user.user_metadata?.name || "";
+      setAvatarPreview(fallbackAvatar, fallbackName, user.email || "");
+      return;
+    }
     resetProfileFields();
   }
 }
@@ -6057,7 +6090,7 @@ function setAuthorizedButtons(isAuthorized){
 
 function applyShareSettingsToOwnerPanels(profile = {}){
   const token = profile.nfc_token || profile.public_share_token || "";
-  const url = token ? buildPublicShareUrl(token) : "";
+  const url = buildPublicShareUrl(token || "");
   const enabled = isShareEnabled(profile);
   const title = profile.public_card_title || profile.display_name || profile.username || "";
   const bio = profile.public_card_bio || "";
@@ -6105,7 +6138,7 @@ function applyShareSettingsToOwnerPanels(profile = {}){
   });
 
   if(shareBtn){
-    shareBtn.disabled = !url;
+    shareBtn.disabled = false;
   }
 }
 
@@ -6117,11 +6150,6 @@ async function shareLibrary(){
   }
 
   const profile = await ensureCurrentProfileData();
-  if(!profile?.public_share_token){
-    alert(t().share.unavailable);
-    return;
-  }
-
   applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
   toggleShareMenu();
 }
@@ -6446,8 +6474,11 @@ async function showAuthorizedUI(){
   forceLibraryLaunchVisibility(true);
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
-  safeLoadProfile("showAuthorizedUI");
-  setTimeout(() => safeLoadProfile("showAuthorizedUI:retry"), 900);
+  await ensureCurrentProfileData();
+  await safeLoadProfile("showAuthorizedUI");
+  setTimeout(() => {
+    safeLoadProfile("showAuthorizedUI:retry");
+  }, 900);
   try {
     await restoreUiStateIfPossible();
   } catch (error) {
@@ -6754,10 +6785,6 @@ async function shareLibrary(){
     return;
   }
   const profile = await ensureCurrentProfileData();
-  if(!profile?.public_share_token){
-    alert(t().share.unavailable);
-    return;
-  }
   applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
   openShareSheet();
 }
