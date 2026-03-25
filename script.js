@@ -6028,6 +6028,12 @@ function updatePrimaryActionVisibility(){
   fab.classList.add("hidden");
 }
 
+function forceLibraryLaunchVisibility(isVisible){
+  const libraryLaunch = document.querySelector(".home-library-launch-wrap");
+  if(!libraryLaunch) return;
+  libraryLaunch.classList.toggle("hidden", !isVisible);
+}
+
 function setAuthorizedButtons(isAuthorized){
   const loginBtn = document.getElementById("login-top-btn");
   const profileWrap = document.getElementById("header-profile-menu-wrap");
@@ -6237,6 +6243,7 @@ function goHome(){
   isPublicView = false;
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
+  forceLibraryLaunchVisibility(true);
   toggleCategoryFilters(false);
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
@@ -6248,6 +6255,7 @@ async function openLibraryScreen(){
   isPublicView = false;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
+  forceLibraryLaunchVisibility(false);
   await renderLibraryCategories();
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
@@ -6292,7 +6300,11 @@ async function ensureLibraryDataLoaded(){
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
-  await ensureLibraryDataLoaded();
+  try {
+    await ensureLibraryDataLoaded();
+  } catch (error) {
+    console.error("Library preload error:", error);
+  }
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
@@ -6324,6 +6336,7 @@ function backToCategory(){
   syncShelfSearchInput();
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
+  forceLibraryLaunchVisibility(false);
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
 }
@@ -6336,6 +6349,7 @@ async function openCategory(name){
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
+  forceLibraryLaunchVisibility(false);
   document.getElementById("category-title").textContent = translateCategory(name);
   document.getElementById("back-home-btn").onclick = openLibraryScreen;
   toggleCategoryFilters(false);
@@ -6366,6 +6380,7 @@ async function openCardById(id){
 
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
+  forceLibraryLaunchVisibility(false);
 
   document.getElementById("details-title").textContent = item?.title || "";
   document.getElementById("details-creator").textContent = item?.creator || "";
@@ -6428,9 +6443,11 @@ async function showAuthorizedUI(){
   setPublicRouteMode(false);
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
+  forceLibraryLaunchVisibility(true);
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
-  await safeLoadProfile("showAuthorizedUI");
+  safeLoadProfile("showAuthorizedUI");
+  setTimeout(() => safeLoadProfile("showAuthorizedUI:retry"), 900);
   try {
     await restoreUiStateIfPossible();
   } catch (error) {
