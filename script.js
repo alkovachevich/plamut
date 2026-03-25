@@ -2051,7 +2051,7 @@
       return true;
     }
 
-    async function buildRelationsInBackground(item, category, reason = "card_open"){
+    await buildRelationsInBackground(item, category, "relations_screen_open");
       const lockKey = `${category}:${item.id}`;
       if(relationBuildLocks.has(lockKey)){
         return relationBuildLocks.get(lockKey);
