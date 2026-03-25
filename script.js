@@ -6,7 +6,7 @@
   supabaseClient
 } from "./js/config.js";
 
-    
+    import { translations } from "./js/translations.js";
 
     let currentLanguage = localStorage.getItem("plamut_language") || "ru";
     let currentThemeMode = localStorage.getItem("plamut_theme_mode") || "system";
