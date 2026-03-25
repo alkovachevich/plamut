@@ -6094,12 +6094,28 @@ async function openLibraryScreen(){
   updatePrimaryActionVisibility();
 }
 
+const libraryLoadedCategories = new Set();
+let librarySearchDebounceTimer = null;
+
+function handleLibrarySearchInput(){
+  if(librarySearchDebounceTimer){
+    clearTimeout(librarySearchDebounceTimer);
+  }
+  librarySearchDebounceTimer = setTimeout(() => {
+    renderLibraryCategories();
+  }, 120);
+}
+
 async function ensureLibraryDataLoaded(){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   for(const category of categories){
+    if(libraryLoadedCategories.has(category)){
+      continue;
+    }
     if(!(demoData[category] || []).length){
       await loadCategoryFromSupabase(category);
     }
+    libraryLoadedCategories.add(category);
   }
 }
 
@@ -6949,7 +6965,10 @@ applyTranslations = function applyTranslationsMobileRefine(){
   setTextIfPresent("folder-manager-create-btn", t().profile.createFolder);
   setTextIfPresent("folder-manager-cancel-btn", t().buttons.cancel);
   setTextIfPresent("item-actions-cancel-btn", t().buttons.cancel);
-  renderLibraryCategories();
+  const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
+  if(libraryVisible){
+    renderLibraryCategories();
+  }
   renderFolderRail();
   renderFolderManagerList();
 };
