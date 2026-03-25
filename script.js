@@ -100,7 +100,8 @@
           manualAdd: "Add manually",
           save: "Save",
           delete: "Delete",
-          moveToBlacklist: "Move to blacklist"
+          moveToBlacklist: "Move to blacklist",
+          openRelations: "Universe"
         },
         modals: {
           searchTitle: "Search and add",
@@ -154,6 +155,14 @@
           folderSaved: "Folder saved",
           relatedWorks: "Related works",
           relatedWorksEmpty: "No related works found yet.",
+          relationsScreenTitle: "Universe",
+          relationsEntryReady: "Available",
+          relationsEntryBuilding: "Building...",
+          relationsEntryNotBuilt: "Not built",
+          relationsEntryError: "Build error",
+          relationsLoading: "Loading relations...",
+          relationsEmpty: "Relations are not built yet.",
+          currentItem: "Current item",
           runtimeError: "Application error. Please refresh the page. Details:"
         },
         statuses: {
@@ -274,7 +283,8 @@
           manualAdd: "Добавить вручную",
           save: "Сохранить",
           delete: "Удалить",
-          moveToBlacklist: "Перенести в чёрный список"
+          moveToBlacklist: "Перенести в чёрный список",
+          openRelations: "Вселенная"
         },
         modals: {
           searchTitle: "Поиск и добавление",
@@ -328,6 +338,14 @@
           folderSaved: "Папка сохранена",
           relatedWorks: "Связанные произведения",
           relatedWorksEmpty: "Связанные произведения пока не найдены.",
+          relationsScreenTitle: "Вселенная",
+          relationsEntryReady: "Готово",
+          relationsEntryBuilding: "Построение...",
+          relationsEntryNotBuilt: "Не построено",
+          relationsEntryError: "Ошибка построения",
+          relationsLoading: "Загрузка связей...",
+          relationsEmpty: "Связи пока не построены.",
+          currentItem: "Текущее произведение",
           runtimeError: "Ошибка приложения. Обновите страницу. Детали:"
         },
         statuses: {
@@ -513,6 +531,8 @@
     let currentThemeMode = localStorage.getItem("plamut_theme_mode") || "system";
     let currentCategory = null;
     let currentOpenItemId = null;
+    let currentRelationsItemId = null;
+    let currentRelationsCategory = null;
     let currentStatusItemId = null;
     let currentSearchResults = [];
     let isPublicView = false;
@@ -533,6 +553,7 @@
     let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
     let currentSavedLibraryState = { saved: false, source: "none" };
     const relationCache = new Map();
+    const relationBuildLocks = new Map();
     const categorySearchCache = new Map();
     const categorySearchInFlight = new Map();
     const bookDescriptionCache = new Map();
@@ -1074,7 +1095,13 @@
       document.getElementById("open-folder-modal-btn").textContent = t().buttons.addToFolder;
       document.getElementById("details-folder-current").textContent = t().labels.noFolder;
       document.getElementById("details-relations-title").textContent = t().labels.relatedWorks;
-      document.getElementById("details-relations-empty").textContent = t().labels.relatedWorksEmpty;
+      document.getElementById("open-relations-screen-btn").textContent = t().buttons.openRelations;
+      document.getElementById("details-relations-state").textContent = t().labels.relationsEntryNotBuilt;
+      document.getElementById("back-relations-btn").textContent = t().buttons.backShelf;
+      document.getElementById("relations-screen-title").textContent = t().labels.relationsScreenTitle;
+      document.getElementById("relations-current-item-label").textContent = t().labels.currentItem;
+      document.getElementById("relations-loading").textContent = t().labels.relationsLoading;
+      document.getElementById("relations-empty").textContent = t().labels.relationsEmpty;
       document.getElementById("folder-modal-title").textContent = t().buttons.addToFolder;
       document.getElementById("folder-modal-subtitle").textContent = t().labels.folder;
       document.getElementById("folder-modal-cancel-btn").textContent = t().buttons.cancel;
@@ -1235,6 +1262,14 @@
         const item = getItemById(currentCategory, currentOpenItemId);
         if(item) openCardById(currentOpenItemId);
       }
+
+      if(!document.getElementById("relations-screen").classList.contains("hidden") && currentRelationsItemId){
+        const item = getItemById(currentRelationsCategory || currentCategory, currentRelationsItemId);
+        if(item){
+          document.getElementById("relations-current-item-title").textContent = item.title || "—";
+          renderRelationsScreen(item, currentRelationsCategory || currentCategory);
+        }
+      }
     }
 
     function translateStatus(status) {
@@ -1254,6 +1289,7 @@
       document.getElementById("library-screen")?.classList.add("hidden");
       document.getElementById("category-screen").classList.add("hidden");
       document.getElementById("details-screen").classList.add("hidden");
+      document.getElementById("relations-screen")?.classList.add("hidden");
       document.getElementById("auth-screen").classList.add("hidden");
       document.getElementById("public-share-screen")?.classList.add("hidden");
       closeFolderModal();
@@ -1827,6 +1863,231 @@
       return setCachedRelatedItems(item, category, computeRelatedItems(item, category, libraryItems));
     }
 
+    function buildEntityCanonicalKey(item, category){
+      if(item?.canonical_key) return item.canonical_key;
+      if(item?.work_key) return `${category}:work:${item.work_key}`;
+      return `${category}:title:${normalizeRelationKey(item?.title || "")}:${item?.year || ""}`;
+    }
+
+    function mapRelationStatusToLabel(status){
+      if(status === "ready") return t().labels.relationsEntryReady;
+      if(status === "building") return t().labels.relationsEntryBuilding;
+      if(status === "error") return t().labels.relationsEntryError;
+      return t().labels.relationsEntryNotBuilt;
+    }
+
+    function updateDetailsRelationsState(status = "not_built"){
+      const stateEl = document.getElementById("details-relations-state");
+      if(stateEl){
+        stateEl.textContent = mapRelationStatusToLabel(status);
+      }
+    }
+
+    function groupRelationsByType(relations = []){
+      const groups = new Map();
+      relations.forEach((relation) => {
+        const type = relation.relation_type || "related_work";
+        if(!groups.has(type)){
+          groups.set(type, []);
+        }
+        groups.get(type).push(relation);
+      });
+      return groups;
+    }
+
+    function translateRelationType(type){
+      const value = String(type || "related_work");
+      const map = currentLanguage === "ru"
+        ? {
+          same_universe: "Одна вселенная",
+          same_series: "Одна серия",
+          sequel: "Продолжение",
+          prequel: "Предыстория",
+          adaptation_of: "Экранизация",
+          adapted_into: "Адаптировано в",
+          spinoff_of: "Спин-офф",
+          related_work: "Связано"
+        }
+        : {
+          same_universe: "Same universe",
+          same_series: "Same series",
+          sequel: "Sequel",
+          prequel: "Prequel",
+          adaptation_of: "Adaptation of",
+          adapted_into: "Adapted into",
+          spinoff_of: "Spin-off",
+          related_work: "Related work"
+        };
+      return map[value] || map.related_work;
+    }
+
+    async function loadRelationsFromDb(item, category){
+      const canonicalKey = buildEntityCanonicalKey(item, category);
+      const { data: entities, error: entityError } = await supabaseClient
+        .from("media_entities")
+        .select("id, relations_status, relations_built_at")
+        .eq("canonical_key", canonicalKey)
+        .limit(1);
+
+      if(entityError){
+        return { status: "not_built", relations: [], entityId: null, tableMissing: true };
+      }
+
+      const entity = entities?.[0];
+      if(!entity?.id){
+        return { status: "not_built", relations: [], entityId: null, tableMissing: false };
+      }
+
+      const { data: relations, error: relationError } = await supabaseClient
+        .from("media_relations")
+        .select(`
+          relation_type, sort_order, source, confidence, to_entity_id,
+          to:to_entity_id(id, canonical_key, category, title_primary, title_ru, title_en, year, cover_url)
+        `)
+        .eq("from_entity_id", entity.id)
+        .order("sort_order", { ascending: true });
+
+      if(relationError){
+        return { status: entity.relations_status || "not_built", relations: [], entityId: entity.id, tableMissing: true };
+      }
+
+      const normalizedRelations = (relations || [])
+        .map((entry) => ({
+          relation_type: entry.relation_type || "related_work",
+          sort_order: Number.isFinite(entry.sort_order) ? entry.sort_order : 0,
+          source: entry.source || "db",
+          confidence: Number(entry.confidence || 0),
+          item: {
+            title: entry.to?.title_ru || entry.to?.title_en || entry.to?.title_primary || "—",
+            cover: entry.to?.cover_url || "",
+            category: entry.to?.category || "",
+            year: entry.to?.year || "",
+            canonical_key: entry.to?.canonical_key || "",
+            id: null
+          }
+        }))
+        .filter((entry) => entry.item.canonical_key !== canonicalKey);
+
+      return { status: entity.relations_status || "not_built", relations: normalizedRelations, entityId: entity.id, tableMissing: false };
+    }
+
+    async function persistRelationsToDb(item, category, relatedItems = [], status = "ready"){
+      const canonicalKey = buildEntityCanonicalKey(item, category);
+      const baseEntityPayload = {
+        canonical_key: canonicalKey,
+        category,
+        title_primary: item.title || "",
+        title_ru: currentLanguage === "ru" ? (item.title || "") : "",
+        title_en: currentLanguage === "en" ? (item.title || "") : "",
+        year: item.year || null,
+        cover_url: item.cover || "",
+        relations_status: status,
+        relations_built_at: new Date().toISOString()
+      };
+
+      const { data: fromEntity, error: fromError } = await supabaseClient
+        .from("media_entities")
+        .upsert(baseEntityPayload, { onConflict: "canonical_key" })
+        .select("id, canonical_key")
+        .single();
+
+      if(fromError || !fromEntity?.id){
+        return false;
+      }
+
+      await supabaseClient.from("media_relations").delete().eq("from_entity_id", fromEntity.id);
+
+      const relationRows = [];
+      const seen = new Set();
+      for(let index = 0; index < relatedItems.length; index += 1){
+        const relatedItem = relatedItems[index];
+        const relatedCanonicalKey = buildEntityCanonicalKey(relatedItem, relatedItem.category || category);
+        const sourceExternalId = `${relatedItem.source || "library"}:${relatedItem.work_key || relatedCanonicalKey}`;
+        const fallbackTitleKey = `${normalizeRelationKey(relatedItem.title)}:${relatedItem.year || ""}:${relatedItem.category || ""}`;
+        const dedupeKey = relatedCanonicalKey || sourceExternalId || fallbackTitleKey;
+        if(!dedupeKey || seen.has(dedupeKey) || relatedCanonicalKey === canonicalKey){
+          continue;
+        }
+        seen.add(dedupeKey);
+
+        const { data: toEntity } = await supabaseClient
+          .from("media_entities")
+          .upsert({
+            canonical_key: relatedCanonicalKey,
+            category: relatedItem.category || category,
+            title_primary: relatedItem.title || "",
+            title_ru: currentLanguage === "ru" ? (relatedItem.title || "") : "",
+            title_en: currentLanguage === "en" ? (relatedItem.title || "") : "",
+            year: relatedItem.year || null,
+            cover_url: relatedItem.cover || "",
+            relations_status: "not_built"
+          }, { onConflict: "canonical_key" })
+          .select("id")
+          .single();
+
+        if(!toEntity?.id || toEntity.id === fromEntity.id){
+          continue;
+        }
+
+        relationRows.push({
+          from_entity_id: fromEntity.id,
+          to_entity_id: toEntity.id,
+          relation_type: relatedItem.relation_type || "related_work",
+          source: relatedItem.source || "library",
+          confidence: relatedItem.confidence || 0.7,
+          sort_order: index,
+          metadata_json: {
+            source_external_id: sourceExternalId,
+            fallback_title_key: fallbackTitleKey
+          }
+        });
+      }
+
+      if(relationRows.length){
+        await supabaseClient.from("media_relations").upsert(relationRows, {
+          onConflict: "from_entity_id,to_entity_id,relation_type"
+        });
+      }
+      return true;
+    }
+
+    async function buildRelationsInBackground(item, category, reason = "card_open"){
+      const lockKey = `${category}:${item.id}`;
+      if(relationBuildLocks.has(lockKey)){
+        return relationBuildLocks.get(lockKey);
+      }
+
+      const task = (async () => {
+        updateDetailsRelationsState("building");
+        try {
+          const libraryRelated = await getRelatedItemsForItem(item, category);
+          const fallbackCandidates = libraryRelated.length
+            ? libraryRelated
+            : (await searchByCategory(category, item.title || "", 3)).map((entry) => ({
+              ...entry,
+              relation_type: "related_work",
+              source: "api_fallback",
+              confidence: 0.35
+            }));
+          const normalized = fallbackCandidates
+            .filter((entry) => normalizeRelationKey(entry.title) !== normalizeRelationKey(item.title))
+            .slice(0, 12)
+            .map((entry) => ({ ...entry, relation_type: entry.relation_type || "related_work" }));
+          const saved = await persistRelationsToDb(item, category, normalized, "ready");
+          updateDetailsRelationsState(saved ? "ready" : "error");
+        } catch (error) {
+          console.error(`Relation build error (${reason}):`, error);
+          updateDetailsRelationsState("error");
+          await persistRelationsToDb(item, category, [], "error");
+        } finally {
+          relationBuildLocks.delete(lockKey);
+        }
+      })();
+
+      relationBuildLocks.set(lockKey, task);
+      return task;
+    }
+
     async function openRelatedItemFromDetails(id, category){
       if(!id || !category) return;
       if(isPublicView){
@@ -1892,30 +2153,84 @@
     }
 
     async function renderRelatedItemsSection(item, category = currentCategory){
-      const list = document.getElementById("details-relations-list");
-      const empty = document.getElementById("details-relations-empty");
-      if(!list || !empty) return;
-
-      list.innerHTML = "";
-      empty.textContent = t().labels.relatedWorksEmpty;
-      empty.classList.add("hidden");
-
       if(!item){
-        empty.classList.remove("hidden");
+        updateDetailsRelationsState("not_built");
         return;
       }
 
-      const relatedItems = await getRelatedItemsForItem(item, category);
+      const relationResult = await loadRelationsFromDb(item, category);
       if(currentOpenItemId !== item.id || currentCategory !== category){
         return;
       }
+      updateDetailsRelationsState(relationResult.status || "not_built");
+      if(!relationResult.relations.length && relationResult.status !== "building"){
+        buildRelationsInBackground(item, category, "details_open");
+      }
+    }
 
-      if(!relatedItems.length){
-        empty.classList.remove("hidden");
+    async function openRelationsScreen(){
+      const item = getItemById(currentCategory, currentOpenItemId);
+      if(!item) return;
+
+      currentRelationsItemId = item.id;
+      currentRelationsCategory = currentCategory;
+      hideAllScreens();
+      document.getElementById("relations-screen").classList.remove("hidden");
+      document.getElementById("relations-current-item-title").textContent = item.title || "—";
+      await renderRelationsScreen(item, currentCategory);
+    }
+
+    function backToDetailsFromRelations(){
+      if(currentRelationsItemId){
+        openCardById(currentRelationsItemId);
+        return;
+      }
+      backToCategory();
+    }
+
+    async function renderRelationsScreen(item, category){
+      const groupsEl = document.getElementById("relations-groups");
+      const loadingEl = document.getElementById("relations-loading");
+      const emptyEl = document.getElementById("relations-empty");
+      if(!groupsEl || !loadingEl || !emptyEl) return;
+
+      groupsEl.innerHTML = "";
+      emptyEl.classList.add("hidden");
+      loadingEl.classList.remove("hidden");
+
+      let payload = await loadRelationsFromDb(item, category);
+      if(!payload.relations.length && payload.status !== "building"){
+        buildRelationsInBackground(item, category, "relations_screen_open");
+        payload = await loadRelationsFromDb(item, category);
+      }
+
+      loadingEl.classList.add("hidden");
+      if(!payload.relations.length){
+        emptyEl.classList.remove("hidden");
         return;
       }
 
-      relatedItems.forEach((entry) => list.appendChild(buildRelatedItemCard(entry)));
+      const grouped = groupRelationsByType(payload.relations);
+      grouped.forEach((relations, type) => {
+        const section = document.createElement("section");
+        section.className = "section";
+        const title = document.createElement("h3");
+        title.className = "relations-group-title";
+        title.textContent = translateRelationType(type);
+        section.appendChild(title);
+
+        const list = document.createElement("div");
+        list.className = "details-relations-list";
+        relations.forEach((relationEntry) => {
+          const localItem = getLoadedLibraryItems().find((candidate) => candidate.canonical_key === relationEntry.item.canonical_key);
+          const itemForCard = localItem
+            ? { ...localItem, relation_type: type }
+            : { ...relationEntry.item, relation_type: type, status: "Info" };
+          list.appendChild(buildRelatedItemCard(itemForCard));
+        });
+        section.appendChild(list);
+        groupsEl.appendChild(section);
+      });
     }
 
     function getOpenLibraryCoverUrl(coverId){
@@ -6401,6 +6716,7 @@ async function openCardById(id){
   if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
   if(detailsActions) detailsActions.classList.toggle("hidden", isPublicView);
 
+  updateDetailsRelationsState("not_built");
   deferRelatedItemsRender(item, currentCategory);
   updatePrimaryActionVisibility();
 }
