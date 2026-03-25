@@ -1863,11 +1863,18 @@
       return setCachedRelatedItems(item, category, computeRelatedItems(item, category, libraryItems));
     }
 
-    function buildEntityCanonicalKey(item, category){
-      if(item?.canonical_key) return item.canonical_key;
-      if(item?.work_key) return `${category}:work:${item.work_key}`;
-      return `${category}:title:${normalizeRelationKey(item?.title || "")}:${item?.year || ""}`;
+    function getItemYear(item){
+      return item?.year || item?.release_year || null;
     }
+
+    function buildEntityCanonicalKey(item, category){
+  if(item?.canonical_key) return item.canonical_key;
+  if(item?.work_key) return `${category}:work:${item.work_key}`;
+
+  const year = getItemYear(item);
+
+  return `${category}:title:${normalizeRelationKey(item?.title || "")}:${year || ""}`;
+}
 
     function mapRelationStatusToLabel(status){
       if(status === "ready") return t().labels.relationsEntryReady;
