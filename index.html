@@ -253,8 +253,10 @@
             <div class="details-relations-header">
               <h3 id="details-relations-title">Related works</h3>
             </div>
-            <div id="details-relations-list" class="details-relations-list"></div>
-            <div class="small muted" id="details-relations-empty">No related works found yet.</div>
+            <div class="details-relations-entry">
+              <button class="button button-secondary" type="button" id="open-relations-screen-btn" onclick="openRelationsScreen()">Связи</button>
+              <span class="small muted" id="details-relations-state">Не построено</span>
+            </div>
           </div>
 
           <div class="section" id="details-folder-section">
@@ -277,6 +279,22 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div id="relations-screen" class="hidden screen-panel relations-screen">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="backToDetailsFromRelations()" id="back-relations-btn">← Back</button>
+          <h2 id="relations-screen-title" class="screen-title">Связи</h2>
+        </div>
+      </div>
+      <div class="relations-header-card">
+        <div class="small muted" id="relations-current-item-label">Текущее произведение</div>
+        <div id="relations-current-item-title" class="relations-current-item-title">—</div>
+      </div>
+      <div class="small muted hidden" id="relations-loading">Загрузка связей...</div>
+      <div class="small muted hidden" id="relations-empty">Связи пока не найдены.</div>
+      <div id="relations-groups" class="relations-groups"></div>
     </div>
 
     <div id="folder-modal" class="modal hidden" onclick="closeFolderModalOnBackdrop(event)">
