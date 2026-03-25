@@ -6266,14 +6266,23 @@ function handleLibrarySearchInput(){
 }
 
 async function ensureLibraryDataLoaded(){
+  const user = await getCurrentUser();
+  if(!user){
+    return;
+  }
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   const pending = categories
     .filter((category) => !libraryLoadedCategories.has(category))
     .map(async (category) => {
+      let loaded = true;
       if(!(demoData[category] || []).length){
-        await loadCategoryFromSupabase(category);
+        loaded = await loadCategoryFromSupabase(category);
       }
-      libraryLoadedCategories.add(category);
+      if(loaded){
+        libraryLoadedCategories.add(category);
+      } else {
+        libraryLoadedCategories.delete(category);
+      }
     });
   if(pending.length){
     await Promise.allSettled(pending);
@@ -6421,8 +6430,12 @@ async function showAuthorizedUI(){
   document.getElementById("home-screen").classList.remove("hidden");
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
-  safeLoadProfile("showAuthorizedUI");
-  await restoreUiStateIfPossible();
+  await safeLoadProfile("showAuthorizedUI");
+  try {
+    await restoreUiStateIfPossible();
+  } catch (error) {
+    console.error("Restore UI state in showAuthorizedUI error:", error);
+  }
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
 }
@@ -6634,7 +6647,10 @@ async function restoreUiStateIfPossible(){
     if(state.screen === "details" && state.category){
       await openCategory(state.category);
       if(state.openItemId){
-        await openCardById(state.openItemId);
+        const targetItem = getItemById(state.category, state.openItemId);
+        if(targetItem){
+          await openCardById(state.openItemId);
+        }
       }
       return true;
     }
