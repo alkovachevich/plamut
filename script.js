@@ -10,6 +10,19 @@
 
     import { state } from "./js/state.js";
 
+    import {
+  escapeHtml,
+  normalizeSpaces,
+  normalizeComparisonText,
+  normalizeLanguageCode,
+  detectISBN,
+  isValidIsbn10,
+  isValidIsbn13,
+  setValueIfPresent,
+  setCheckedIfPresent,
+  setTextIfPresent
+} from "./js/utils.js";
+
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
     function getLanguageLabel(lang = currentLanguage){
