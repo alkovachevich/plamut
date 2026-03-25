@@ -2173,52 +2173,59 @@
     }
 
     function buildRelatedItemCard(item){
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "related-work-card";
-      button.addEventListener("click", () => openRelatedItemFromDetails(item.id, item.category));
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "related-work-card";
+  button.addEventListener("click", () => openRelatedItemFromDetails(item.id, item.category));
 
-      const cover = document.createElement("div");
-      cover.className = "related-work-cover";
-      if(item.cover){
-        const image = document.createElement("img");
-        image.src = item.cover;
-        image.alt = item.title || t().labels.cover;
-        cover.appendChild(image);
-      } else {
-        cover.textContent = t().labels.cover;
-      }
+  const cover = document.createElement("div");
+  cover.className = "related-work-cover";
+  if(item.cover){
+    const image = document.createElement("img");
+    image.src = item.cover;
+    image.alt = item.title || t().labels.cover;
+    cover.appendChild(image);
+  } else {
+    cover.textContent = t().labels.cover;
+  }
 
-      const body = document.createElement("div");
-      body.className = "related-work-body";
+  const body = document.createElement("div");
+  body.className = "related-work-body";
 
-      const title = document.createElement("div");
-      title.className = "related-work-title";
-      title.textContent = item.title || "—";
+  const title = document.createElement("div");
+  title.className = "related-work-title";
+  title.textContent = item.title || "—";
 
-      const meta = document.createElement("div");
-      meta.className = "related-work-meta";
-      [translateCategory(item.category), translateStatus(item.status || "Planned")].filter(Boolean).forEach((value) => {
-        const chip = document.createElement("span");
-        chip.className = "related-work-chip";
-        chip.textContent = value;
-        meta.appendChild(chip);
-      });
+  const meta = document.createElement("div");
+  meta.className = "related-work-meta";
 
-      body.appendChild(title);
-      body.appendChild(meta);
+  const chips = [
+    translateCategory(item.category),
+    item.relation_type ? translateRelationType(item.relation_type) : "",
+    item.year ? String(item.year) : ""
+  ].filter(Boolean);
 
-      if(item.creator){
-        const creator = document.createElement("div");
-        creator.className = "related-work-creator";
-        creator.textContent = item.creator;
-        body.appendChild(creator);
-      }
+  chips.forEach((value) => {
+    const chip = document.createElement("span");
+    chip.className = "related-work-chip";
+    chip.textContent = value;
+    meta.appendChild(chip);
+  });
 
-      button.appendChild(cover);
-      button.appendChild(body);
-      return button;
-    }
+  body.appendChild(title);
+  body.appendChild(meta);
+
+  if(item.creator){
+    const creator = document.createElement("div");
+    creator.className = "related-work-creator";
+    creator.textContent = item.creator;
+    body.appendChild(creator);
+  }
+
+  button.appendChild(cover);
+  button.appendChild(body);
+  return button;
+}
 
     async function renderRelatedItemsSection(item, category = currentCategory){
       if(!item){
