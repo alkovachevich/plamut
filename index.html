@@ -102,8 +102,8 @@
           <div class="subtitle" id="home-subtitle"></div>
         </div>
 
-        <div class="home-overview-actions">
-          <button id="home-add-btn" class="button hidden" type="button" aria-hidden="true" tabindex="-1">Добавить</button>
+        <div class="home-actions">
+          <button id="home-open-library-btn" class="button button-secondary" type="button" onclick="openLibraryScreen()">Библиотека</button>
           <div class="header-panel-wrap share-menu-wrap">
             <button id="share-library-btn" class="button button-secondary share-library-btn" onclick="shareLibrary()" type="button" aria-haspopup="menu" aria-expanded="false">Share Library</button>
             <div id="share-library-menu" class="header-popover share-popover hidden" role="menu" aria-labelledby="share-library-btn">
@@ -115,6 +115,7 @@
               </div>
             </div>
           </div>
+          <button id="home-add-btn" class="button button-primary" type="button" onclick="toggleHomeAddPanel()">Добавить</button>
         </div>
       </section>
 
@@ -132,7 +133,7 @@
         </div>
       </section>
 
-      <section class="home-section panel-section">
+      <section class="home-section panel-section hidden">
         <div class="section-heading">
           <div>
             <h2 class="section-title" id="library-section-title">Library</h2>
@@ -151,6 +152,19 @@
       </section>
     </div>
 
+    <div id="library-screen" class="hidden screen-panel">
+      <div class="topbar panel-toolbar">
+        <div class="toolbar-primary">
+          <button class="button button-ghost" onclick="goHome()" id="back-library-home-btn">← Back</button>
+          <h2 id="library-screen-title" class="screen-title">Library</h2>
+        </div>
+      </div>
+      <div class="library-search-wrap">
+        <input id="library-search-input" class="input" type="search" autocomplete="off" oninput="renderLibraryCategories()">
+      </div>
+      <div id="library-categories-grid" class="grid category-grid"></div>
+    </div>
+
     <div id="category-screen" class="hidden screen-panel">
       <div class="topbar panel-toolbar">
         <div class="toolbar-primary">
@@ -158,8 +172,9 @@
           <h2 id="category-title" class="screen-title"></h2>
         </div>
         <div class="toolbar-actions">
+          <button class="button button-secondary" type="button" id="filter-toggle-btn" onclick="toggleCategoryFilters()">Фильтр</button>
           <button class="button hidden" onclick="openAddModal()" id="add-new-btn" aria-hidden="true" tabindex="-1"></button>
-          <button class="button button-secondary" onclick="addCustomFolder()" id="add-folder-btn"></button>
+          <button class="button hidden" onclick="addCustomFolder()" id="add-folder-btn"></button>
         </div>
       </div>
 
@@ -172,7 +187,7 @@
         <button class="button button-ghost" onclick="openPublicCategory('Blacklist', currentPublicProfileName)" id="public-tab-blacklist">Blacklist</button>
       </div>
 
-      <div class="toolbar-row filter-toolbar" id="filter-toolbar">
+      <div class="toolbar-row filter-toolbar hidden" id="filter-toolbar">
         <div class="filter-toolbar-search">
           <input id="shelf-search-input" class="input" type="search" autocomplete="off" oninput="setShelfSearchQuery(this.value)">
         </div>
