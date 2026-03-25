@@ -8,7 +8,7 @@
 
     import { translations } from "./js/translations.js";
 
-
+    import { state } from "./js/state.js";
 
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
