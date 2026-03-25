@@ -2121,8 +2121,19 @@
 
       console.log("RELATIONS BUILD: fallbackCandidates", fallbackCandidates);
 
+      const sourceCanonicalKey = buildEntityCanonicalKey(item, category);
+      const sourceWorkKey = item?.work_key || null;
+      const sourceId = item?.id || null;
+
       const normalized = fallbackCandidates
-        .filter((entry) => normalizeRelationKey(entry.title) !== normalizeRelationKey(item.title))
+        .filter((entry) => {
+          const entryCanonicalKey = buildEntityCanonicalKey(entry, entry.category || category);
+          const sameCanonical = entryCanonicalKey && sourceCanonicalKey && entryCanonicalKey === sourceCanonicalKey;
+          const sameWorkKey = entry?.work_key && sourceWorkKey && entry.work_key === sourceWorkKey;
+          const sameId = entry?.id && sourceId && entry.id === sourceId;
+
+          return !sameCanonical && !sameWorkKey && !sameId;
+        })
         .slice(0, 12)
         .map((entry) => ({ ...entry, relation_type: entry.relation_type || "related_work" }));
 
