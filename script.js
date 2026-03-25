@@ -6,11 +6,9 @@
   supabaseClient
 } from "./js/config.js";
 
-    import { translations } from "./js/translations.js";
-
-    import { state } from "./js/state.js";
-
-    import {
+import { translations } from "./js/translations.js";
+import { t } from "./js/i18n.js";
+import {
   escapeHtml,
   normalizeSpaces,
   normalizeComparisonText,
