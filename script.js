@@ -2189,49 +2189,58 @@
     }
 
     async function renderRelationsScreen(item, category){
-      const groupsEl = document.getElementById("relations-groups");
-      const loadingEl = document.getElementById("relations-loading");
-      const emptyEl = document.getElementById("relations-empty");
-      if(!groupsEl || !loadingEl || !emptyEl) return;
+  const groupsEl = document.getElementById("relations-groups");
+  const loadingEl = document.getElementById("relations-loading");
+  const emptyEl = document.getElementById("relations-empty");
+  if(!groupsEl || !loadingEl || !emptyEl) return;
 
-      groupsEl.innerHTML = "";
-      emptyEl.classList.add("hidden");
-      loadingEl.classList.remove("hidden");
+  groupsEl.innerHTML = "";
+  emptyEl.classList.add("hidden");
+  loadingEl.classList.remove("hidden");
 
-      let payload = await loadRelationsFromDb(item, category);
-      if(!payload.relations.length && payload.status !== "building"){
-        buildRelationsInBackground(item, category, "relations_screen_open");
-        payload = await loadRelationsFromDb(item, category);
-      }
+  let payload = await loadRelationsFromDb(item, category);
 
-      loadingEl.classList.add("hidden");
-      if(!payload.relations.length){
-        emptyEl.classList.remove("hidden");
-        return;
-      }
+  if(!payload.relations.length && payload.status !== "building"){
+    await buildRelationsInBackground(item, category, "relations_screen_open");
+    payload = await loadRelationsFromDb(item, category);
+  }
 
-      const grouped = groupRelationsByType(payload.relations);
-      grouped.forEach((relations, type) => {
-        const section = document.createElement("section");
-        section.className = "section";
-        const title = document.createElement("h3");
-        title.className = "relations-group-title";
-        title.textContent = translateRelationType(type);
-        section.appendChild(title);
+  loadingEl.classList.add("hidden");
 
-        const list = document.createElement("div");
-        list.className = "details-relations-list";
-        relations.forEach((relationEntry) => {
-          const localItem = getLoadedLibraryItems().find((candidate) => candidate.canonical_key === relationEntry.item.canonical_key);
-          const itemForCard = localItem
-            ? { ...localItem, relation_type: type }
-            : { ...relationEntry.item, relation_type: type, status: "Info" };
-          list.appendChild(buildRelatedItemCard(itemForCard));
-        });
-        section.appendChild(list);
-        groupsEl.appendChild(section);
-      });
-    }
+  if(!payload.relations.length){
+    emptyEl.classList.remove("hidden");
+    return;
+  }
+
+  const grouped = groupRelationsByType(payload.relations);
+  grouped.forEach((relations, type) => {
+    const section = document.createElement("section");
+    section.className = "section";
+
+    const title = document.createElement("h3");
+    title.className = "relations-group-title";
+    title.textContent = translateRelationType(type);
+    section.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "details-relations-list";
+
+    relations.forEach((relationEntry) => {
+      const localItem = getLoadedLibraryItems().find(
+        (candidate) => candidate.canonical_key === relationEntry.item.canonical_key
+      );
+
+      const itemForCard = localItem
+        ? { ...localItem, relation_type: type }
+        : { ...relationEntry.item, relation_type: type, status: "Info" };
+
+      list.appendChild(buildRelatedItemCard(itemForCard));
+    });
+
+    section.appendChild(list);
+    groupsEl.appendChild(section);
+  });
+}
 
     function getOpenLibraryCoverUrl(coverId){
       if(!coverId) return "";
