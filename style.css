@@ -2652,14 +2652,20 @@ body.header-compact .header-actions {
 
 .home-actions {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   align-items: center;
   gap: 12px;
   width: 100%;
 }
 
+.home-library-launch-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 18px;
+}
+
 .home-library-btn {
-  margin-top: 10px;
+  margin-top: 0;
   min-width: 180px;
   border-radius: 16px;
 }
@@ -2668,10 +2674,16 @@ body.header-compact .header-actions {
   margin-top: 10px;
 }
 
+#share-library-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 #home-add-btn {
   min-width: 180px;
   border-radius: 999px;
   justify-content: center;
+  margin-left: auto;
 }
 
 #global-add-fab {
@@ -2702,6 +2714,7 @@ body.header-compact .header-actions {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 12px;
+  width: 100%;
 }
 
 .media-card {
@@ -2712,6 +2725,16 @@ body.header-compact .header-actions {
   min-width: 170px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.details-menu-wrap {
+  position: relative;
+}
+
+.details-menu-btn {
+  min-width: 42px;
+  padding-inline: 12px;
 }
 
 .media-cover {
