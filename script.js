@@ -8,47 +8,7 @@
 
     import { translations } from "./js/translations.js";
 
-    let currentLanguage = localStorage.getItem("plamut_language") || "ru";
-    let currentThemeMode = localStorage.getItem("plamut_theme_mode") || "system";
-    let currentCategory = null;
-    let currentOpenItemId = null;
-    let currentRelationsItemId = null;
-    let currentRelationsCategory = null;
-    let currentStatusItemId = null;
-    let currentSearchResults = [];
-    let isPublicView = false;
-    let currentPublicProfileName = "Library";
-    let searchTimer = null;
-    let currentFilterStatus = localStorage.getItem("plamut_status_filter") || "All";
-    let currentShelfSearchQuery = "";
-    let currentFolderModalItemId = null;
-    let pendingFolderSelection = "";
-    let currentOpenMenuItemId = null;
-    let currentProfileData = null;
-    let currentPublicProfile = null;
-    let activeShareToken = "";
-    let currentPublicShareItems = [];
-    let currentPublicShareState = "loading";
-    let publicLibraryExpanded = false;
-    let currentNfcContext = null;
-    let currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
-    let currentSavedLibraryState = { saved: false, source: "none" };
-    const relationCache = new Map();
-    const relationBuildLocks = new Map();
-    const categorySearchCache = new Map();
-    const categorySearchInFlight = new Map();
-    const bookDescriptionCache = new Map();
-    let activeCategorySearchToken = 0;
-    let relatedLibraryItemsCache = { userId: "", items: [], loaded: false, promise: null };
 
-    const demoData = {
-      Books: [],
-      Movies: [],
-      Series: [],
-      Anime: [],
-      Manga: [],
-      Blacklist: []
-    };
 
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
