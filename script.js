@@ -2206,6 +2206,77 @@ async function fetchWikidataRelations(item){
   }
 }
 
+async function fetchWikidataRelations(item){
+  const wikidataId = item?.wikidata_entity_id;
+  if(!wikidataId) return [];
+
+  try {
+    const url = `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`;
+    const response = await fetch(url);
+    if(!response.ok){
+      console.error("RELATIONS BUILD: wikidata http error", response.status);
+      return [];
+    }
+
+    const json = await response.json();
+    const entity = json?.entities?.[wikidataId];
+    if(!entity?.claims) return [];
+
+    const relations = [];
+
+    const followedBy = entity.claims.P156 || [];
+    followedBy.forEach((claim) => {
+      const id = claim?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          title: id,
+          wikidata_entity_id: id,
+          relation_type: "sequel",
+          source: "wikidata",
+          confidence: 0.9,
+          category
+        });
+      }
+    });
+
+    const follows = entity.claims.P155 || [];
+    follows.forEach((claim) => {
+      const id = claim?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          title: id,
+          wikidata_entity_id: id,
+          relation_type: "prequel",
+          source: "wikidata",
+          confidence: 0.9,
+          category
+        });
+      }
+    });
+
+    const basedOn = entity.claims.P144 || [];
+    basedOn.forEach((claim) => {
+      const id = claim?.mainsnak?.datavalue?.value?.id;
+      if(id){
+        relations.push({
+          title: id,
+          wikidata_entity_id: id,
+          relation_type: "adaptation_of",
+          source: "wikidata",
+          confidence: 0.85,
+          category
+        });
+      }
+    });
+
+    console.log("RELATIONS BUILD: external", relations);
+    return relations;
+  } catch (error) {
+    console.error("RELATIONS BUILD: wikidata fetch error", error);
+    return [];
+  }
+}
+
    async function buildRelationsInBackground(item, category, reason = "card_open"){
   const lockKey = `${category}:${item.id}`;
   if(relationBuildLocks.has(lockKey)){
@@ -2223,14 +2294,22 @@ async function fetchWikidataRelations(item){
         wikidata_entity_id: item?.wikidata_entity_id
       });
 
-      const libraryRelated = await getRelatedItemsForItem(item, category);
-      console.log("RELATIONS BUILD: fallback library", libraryRelated);
+      const externalRelations = await fetchWikidataRelations(item);
 
-      const sourceCanonicalKey = buildEntityCanonicalKey(item, category);
-      const sourceWorkKey = item?.work_key || null;
-      const sourceId = item?.id || null;
+let candidates = [];
+if(externalRelations.length){
+  candidates = externalRelations;
+} else {
+  const libraryRelated = await getRelatedItemsForItem(item, category);
+  console.log("RELATIONS BUILD: fallback library", libraryRelated);
+  candidates = libraryRelated;
+}
 
-      const normalized = libraryRelated
+const sourceCanonicalKey = buildEntityCanonicalKey(item, category);
+const sourceWorkKey = item?.work_key || null;
+const sourceId = item?.id || null;
+
+const normalized = candidates
         .filter((entry) => {
           const entryCanonicalKey = buildEntityCanonicalKey(entry, entry.category || category);
           const sameCanonical = entryCanonicalKey && sourceCanonicalKey && entryCanonicalKey === sourceCanonicalKey;
