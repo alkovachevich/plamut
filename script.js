@@ -3177,7 +3177,9 @@
       const user = await getCurrentUser();
 
       if(!user){
-        console.warn("Skip Supabase category load without authorized user:", category);
+        invalidateRelatedLibraryItemsCache("");
+        demoData[category] = [];
+        renderShelf();
         return false;
       }
 
@@ -4502,34 +4504,6 @@ async function ensureCurrentProfileData(){
     }
   }
 
-  if(!profile?.public_share_token){
-    const fallbackToken = generateToken(24);
-    try {
-      const { error: fallbackUpsertError } = await supabaseClient
-        .from("profiles")
-        .upsert({
-          id: user.id,
-          public_share_token: fallbackToken,
-          public_share_enabled: true,
-          is_public: true
-        });
-      if(fallbackUpsertError){
-        throw fallbackUpsertError;
-      }
-      profile = {
-        ...(profile || {}),
-        ...(await fetchProfileByUserId(user.id) || {}),
-        public_share_token: fallbackToken
-      };
-    } catch (error) {
-      console.error("Fallback share token save error:", error);
-      profile = {
-        ...(profile || {}),
-        public_share_token: fallbackToken
-      };
-    }
-  }
-
   currentProfileData = profile
     ? {
         ...profile,
@@ -4609,7 +4583,7 @@ async function upsertCurrentProfilePatch(patch = {}){
 
 function applyShareSettingsToOwnerPanels(profile = {}){
   const token = profile.nfc_token || profile.public_share_token || "";
-  const url = buildPublicShareUrl(token || "");
+  const url = token ? buildPublicShareUrl(token) : "";
   const enabled = isShareEnabled(profile);
   const title = profile.public_card_title || profile.display_name || profile.username || "";
   const bio = profile.public_card_bio || "";
@@ -5482,13 +5456,6 @@ async function changePassword(){
     applyShareSettingsToOwnerPanels(data);
   } catch (error) {
     console.error("Load profile error:", error);
-    const user = await getCurrentUser();
-    if(user){
-      const fallbackAvatar = user.user_metadata?.avatar_url || "";
-      const fallbackName = user.user_metadata?.full_name || user.user_metadata?.name || "";
-      setAvatarPreview(fallbackAvatar, fallbackName, user.email || "");
-      return;
-    }
     resetProfileFields();
   }
 }
@@ -6061,12 +6028,6 @@ function updatePrimaryActionVisibility(){
   fab.classList.add("hidden");
 }
 
-function forceLibraryLaunchVisibility(isVisible){
-  const libraryLaunch = document.querySelector(".home-library-launch-wrap");
-  if(!libraryLaunch) return;
-  libraryLaunch.classList.toggle("hidden", !isVisible);
-}
-
 function setAuthorizedButtons(isAuthorized){
   const loginBtn = document.getElementById("login-top-btn");
   const profileWrap = document.getElementById("header-profile-menu-wrap");
@@ -6090,7 +6051,7 @@ function setAuthorizedButtons(isAuthorized){
 
 function applyShareSettingsToOwnerPanels(profile = {}){
   const token = profile.nfc_token || profile.public_share_token || "";
-  const url = buildPublicShareUrl(token || "");
+  const url = token ? buildPublicShareUrl(token) : "";
   const enabled = isShareEnabled(profile);
   const title = profile.public_card_title || profile.display_name || profile.username || "";
   const bio = profile.public_card_bio || "";
@@ -6138,7 +6099,7 @@ function applyShareSettingsToOwnerPanels(profile = {}){
   });
 
   if(shareBtn){
-    shareBtn.disabled = false;
+    shareBtn.disabled = !url;
   }
 }
 
@@ -6150,6 +6111,11 @@ async function shareLibrary(){
   }
 
   const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    alert(t().share.unavailable);
+    return;
+  }
+
   applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
   toggleShareMenu();
 }
@@ -6271,7 +6237,6 @@ function goHome(){
   isPublicView = false;
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
-  forceLibraryLaunchVisibility(true);
   toggleCategoryFilters(false);
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
@@ -6283,7 +6248,6 @@ async function openLibraryScreen(){
   isPublicView = false;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
-  forceLibraryLaunchVisibility(false);
   await renderLibraryCategories();
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
@@ -6302,23 +6266,14 @@ function handleLibrarySearchInput(){
 }
 
 async function ensureLibraryDataLoaded(){
-  const user = await getCurrentUser();
-  if(!user){
-    return;
-  }
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   const pending = categories
     .filter((category) => !libraryLoadedCategories.has(category))
     .map(async (category) => {
-      let loaded = true;
       if(!(demoData[category] || []).length){
-        loaded = await loadCategoryFromSupabase(category);
+        await loadCategoryFromSupabase(category);
       }
-      if(loaded){
-        libraryLoadedCategories.add(category);
-      } else {
-        libraryLoadedCategories.delete(category);
-      }
+      libraryLoadedCategories.add(category);
     });
   if(pending.length){
     await Promise.allSettled(pending);
@@ -6328,11 +6283,7 @@ async function ensureLibraryDataLoaded(){
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
-  try {
-    await ensureLibraryDataLoaded();
-  } catch (error) {
-    console.error("Library preload error:", error);
-  }
+  await ensureLibraryDataLoaded();
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
@@ -6364,7 +6315,6 @@ function backToCategory(){
   syncShelfSearchInput();
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
-  forceLibraryLaunchVisibility(false);
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
 }
@@ -6377,7 +6327,6 @@ async function openCategory(name){
 
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
-  forceLibraryLaunchVisibility(false);
   document.getElementById("category-title").textContent = translateCategory(name);
   document.getElementById("back-home-btn").onclick = openLibraryScreen;
   toggleCategoryFilters(false);
@@ -6408,7 +6357,6 @@ async function openCardById(id){
 
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
-  forceLibraryLaunchVisibility(false);
 
   document.getElementById("details-title").textContent = item?.title || "";
   document.getElementById("details-creator").textContent = item?.creator || "";
@@ -6471,19 +6419,10 @@ async function showAuthorizedUI(){
   setPublicRouteMode(false);
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
-  forceLibraryLaunchVisibility(true);
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
-  await ensureCurrentProfileData();
-  await safeLoadProfile("showAuthorizedUI");
-  setTimeout(() => {
-    safeLoadProfile("showAuthorizedUI:retry");
-  }, 900);
-  try {
-    await restoreUiStateIfPossible();
-  } catch (error) {
-    console.error("Restore UI state in showAuthorizedUI error:", error);
-  }
+  safeLoadProfile("showAuthorizedUI");
+  await restoreUiStateIfPossible();
   updatePrimaryActionVisibility();
   scheduleSaveUiState();
 }
@@ -6695,10 +6634,7 @@ async function restoreUiStateIfPossible(){
     if(state.screen === "details" && state.category){
       await openCategory(state.category);
       if(state.openItemId){
-        const targetItem = getItemById(state.category, state.openItemId);
-        if(targetItem){
-          await openCardById(state.openItemId);
-        }
+        await openCardById(state.openItemId);
       }
       return true;
     }
@@ -6785,6 +6721,10 @@ async function shareLibrary(){
     return;
   }
   const profile = await ensureCurrentProfileData();
+  if(!profile?.public_share_token){
+    alert(t().share.unavailable);
+    return;
+  }
   applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
   openShareSheet();
 }
