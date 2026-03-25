@@ -950,11 +950,13 @@
       currentFilterStatus = value || "All";
       localStorage.setItem("plamut_status_filter", currentFilterStatus);
       renderShelf();
+      scheduleSaveUiState();
     }
 
     function setShelfSearchQuery(value){
       currentShelfSearchQuery = normalizeSpaces(value);
       renderShelf();
+      scheduleSaveUiState();
     }
 
     function syncShelfSearchInput(){
@@ -6237,6 +6239,7 @@ function goHome(){
   document.getElementById("home-screen").classList.remove("hidden");
   toggleCategoryFilters(false);
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 async function openLibraryScreen(){
@@ -6247,6 +6250,7 @@ async function openLibraryScreen(){
   document.getElementById("library-screen")?.classList.remove("hidden");
   await renderLibraryCategories();
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 const libraryLoadedCategories = new Set();
@@ -6263,14 +6267,16 @@ function handleLibrarySearchInput(){
 
 async function ensureLibraryDataLoaded(){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-  for(const category of categories){
-    if(libraryLoadedCategories.has(category)){
-      continue;
-    }
-    if(!(demoData[category] || []).length){
-      await loadCategoryFromSupabase(category);
-    }
-    libraryLoadedCategories.add(category);
+  const pending = categories
+    .filter((category) => !libraryLoadedCategories.has(category))
+    .map(async (category) => {
+      if(!(demoData[category] || []).length){
+        await loadCategoryFromSupabase(category);
+      }
+      libraryLoadedCategories.add(category);
+    });
+  if(pending.length){
+    await Promise.allSettled(pending);
   }
 }
 
@@ -6310,6 +6316,7 @@ function backToCategory(){
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 async function openCategory(name){
@@ -6338,6 +6345,7 @@ async function openCategory(name){
 
   await loadCategoryFromSupabase(name);
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 async function openCardById(id){
@@ -6403,6 +6411,7 @@ async function openCardById(id){
 
   deferRelatedItemsRender(item, currentCategory);
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 async function showAuthorizedUI(){
@@ -6413,7 +6422,9 @@ async function showAuthorizedUI(){
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
   safeLoadProfile("showAuthorizedUI");
+  await restoreUiStateIfPossible();
   updatePrimaryActionVisibility();
+  scheduleSaveUiState();
 }
 
 function showAuthScreen(){
@@ -6510,6 +6521,9 @@ async function init(){
 
 let currentFilterFolder = localStorage.getItem("plamut_folder_filter") || "All";
 let currentItemActionSheetId = null;
+const UI_STATE_STORAGE_KEY = "plamut_ui_state_v1";
+let uiStatePersistTimer = null;
+let uiStateRestoredOnce = false;
 
 Object.assign(translations.en.profile, {
   folderManagerTitle: "Folders",
@@ -6552,6 +6566,95 @@ Object.assign(translations.ru.labels, {
 
 function isMobileViewport(){
   return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function getVisibleScreenId(){
+  if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
+  if(!document.getElementById("category-screen")?.classList.contains("hidden")) return "category";
+  if(!document.getElementById("library-screen")?.classList.contains("hidden")) return "library";
+  if(!document.getElementById("home-screen")?.classList.contains("hidden")) return "home";
+  if(!document.getElementById("auth-screen")?.classList.contains("hidden")) return "auth";
+  return "home";
+}
+
+function buildUiStateSnapshot(){
+  return {
+    screen: getVisibleScreenId(),
+    category: currentCategory || "",
+    openItemId: currentOpenItemId || null,
+    filterStatus: currentFilterStatus || "All",
+    filterFolder: currentFilterFolder || "All",
+    shelfQuery: currentShelfSearchQuery || "",
+    timestamp: Date.now()
+  };
+}
+
+function saveUiStateNow(){
+  if(isPublicView || isPublicShareRoute()) return;
+  try {
+    localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(buildUiStateSnapshot()));
+  } catch (error) {
+    console.error("UI state save error:", error);
+  }
+}
+
+function scheduleSaveUiState(){
+  if(uiStatePersistTimer){
+    clearTimeout(uiStatePersistTimer);
+  }
+  uiStatePersistTimer = setTimeout(() => {
+    saveUiStateNow();
+    uiStatePersistTimer = null;
+  }, 100);
+}
+
+async function restoreUiStateIfPossible(){
+  if(uiStateRestoredOnce || isPublicShareRoute()) return false;
+  uiStateRestoredOnce = true;
+
+  const user = await getCurrentUser();
+  if(!user) return false;
+
+  try {
+    const raw = localStorage.getItem(UI_STATE_STORAGE_KEY);
+    if(!raw) return false;
+    const state = JSON.parse(raw);
+    if(!state || typeof state !== "object") return false;
+
+    currentFilterStatus = state.filterStatus || currentFilterStatus || "All";
+    currentFilterFolder = state.filterFolder || currentFilterFolder || "All";
+    currentShelfSearchQuery = normalizeSpaces(state.shelfQuery || "");
+    if(state.filterStatus){
+      localStorage.setItem("plamut_status_filter", currentFilterStatus);
+    }
+    if(state.filterFolder){
+      localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+    }
+
+    if(state.screen === "details" && state.category){
+      await openCategory(state.category);
+      if(state.openItemId){
+        await openCardById(state.openItemId);
+      }
+      return true;
+    }
+
+    if(state.screen === "category" && state.category){
+      await openCategory(state.category);
+      return true;
+    }
+
+    if(state.screen === "library"){
+      await openLibraryScreen();
+      return true;
+    }
+
+    goHome();
+    return true;
+  } catch (error) {
+    console.error("UI state restore error:", error);
+    return false;
+  }
 }
 
 function setBodySheetLock(locked){
@@ -6835,6 +6938,7 @@ function setFolderFilter(value){
   localStorage.setItem("plamut_folder_filter", currentFilterFolder);
   renderFolderRail();
   renderShelf();
+  scheduleSaveUiState();
 }
 
 async function renderFolderRail(){
@@ -7182,6 +7286,12 @@ async function init(){
       closeShareItemModal();
       closeFolderModal();
       toggleHomeAddPanel(false);
+    }
+  });
+  window.addEventListener("beforeunload", saveUiStateNow);
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "hidden"){
+      saveUiStateNow();
     }
   });
   window.addEventListener("error", (event) => showRuntimeError(event?.message || "Unknown script error"));
