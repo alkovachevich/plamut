@@ -2210,7 +2210,7 @@ const normalized = candidates
 
       const { data, error } = await supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
+        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false })
@@ -3143,7 +3143,7 @@ const normalized = candidates
 
       const { data, error } = await retryReadQuery(() => supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
+        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false }), 2, 220);
@@ -3189,7 +3189,7 @@ const normalized = candidates
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
-          folder: item.folder_name || ""
+          folder: ""
         });
       });
 
@@ -4054,12 +4054,13 @@ function normalizePublicLibraryItem(item = {}){
     status: item.status || item.media_status || "Planned",
     cover_url: item.cover_url || item.cover || item.image_url || "",
     description: item.description || item.media_description || "",
-    description_ru: item.description_ru || "",
-    description_en: item.description_en || "",
+    description_ru: "",
+    description_en: "",
     creator: item.creator || item.author || item.director || item.studio || "",
     work_key: item.work_key || item.media_work_key || "",
     canonical_key: item.canonical_key || item.media_canonical_key || "",
-    folder_name: item.folder_name || item.folder || ""
+    folder_name: "",
+    folder: item.folder || ""
   };
 }
 
@@ -4085,7 +4086,7 @@ async function fetchPublicShareLibraryItems(ownerProfileId){
 
   let { data, error } = await supabaseClient
     .from("user_media")
-    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
+    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
     .eq("user_id", ownerProfileId)
     .or("is_public.is.null,is_public.eq.true")
     .order("id", { ascending: false });
@@ -4093,7 +4094,7 @@ async function fetchPublicShareLibraryItems(ownerProfileId){
   if(error && /is_public/i.test(error.message || "")){
     ({ data, error } = await supabaseClient
       .from("user_media")
-      .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
+      .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
       .eq("user_id", ownerProfileId)
       .order("id", { ascending: false }));
   }
@@ -4419,7 +4420,7 @@ function exitPublicShareRoute(){
 async function fetchPublicLibraryItems(userId){
   const { data, error } = await supabaseClient
     .from("user_media")
-    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
+    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
     .eq("user_id", userId)
     .order("id", { ascending: false });
 
@@ -4452,7 +4453,7 @@ function applyPublicLibraryItems(data = []){
     }
 
     if(item.category) categories.add(translateCategory(item.category));
-    if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
+    if(item.folder) folders.add(item.folder);
     if(item.status) statuses.add(translateStatus(item.status));
 
     state.demoData[item.category].push({
@@ -4461,12 +4462,12 @@ function applyPublicLibraryItems(data = []){
       status: item.status || "Planned",
       cover: item.cover_url || "",
       description: item.description || "",
-      description_ru: item.description_ru || "",
-      description_en: item.description_en || "",
+      description_ru: "",
+      description_en: "",
       creator: item.creator || "",
       work_key: item.work_key || "",
       canonical_key: item.canonical_key || "",
-      folder: item.folder_name || item.folder || ""
+      folder: item.folder || ""
     });
   });
 
