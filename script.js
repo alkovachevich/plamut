@@ -5505,6 +5505,19 @@ function goHome(){
   saveRouteState({ screen: "home", category: "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
+const libraryLoadedCategories = new Set();
+let librarySearchDebounceTimer = null;
+
+function handleLibrarySearchInput(){
+  if(librarySearchDebounceTimer){
+    clearTimeout(librarySearchDebounceTimer);
+  }
+
+  librarySearchDebounceTimer = setTimeout(() => {
+    renderLibraryCategories();
+  }, 120);
+}
+
 async function openLibraryScreen(options = {}){
   closePreferencesPanel();
   toggleHomeAddPanel(false);
