@@ -1405,7 +1405,7 @@ import { state } from "./js/state.js";
   return true;
 }
 
-async function fetchWikidataRelations(item){
+async function fetchWikidataRelations(item, category = item?.category || state.currentCategory){
   const wikidataId = item?.wikidata_entity_id;
   if(!wikidataId) return [];
 
