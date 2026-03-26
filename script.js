@@ -5645,7 +5645,7 @@ async function shareLibrary(){
 function closeItemActionsSheet(){
   const sheet = document.getElementById("item-actions-sheet");
   if(sheet) sheet.classList.add("hidden");
-  currentItemActionSheetId = null;
+  state.currentItemActionSheetId = null;
   syncBodySheetLock();
 }
 
@@ -5706,7 +5706,7 @@ function openItemActionsSheet(id){
   if(!item) return;
   const list = document.getElementById("item-actions-list");
   if(!list) return;
-  currentItemActionSheetId = id;
+  state.currentItemActionSheetId = id;
   setTextIfPresent("item-actions-title", item.title || t().buttons.moreActions);
   setTextIfPresent("item-actions-subtitle", item.folder ? `${t().labels.folder}: ${item.folder}` : translateCategory(state.currentCategory));
   list.innerHTML = "";
@@ -5792,9 +5792,9 @@ async function renameCustomFolder(oldFolder, nextFolder){
     }
   }
 
-  if(currentFilterFolder === oldName){
-    currentFilterFolder = newName;
-    localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  if(state.currentFilterFolder === oldName){
+    state.currentFilterFolder = newName;
+    localStorage.setItem("plamut_folder_filter", state.currentFilterFolder);
   }
 
   renderFolderRail();
@@ -5836,9 +5836,9 @@ async function removeCustomFolder(folder){
     }
   }
 
-  if(currentFilterFolder === folderName){
-    currentFilterFolder = "All";
-    localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  if(state.currentFilterFolder === folderName){
+    state.currentFilterFolder = "All";
+    localStorage.setItem("plamut_folder_filter", state.currentFilterFolder);
   }
 
   renderFolderRail();
@@ -5847,8 +5847,8 @@ async function removeCustomFolder(folder){
 }
 
 function setFolderFilter(value){
-  currentFilterFolder = value || "All";
-  localStorage.setItem("plamut_folder_filter", currentFilterFolder);
+  state.currentFilterFolder = value || "All";
+  localStorage.setItem("plamut_folder_filter", state.currentFilterFolder);
   renderFolderRail();
   renderShelf();
 }
@@ -5879,7 +5879,7 @@ async function renderFolderRail(){
   buttons.forEach(({ label, value }) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `folder-chip${currentFilterFolder === value ? " is-active" : ""}`;
+    button.className = `folder-chip${state.currentFilterFolder === value ? " is-active" : ""}`;
     button.textContent = label;
     button.addEventListener("click", () => setFolderFilter(value));
     rail.appendChild(button);
@@ -6040,8 +6040,8 @@ function getFilteredItems(){
   const searchComparison = normalizeComparisonText(state.currentShelfSearchQuery);
   return items.filter((item) => {
     const statusMatches = state.currentCategory === "Blacklist" || state.currentFilterStatus === "All" || item.status === state.currentFilterStatus;
-    const folderMatches = currentFilterFolder === "All"
-      || (currentFilterFolder === "__ungrouped__" ? !normalizeSpaces(item.folder || "") : normalizeSpaces(item.folder || "") === currentFilterFolder);
+    const folderMatches = state.currentFilterFolder === "All"
+      || (state.currentFilterFolder === "__ungrouped__" ? !normalizeSpaces(item.folder || "") : normalizeSpaces(item.folder || "") === state.currentFilterFolder);
     const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
     const searchMatches = !searchComparison || haystack.includes(searchComparison);
     return statusMatches && folderMatches && searchMatches;
