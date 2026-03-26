@@ -1997,36 +1997,56 @@ const normalized = candidates
       return Boolean(title) && (hasCover || hasDescription || creator || item.isbn);
     }
 
+    function isCompanyLikeBookCreator(creator = ""){
+      const normalized = normalizeComparisonText(creator);
+      if(!normalized) return false;
+      return /\b(inc|ltd|bros|entertainment|publishing|media|studio)\b/iu.test(normalized);
+    }
+
     function buildBookResultScore(item = {}, queryMeta = {}){
       const titleKey = normalizeComparisonText(item.title || "");
       const authorKey = normalizeComparisonText(item.creator || "");
       const queryKey = queryMeta.comparison || "";
+      const queryText = normalizeComparisonText(queryMeta.text || "");
+      const isBroadQuery = isBroadBookQuery(queryMeta) && !queryMeta.isbn;
       let score = getBookSourcePriority(item.source, queryMeta);
       const titleProbe = normalizeComparisonText([item.title || "", item.title_original || "", item.title_en || "", item.title_ru || ""].join(" "));
 
       const secondaryPatterns = [
-        /\bвсе о\b/iu,
-        /\bо\s+[а-яёa-z0-9]/iu,
-        /\bмир\b/iu,
-        /\bфакт(ы|ов)?\b/iu,
-        /\bэнциклопед(ия|и[яи])\b/iu,
-        /\bбиограф(ия|ии|ический)\b/iu,
-        /\bисследован(ие|ия|ий)\b/iu,
-        /\bпереводческ/iu,
-        /\bнеофициальн/iu,
-        /\bпо мотивам\b/iu,
-        /\bсправочник\b/iu,
-        /\bжизни и любви\b/iu,
-        /\babout\b/iu,
-        /\bguide\b/iu,
-        /\bcompanion\b/iu,
-        /\bunofficial\b/iu,
-        /\bfacts?\b/iu,
-        /\bencyclopedia\b/iu,
-        /\bbiograph(y|ies|ical)\b/iu,
-        /\bstud(y|ies)\b/iu,
-        /\bessays?\b/iu,
-        /\bworld of\b/iu
+        { marker: "series", re: /\bseries\b/iu },
+        { marker: "1-7", re: /\b1\s*[-–]\s*7\b/iu },
+        { marker: "collection", re: /\bcollection\b/iu },
+        { marker: "boxed set", re: /\bboxed set\b/iu },
+        { marker: "complete", re: /\bcomplete\b/iu },
+        { marker: "annual", re: /\bannual\b/iu },
+        { marker: "poster", re: /\bposter\b/iu },
+        { marker: "screenplay", re: /\bscreenplay\b/iu },
+        { marker: "play", re: /\bplay\b/iu },
+        { marker: "script", re: /\bscript\b/iu },
+        { marker: "cursed child", re: /\bcursed child\b/iu },
+        { marker: "illustrated by", re: /\billustrated by\b/iu },
+        { marker: "calendar", re: /\bcalendar\b/iu },
+        { marker: "companion", re: /\bcompanion\b/iu },
+        { marker: "guide", re: /\bguide\b/iu },
+        { marker: "world of", re: /\bworld of\b/iu },
+        { marker: "facts", re: /\bfacts?\b/iu },
+        { marker: "encyclopedia", re: /\bencyclopedia\b/iu },
+        { marker: "unofficial", re: /\bunofficial\b/iu },
+        { marker: "все о", re: /\bвсе о\b/iu },
+        { marker: "о ", re: /\bо\s+[а-яёa-z0-9]/iu },
+        { marker: "мир", re: /\bмир\b/iu },
+        { marker: "факты", re: /\bфакт(ы|ов)?\b/iu },
+        { marker: "энциклопедия", re: /\bэнциклопед(ия|и[яи])\b/iu },
+        { marker: "биография", re: /\bбиограф(ия|ии|ический)\b/iu },
+        { marker: "исследование", re: /\bисследован(ие|ия|ий)\b/iu },
+        { marker: "переводческ", re: /\bпереводческ/iu },
+        { marker: "неофициальн", re: /\bнеофициальн/iu },
+        { marker: "по мотивам", re: /\bпо мотивам\b/iu },
+        { marker: "справочник", re: /\bсправочник\b/iu },
+        { marker: "about", re: /\babout\b/iu },
+        { marker: "biography", re: /\bbiograph(y|ies|ical)\b/iu },
+        { marker: "study", re: /\bstud(y|ies)\b/iu },
+        { marker: "essays", re: /\bessays?\b/iu }
       ];
 
       if(item.isbn && queryMeta.isbn && item.isbn === queryMeta.isbn) score += 240;
@@ -2043,9 +2063,16 @@ const normalized = candidates
       if(item.isbn) score += 12;
       if((item.source || "") === "fantlab" && queryMeta.hasCyrillic) score += 12;
 
-      secondaryPatterns.forEach((pattern) => {
-        if(pattern.test(titleProbe)){
-          score -= 55;
+      let hasSecondaryMarker = false;
+      secondaryPatterns.forEach((entry) => {
+        if(entry.re.test(titleProbe)){
+          hasSecondaryMarker = true;
+          const queryTargetsThis = queryText && queryText.includes(normalizeComparisonText(entry.marker));
+          if(isBroadQuery && !queryTargetsThis){
+            score -= 95;
+          } else {
+            score -= 30;
+          }
         }
       });
 
@@ -2056,6 +2083,16 @@ const normalized = candidates
       if(authorKey && authorKey.length <= 45) score += 8;
       if(item.wikidata_relevance === "main") score += 44;
       if(item.wikidata_relevance === "secondary") score -= 44;
+      if(isBroadQuery && isCompanyLikeBookCreator(item.creator || "")) score -= 85;
+
+      const creatorLooksAuthorLike = Boolean(authorKey) && !isCompanyLikeBookCreator(item.creator || "");
+      const titleHasQuery = Boolean(queryKey && titleKey.includes(queryKey));
+      const cleanMainVolumeCandidate = isBroadQuery
+        && titleHasQuery
+        && !hasSecondaryMarker
+        && creatorLooksAuthorLike
+        && titleWordCount <= 10;
+      if(cleanMainVolumeCandidate) score += 72;
 
       const filledFields = ["title", "creator", "cover", "description_ru", "description_original", "isbn"].filter((field) => Boolean(item[field])).length;
       score += filledFields * 4;
