@@ -5254,7 +5254,8 @@ async function removeAvatar(){
   if(loginBtn) loginBtn.classList.remove("hidden");
   if(profileBtn) profileBtn.classList.add("hidden");
 }
-
+});
+       
       const openedPublic = await checkPublicRoute();
       if(!openedPublic){
         await checkAuth();
