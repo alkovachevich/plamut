@@ -5618,7 +5618,13 @@ async function openCardById(id){
   closePreferencesPanel();
   state.currentOpenItemId = id;
   const item = getItemById(state.currentCategory, id);
-
+  
+  if(!item){
+  console.error("openCardById: item not found", { id, category: state.currentCategory });
+  backToCategory();
+  return;
+  }
+   
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
 
