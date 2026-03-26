@@ -43,7 +43,7 @@ import { state } from "./js/state.js";
     }
 
     function invalidateRelatedLibraryItemsCache(userId = state.relatedLibraryItemsCache.userId){
-      state.relatedLibraryItemsCache = { userId: userId || "", items: [], loaded: false, promise: null };
+      state.relatedLibraryItemsCache = { userId: userId || "", items: [], loaded: false, promise: null, fetchedAt: 0 };
     }
 
     function clearRelationCache(){
@@ -223,6 +223,31 @@ import { state } from "./js/state.js";
 
     function supportsTable(error, tableName){
       return !error || !new RegExp(`relation .*${tableName}`, "i").test(String(error.message || ""));
+    }
+
+    function isNetworkError(error){
+      const message = String(error?.message || error || "").toLowerCase();
+      const details = String(error?.details || "").toLowerCase();
+      return message.includes("failed to fetch")
+        || message.includes("networkerror")
+        || message.includes("network request failed")
+        || message.includes("fetch")
+        || details.includes("failed to fetch");
+    }
+
+    async function retryReadQuery(runQuery, attempts = 2, delayMs = 220){
+      let lastError = null;
+      for(let attempt = 0; attempt < attempts; attempt += 1){
+        const result = await runQuery();
+        if(!result?.error || !isNetworkError(result.error)){
+          return result;
+        }
+        lastError = result.error;
+        if(attempt < attempts - 1){
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+      return { data: null, error: lastError };
     }
 
     function buildQrImageUrl(url){
@@ -668,6 +693,14 @@ import { state } from "./js/state.js";
     const ROUTE_STATE_STORAGE_KEY = "plamut_route_state";
     let routeRestoreInProgress = false;
     let authBootstrapCompleted = false;
+    let currentUserPromise = null;
+    let currentUserCache = { user: null, fetchedAt: 0 };
+    let foregroundRestorePromise = null;
+    let lastForegroundRestoreAt = 0;
+    const FOREGROUND_RESTORE_COOLDOWN_MS = 1200;
+    const RELATION_BUILD_COOLDOWN_MS = 15000;
+    const RELATION_BUILD_FAILURE_COOLDOWN_MS = 35000;
+    const relatedBuildCooldowns = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -976,10 +1009,35 @@ import { state } from "./js/state.js";
       return /[A-Za-z]/.test(text || "");
     }
 
-    async function getCurrentUser(){
-      const { data, error } = await supabaseClient.auth.getUser();
-      if(error || !data.user) return null;
-      return data.user;
+    async function getCurrentUser(options = {}){
+      const now = Date.now();
+      const useCache = !options.force && now - (currentUserCache.fetchedAt || 0) < 1200;
+      if(useCache){
+        return currentUserCache.user || null;
+      }
+      if(currentUserPromise){
+        return await currentUserPromise;
+      }
+
+      currentUserPromise = (async () => {
+        const { data, error } = await retryReadQuery(() => supabaseClient.auth.getUser(), 2, 180);
+        if(error || !data?.user){
+          currentUserCache = { user: null, fetchedAt: Date.now() };
+          return null;
+        }
+        currentUserCache = { user: data.user, fetchedAt: Date.now() };
+        return data.user;
+      })();
+
+      try {
+        return await currentUserPromise;
+      } finally {
+        currentUserPromise = null;
+      }
+    }
+
+    function syncCurrentUserCache(user = null){
+      currentUserCache = { user: user || null, fetchedAt: Date.now() };
     }
 
     async function fetchJson(url, options = undefined){
@@ -1136,6 +1194,7 @@ import { state } from "./js/state.js";
     }
 
     async function getLibraryItemsForRelations(){
+      const cacheTtlMs = 60000;
       if(state.isPublicView){
         return getLoadedLibraryItems();
       }
@@ -1146,7 +1205,11 @@ import { state } from "./js/state.js";
         return getLoadedLibraryItems();
       }
 
-      if(state.relatedLibraryItemsCache.loaded && state.relatedLibraryItemsCache.userId === user.id){
+      if(
+        state.relatedLibraryItemsCache.loaded
+        && state.relatedLibraryItemsCache.userId === user.id
+        && Date.now() - Number(state.relatedLibraryItemsCache.fetchedAt || 0) < cacheTtlMs
+      ){
         return state.relatedLibraryItemsCache.items;
       }
 
@@ -1156,14 +1219,17 @@ import { state } from "./js/state.js";
 
       state.relatedLibraryItemsCache.userId = user.id;
       state.relatedLibraryItemsCache.promise = (async () => {
-        const { data, error } = await supabaseClient
+        const { data, error } = await retryReadQuery(() => supabaseClient
           .from("user_media")
           .select("id, title, status, cover_url, creator, work_key, canonical_key, category")
           .eq("user_id", user.id)
-          .order("id", { ascending: false });
+          .order("id", { ascending: false }), 2, 220);
 
         if(error){
           console.error("Relation library load error:", error);
+          if(state.relatedLibraryItemsCache.loaded && state.relatedLibraryItemsCache.items.length){
+            return state.relatedLibraryItemsCache.items;
+          }
           return getLoadedLibraryItems();
         }
 
@@ -1186,6 +1252,7 @@ import { state } from "./js/state.js";
 
         state.relatedLibraryItemsCache.items = items;
         state.relatedLibraryItemsCache.loaded = true;
+        state.relatedLibraryItemsCache.fetchedAt = Date.now();
         return items;
       })();
 
@@ -1322,14 +1389,16 @@ import { state } from "./js/state.js";
 
     async function loadRelationsFromDb(item, category){
       const canonicalKey = buildEntityCanonicalKey(item, category);
-      const { data: entities, error: entityError } = await supabaseClient
+      const { data: entities, error: entityError } = await retryReadQuery(() => supabaseClient
         .from("media_entities")
         .select("id, relations_status, relations_built_at")
         .eq("canonical_key", canonicalKey)
-        .limit(1);
+        .limit(1), 2, 220);
 
       if(entityError){
-        return { status: "not_built", relations: [], entityId: null, tableMissing: true };
+        const isNetworkFailure = isNetworkError(entityError);
+        const tableMissing = !isNetworkFailure && !supportsTable(entityError, "media_entities");
+        return { status: isNetworkFailure ? "error" : "not_built", relations: [], entityId: null, tableMissing, transientFailure: isNetworkFailure };
       }
 
       const entity = entities?.[0];
@@ -1337,17 +1406,19 @@ import { state } from "./js/state.js";
         return { status: "not_built", relations: [], entityId: null, tableMissing: false };
       }
 
-      const { data: relations, error: relationError } = await supabaseClient
+      const { data: relations, error: relationError } = await retryReadQuery(() => supabaseClient
         .from("media_relations")
         .select(`
           relation_type, sort_order, source, confidence, to_entity_id,
           to:to_entity_id(id, canonical_key, category, title_primary, title_ru, title_en, year, cover_url)
         `)
         .eq("from_entity_id", entity.id)
-        .order("sort_order", { ascending: true });
+        .order("sort_order", { ascending: true }), 2, 220);
 
       if(relationError){
-        return { status: entity.relations_status || "not_built", relations: [], entityId: entity.id, tableMissing: true };
+        const isNetworkFailure = isNetworkError(relationError);
+        const tableMissing = !isNetworkFailure && !supportsTable(relationError, "media_relations");
+        return { status: isNetworkFailure ? "error" : (entity.relations_status || "not_built"), relations: [], entityId: entity.id, tableMissing, transientFailure: isNetworkFailure };
       }
 
       const normalizedRelations = (relations || [])
@@ -1367,7 +1438,7 @@ import { state } from "./js/state.js";
         }))
         .filter((entry) => entry.item.canonical_key !== canonicalKey);
 
-      return { status: entity.relations_status || "not_built", relations: normalizedRelations, entityId: entity.id, tableMissing: false };
+      return { status: entity.relations_status || "not_built", relations: normalizedRelations, entityId: entity.id, tableMissing: false, transientFailure: false };
     }
 
     async function persistRelationsToDb(item, category, relatedItems = [], status = "ready"){
@@ -1592,7 +1663,11 @@ async function fetchTmdbMovieRelations(item){
 }
 
    async function buildRelationsInBackground(item, category, reason = "card_open"){
-  const lockKey = `${category}:${item.id}`;
+  const lockKey = buildEntityCanonicalKey(item, category) || `${category}:${item.id}`;
+  const cooldownUntil = Number(relatedBuildCooldowns.get(lockKey) || 0);
+  if(cooldownUntil > Date.now()){
+    return null;
+  }
   if(state.relationBuildLocks.has(lockKey)){
     return state.relationBuildLocks.get(lockKey);
   }
@@ -1649,10 +1724,14 @@ const normalized = candidates
       console.log("RELATIONS BUILD: persist result", saved);
 
       updateDetailsRelationsState(saved ? "ready" : "error");
+      relatedBuildCooldowns.set(lockKey, Date.now() + (saved ? RELATION_BUILD_COOLDOWN_MS : RELATION_BUILD_FAILURE_COOLDOWN_MS));
     } catch (error) {
       console.error(`Relation build error (${reason}):`, error);
       updateDetailsRelationsState("error");
-      await persistRelationsToDb(item, category, [], "error");
+      relatedBuildCooldowns.set(lockKey, Date.now() + RELATION_BUILD_FAILURE_COOLDOWN_MS);
+      if(!isNetworkError(error)){
+        await persistRelationsToDb(item, category, [], "error");
+      }
     } finally {
       state.relationBuildLocks.delete(lockKey);
     }
@@ -1744,7 +1823,12 @@ const normalized = candidates
         return;
       }
       updateDetailsRelationsState(relationResult.status || "not_built");
-      if(!relationResult.relations.length && relationResult.status !== "building"){
+      if(
+        !relationResult.relations.length
+        && relationResult.status !== "building"
+        && !relationResult.tableMissing
+        && !relationResult.transientFailure
+      ){
         buildRelationsInBackground(item, category, "details_open");
       }
     }
@@ -1791,7 +1875,7 @@ const normalized = candidates
   let payload = await loadRelationsFromDb(item, category);
   console.log("RELATIONS: first DB load", payload);
 
-  if(!payload.relations.length && payload.status !== "building"){
+  if(!payload.relations.length && payload.status !== "building" && !payload.tableMissing && !payload.transientFailure){
     console.log("RELATIONS: starting background build");
     await buildRelationsInBackground(item, category, "relations_screen_open");
     payload = await loadRelationsFromDb(item, category);
@@ -3051,20 +3135,27 @@ const normalized = candidates
       if(!user){
         invalidateRelatedLibraryItemsCache("");
         state.demoData[category] = [];
-        renderShelf();
+        if(!document.getElementById("category-screen")?.classList.contains("hidden") && state.currentCategory === category){
+          renderShelf();
+        }
         return false;
       }
 
-      const { data, error } = await supabaseClient
+      const { data, error } = await retryReadQuery(() => supabaseClient
         .from("user_media")
-        .select("*")
+        .select("id, title, status, cover_url, description, description_ru, description_en, description_original, title_ru, title_en, title_original, creator, work_key, canonical_key, folder_name, category")
         .eq("user_id", user.id)
         .eq("category", category)
-        .order("id", { ascending: false });
+        .order("id", { ascending: false }), 2, 220);
 
       if(error){
         console.error("Supabase load error:", error);
-        renderShelf();
+        if(!isNetworkError(error) || !state.demoData[category]?.length){
+          state.demoData[category] = [];
+        }
+        if(!document.getElementById("category-screen")?.classList.contains("hidden") && state.currentCategory === category){
+          renderShelf();
+        }
         return false;
       }
 
@@ -3103,9 +3194,9 @@ const normalized = candidates
       });
 
       await applyFolderAssignmentsToItems(category);
-      clearRelationCache();
-      clearSearchCaches();
-      renderShelf();
+      if(!document.getElementById("category-screen")?.classList.contains("hidden") && state.currentCategory === category){
+        renderShelf();
+      }
       return true;
     }
 
@@ -3665,6 +3756,7 @@ const normalized = candidates
 
        async function checkAuth(){
       const user = await getCurrentUser();
+      syncCurrentUserCache(user);
 
       if(state.activeShareToken){
         setAuthorizedButtons(Boolean(user));
@@ -5249,6 +5341,7 @@ async function removeAvatar(){
         if(!authBootstrapCompleted){
           return;
         }
+        syncCurrentUserCache(session?.user || null);
 
         const loginBtn = document.getElementById("login-top-btn");
         const profileBtn = document.getElementById("profile-btn");
@@ -5722,6 +5815,7 @@ async function logout(){
   closeProfileModal();
   closeShareModal();
   clearRouteState();
+  syncCurrentUserCache(null);
   await supabaseClient.auth.signOut();
   location.reload();
 }
@@ -6351,14 +6445,27 @@ function handlePrimaryAddAction(){
 }
 
 async function restoreRouteStateIfNeededOnForeground(){
-  const user = await getCurrentUser();
-  if(!user) return;
-  const routeState = readRouteState();
-  if(!routeState) return;
-  const currentScreen = getVisibleScreenName();
-  const shouldRestore = routeState.isPublicShareRoute || routeState.screen === "library" || routeState.screen === "category" || routeState.screen === "details";
-  if(shouldRestore && (currentScreen === "home" || currentScreen === "auth")){
-    await restoreRouteState({ isAuthenticated: true });
+  if(routeRestoreInProgress) return;
+  if(foregroundRestorePromise) return await foregroundRestorePromise;
+  if(Date.now() - lastForegroundRestoreAt < FOREGROUND_RESTORE_COOLDOWN_MS) return;
+
+  foregroundRestorePromise = (async () => {
+    const user = await getCurrentUser();
+    if(!user) return;
+    const routeState = readRouteState();
+    if(!routeState) return;
+    const currentScreen = getVisibleScreenName();
+    const shouldRestore = routeState.isPublicShareRoute || routeState.screen === "library" || routeState.screen === "category" || routeState.screen === "details";
+    if(shouldRestore && (currentScreen === "home" || currentScreen === "auth")){
+      await restoreRouteState({ isAuthenticated: true });
+      lastForegroundRestoreAt = Date.now();
+    }
+  })();
+
+  try {
+    await foregroundRestorePromise;
+  } finally {
+    foregroundRestorePromise = null;
   }
 }
 
@@ -6402,12 +6509,6 @@ async function init(){
       saveRouteState();
       return;
     }
-    await restoreRouteStateIfNeededOnForeground();
-  });
-  window.addEventListener("focus", async () => {
-    await restoreRouteStateIfNeededOnForeground();
-  });
-  window.addEventListener("pageshow", async () => {
     await restoreRouteStateIfNeededOnForeground();
   });
   if(isPublicShareRoute()){
