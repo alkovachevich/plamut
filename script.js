@@ -3048,70 +3048,76 @@ const normalized = candidates
     }
 
    async function loadCategoryFromSupabase(category, options = {}){
-      const user = await getCurrentUser();
+  const user = await getCurrentUser();
 
-      if(!user){
-        invalidateRelatedLibraryItemsCache("");
-        state.demoData[category] = [];
-        renderShelf();
-        return false;
-      }
-
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("category", category)
-        .order("id", { ascending: false });
-
-      if(error){
-        console.error("Supabase load error:", error);
-        renderShelf();
-        return false;
-      }
-
-      state.demoData[category] = [];
-      const seen = new Set();
-
-      data.forEach(item => {
-        const dedupeKey =
-          item.canonical_key ||
-          item.work_key ||
-          (item.title || "").trim().toLowerCase();
-
-        if(seen.has(dedupeKey)){
-          return;
-        }
-
-        seen.add(dedupeKey);
-
-        state.demoData[category].push({
-          id: item.id,
-          title: item.title,
-          status: item.status || "Planned",
-          cover: item.cover_url || "",
-          description: item.description || "",
-          description_ru: item.description_ru || "",
-          description_original: item.description_original || item.description_en || "",
-          description_en: item.description_en || "",
-          title_ru: item.title_ru || "",
-          title_en: item.title_en || "",
-          title_original: item.title_original || "",
-          creator: item.creator || "",
-          work_key: item.work_key || "",
-          canonical_key: item.canonical_key || "",
-          folder: item.folder_name || ""
-        });
-      });
-
-      await applyFolderAssignmentsToItems(category);
-      clearRelationCache();
-      clearSearchCaches();
-      if(options.render !== false){
+  if(!user){
+    invalidateRelatedLibraryItemsCache("");
+    state.demoData[category] = [];
+    if(options.render !== false){
       renderShelf();
-       }
-      return true;
-       }
+    }
+    return false;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("user_media")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("category", category)
+    .order("id", { ascending: false });
+
+  if(error){
+    console.error("Supabase load error:", error);
+    if(options.render !== false){
+      renderShelf();
+    }
+    return false;
+  }
+
+  state.demoData[category] = [];
+  const seen = new Set();
+
+  data.forEach(item => {
+    const dedupeKey =
+      item.canonical_key ||
+      item.work_key ||
+      (item.title || "").trim().toLowerCase();
+
+    if(seen.has(dedupeKey)){
+      return;
+    }
+
+    seen.add(dedupeKey);
+
+    state.demoData[category].push({
+      id: item.id,
+      title: item.title,
+      status: item.status || "Planned",
+      cover: item.cover_url || "",
+      description: item.description || "",
+      description_ru: item.description_ru || "",
+      description_original: item.description_original || item.description_en || "",
+      description_en: item.description_en || "",
+      title_ru: item.title_ru || "",
+      title_en: item.title_en || "",
+      title_original: item.title_original || "",
+      creator: item.creator || "",
+      work_key: item.work_key || "",
+      canonical_key: item.canonical_key || "",
+      folder: item.folder_name || ""
+    });
+  });
+
+  await applyFolderAssignmentsToItems(category);
+  clearRelationCache();
+  clearSearchCaches();
+
+  if(options.render !== false){
+    renderShelf();
+  }
+
+  return true;
+}
 
     function closeCardMenu(){
       state.currentOpenMenuItemId = null;
@@ -5525,6 +5531,7 @@ async function openLibraryScreen(options = {}){
   toggleHomeAddPanel(false);
   state.isPublicView = false;
   state.currentOpenItemId = null;
+
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
 
@@ -5533,16 +5540,23 @@ async function openLibraryScreen(options = {}){
   await renderLibraryCategories();
 
   updatePrimaryActionVisibility();
-  saveRouteState({ screen: "library", openItemId: null, isPublicShareRoute: false, shareToken: "" });
+  saveRouteState({
+    screen: "library",
+    openItemId: null,
+    isPublicShareRoute: false,
+    shareToken: ""
+  });
 }
 
 async function ensureLibraryDataLoaded(forceReload = false){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+
   for(const category of categories){
     if(!forceReload && libraryLoadedCategories.has(category)){
       continue;
     }
-    await loadCategoryFromSupabase(category);
+
+    await loadCategoryFromSupabase(category, { render: false });
     libraryLoadedCategories.add(category);
   }
 }
@@ -5550,6 +5564,7 @@ async function ensureLibraryDataLoaded(forceReload = false){
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
+
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
@@ -5559,7 +5574,9 @@ async function renderLibraryCategories(){
     const count = query
       ? items.filter((item) => normalizeComparisonText(item.title || "").includes(query)).length
       : items.length;
+
     if(query && count === 0) return;
+
     const card = document.createElement("button");
     card.type = "button";
     card.className = "card category-card library-category-card";
