@@ -154,10 +154,6 @@ import { state } from "./js/state.js";
       button.setAttribute("aria-expanded", String(shouldOpen));
     }
 
-    function closePreferencesPanel(){
-      togglePreferencesPanel(false);
-    }
-
     function getProfileInitials(displayName = "", username = ""){
       const source = normalizeSpaces(displayName || username || "P");
       const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
@@ -362,10 +358,6 @@ import { state } from "./js/state.js";
     function resetShelfSearchQuery(){
       currentShelfSearchQuery = "";
       syncShelfSearchInput();
-    }
-
-    function updateHeaderCompactState(){
-      document.body.classList.toggle("header-compact", window.scrollY > 18);
     }
 
     async function renderStatusOptions(){
@@ -681,13 +673,6 @@ import { state } from "./js/state.js";
       }
     }
 
-    function toggleHomeAddPanel(force){
-      const panel = document.getElementById("home-add-panel");
-      if(!panel) return;
-      const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
-      panel.classList.toggle("hidden", !shouldOpen);
-    }
-
     async function startQuickAdd(category){
       if(!category) return;
       toggleHomeAddPanel(false);
@@ -747,31 +732,6 @@ import { state } from "./js/state.js";
 
       container.innerHTML = sections;
       container.classList.toggle("hidden", !sections);
-    }
-
-    function goHome(){
-      closePreferencesPanel();
-      resetShelfSearchQuery();
-      toggleHomeAddPanel(false);
-      if(state.activeShareToken && state.currentPublicProfile && !state.currentPublicProfile.isOwner){
-        if(document.body.classList.contains("public-route-active")){
-          showPublicShareScreen(state.currentPublicProfile);
-          renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
-        } else {
-          showPublicLibraryCategoryView(state.currentPublicProfile);
-        }
-        return;
-      }
-      state.isPublicView = false;
-      hideAllScreens();
-      document.getElementById("home-screen").classList.remove("hidden");
-    }
-
-    function backToCategory(){
-      closePreferencesPanel();
-      syncShelfSearchInput();
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
     }
 
     function openAddModal(){
@@ -935,18 +895,7 @@ import { state } from "./js/state.js";
       document.getElementById("status-modal").classList.add("hidden");
     }
 
-    function getFilteredItems(){
-      const items = state.demoData[state.currentCategory] || [];
-      const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
-      return items.filter((item) => {
-        const statusMatches = state.currentCategory === "Blacklist" || state.currentFilterStatus === "All" || item.status === state.currentFilterStatus;
-        const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
-        const searchMatches = !searchComparison || haystack.includes(searchComparison);
-        return statusMatches && searchMatches;
-      });
-    }
-
-    function getItemById(category, id){
+      function getItemById(category, id){
       return (state.demoData[category] || []).find(item => item.id === id) || null;
     }
 
@@ -1454,130 +1403,6 @@ import { state } from "./js/state.js";
   }
 
   return true;
-}
-
-async function fetchWikidataRelations(item){
-  const wikidataId = item?.wikidata_entity_id;
-  if(!wikidataId) return [];
-
-  try {
-    const url = `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`;
-    const res = await fetch(url);
-    const json = await res.json();
-
-    const entity = json?.entities?.[wikidataId];
-    if(!entity?.claims) return [];
-
-    const relations = [];
-
-    // P155 → follows (продолжение)
-    const sequel = entity.claims.P155 || [];
-    sequel.forEach(c => {
-      const id = c?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "sequel",
-          source: "wikidata",
-          confidence: 0.9
-        });
-      }
-    });
-
-    // P156 → followed by (приквел)
-    const prequel = entity.claims.P156 || [];
-    prequel.forEach(c => {
-      const id = c?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "prequel",
-          source: "wikidata",
-          confidence: 0.9
-        });
-      }
-    });
-
-    // P144 → based on (адаптация)
-    const basedOn = entity.claims.P144 || [];
-    basedOn.forEach(c => {
-      const id = c?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "adaptation_of",
-          source: "wikidata",
-          confidence: 0.85
-        });
-      }
-    });
-
-    return relations;
-
-  } catch (e){
-    console.error("Wikidata fetch error", e);
-    return [];
-  }
-}
-
-async function fetchWikidataRelations(item){
-  const wikidataId = item?.wikidata_entity_id;
-  if(!wikidataId) return [];
-
-  try {
-    const url = `https://www.wikidata.org/wiki/Special:EntityData/${wikidataId}.json`;
-    const res = await fetch(url);
-    const json = await res.json();
-
-    const entity = json?.entities?.[wikidataId];
-    if(!entity?.claims) return [];
-
-    const relations = [];
-
-    const followedBy = entity.claims.P156 || [];
-    followedBy.forEach((claim) => {
-      const id = claim?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "sequel",
-          source: "wikidata",
-          confidence: 0.9
-        });
-      }
-    });
-
-    const follows = entity.claims.P155 || [];
-    follows.forEach((claim) => {
-      const id = claim?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "prequel",
-          source: "wikidata",
-          confidence: 0.9
-        });
-      }
-    });
-
-    const basedOn = entity.claims.P144 || [];
-    basedOn.forEach((claim) => {
-      const id = claim?.mainsnak?.datavalue?.value?.id;
-      if(id){
-        relations.push({
-          wikidata_entity_id: id,
-          relation_type: "adaptation_of",
-          source: "wikidata",
-          confidence: 0.85
-        });
-      }
-    });
-
-    return relations;
-  } catch (error) {
-    console.error("RELATIONS BUILD: wikidata fetch error", error);
-    return [];
-  }
 }
 
 async function fetchWikidataRelations(item){
@@ -2991,55 +2816,9 @@ const normalized = candidates
       }
     }
 
-    async function renderFolderModalOptions(){
-      const list = document.getElementById("folder-modal-list");
-      if(!list) return;
-
-      const folders = await getAvailableFolders();
-      const options = ["", ...folders];
-      list.innerHTML = "";
-
-      options.forEach((folder) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "folder-option" + (pendingFolderSelection === folder ? " is-active" : "");
-        button.textContent = folder || t().labels.noFolder;
-        button.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          pendingFolderSelection = folder;
-          renderFolderModalOptions();
-        });
-        list.appendChild(button);
-      });
-    }
-
-    async function openFolderModalById(id){
-      if(!isOwnerControlAllowed()) return;
-      const item = getItemById(state.currentCategory, id);
-      if(!item) return;
-
-      state.currentFolderModalItemId = id;
-      pendingFolderSelection = item.folder || "";
-      await renderFolderModalOptions();
-      document.getElementById("folder-modal")?.classList.remove("hidden");
-    }
-
-    async function openFolderModalByCurrentItem(){
+       async function openFolderModalByCurrentItem(){
       if(!state.currentOpenItemId) return;
       await openFolderModalById(state.currentOpenItemId);
-    }
-
-    function closeFolderModal(){
-      document.getElementById("folder-modal")?.classList.add("hidden");
-      state.currentFolderModalItemId = null;
-      pendingFolderSelection = "";
-    }
-
-    function closeFolderModalOnBackdrop(event){
-      if(event?.target?.id === "folder-modal"){
-        closeFolderModal();
-      }
     }
 
     async function saveItemFolderFromModal(){
@@ -3306,169 +3085,6 @@ const normalized = candidates
       if(!isOwnerControlAllowed()) return;
       closeCardMenu();
       await openFolderModalById(id);
-    }
-
-    function renderShelf(){
-      const shelf = document.getElementById("shelf");
-      if(!shelf) return;
-
-      closeCardMenu();
-      shelf.innerHTML = "";
-      syncShelfSearchInput();
-
-      const filterToolbar = document.getElementById("filter-toolbar");
-      const statusFilterWrap = document.getElementById("status-filter-wrap");
-      if(filterToolbar){
-        if(state.currentCategory === "Blacklist"){
-          filterToolbar.classList.add("hidden");
-        } else {
-          filterToolbar.classList.remove("hidden");
-        }
-      }
-      if(statusFilterWrap){
-        statusFilterWrap.classList.toggle("hidden", state.currentCategory === "Blacklist");
-      }
-
-      const items = getFilteredItems();
-
-      if(items.length === 0){
-        shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-        return;
-      }
-
-      const createCard = (item) => {
-        const coverHtml = item.cover
-          ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
-          : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
-
-        const creatorLine = item.creator
-          ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
-          : "";
-
-        const menuHtml = state.isPublicView
-          ? ""
-          : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
-               <button
-                 class="media-menu-btn"
-                 type="button"
-                 aria-label="${escapeHtml(t().buttons.moreActions)}"
-                 aria-haspopup="true"
-                 aria-expanded="false"
-                 onclick="toggleCardMenu(event, ${item.id})"
-               >⋮</button>
-               <div class="media-menu" role="menu">
-                 <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(t().buttons.addToFolder)}</button>
-                 <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
-                 <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
-               </div>
-             </div>`;
-
-        const card = document.createElement("div");
-        card.className = "media-card";
-        card.dataset.itemId = item.id;
-        card.tabIndex = 0;
-        card.setAttribute("role", "button");
-        card.setAttribute("aria-label", item.title || t().buttons.open);
-        card.innerHTML = `
-          <div class="media-card-top">
-            <div class="media-cover">
-              ${coverHtml}
-            </div>
-            ${menuHtml}
-          </div>
-          <div class="media-info">
-            <h3 class="media-title">${escapeHtml(item.title)}</h3>
-            ${creatorLine}
-            <div class="media-status">${escapeHtml(t().labels.statusLabel)}: ${escapeHtml(translateStatus(item.status || t().labels.unknownStatus))}</div>
-          </div>
-        `;
-        card.addEventListener("click", () => openCardById(item.id));
-        card.addEventListener("keydown", (event) => {
-          if(event.key === "Enter" || event.key === " "){
-            event.preventDefault();
-            openCardById(item.id);
-          }
-        });
-
-        return card;
-      };
-
-      const folders = [];
-      const ungroupedItems = [];
-      const grouped = new Map();
-
-      items.forEach((item) => {
-        const folder = getItemFolder(item);
-        if(!folder){
-          ungroupedItems.push(item);
-          return;
-        }
-
-        if(!grouped.has(folder)){
-          grouped.set(folder, []);
-          folders.push(folder);
-        }
-        grouped.get(folder).push(item);
-      });
-
-      if(ungroupedItems.length){
-        const defaultGrid = document.createElement("div");
-        defaultGrid.className = "shelf";
-        ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
-        shelf.appendChild(defaultGrid);
-      }
-
-      folders.forEach((folder) => {
-        const section = document.createElement("div");
-        section.className = "folder-block";
-        section.innerHTML = `<h3 class="folder-block-title">${escapeHtml(folder)}</h3>`;
-
-        const folderGrid = document.createElement("div");
-        folderGrid.className = "shelf";
-        grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
-        section.appendChild(folderGrid);
-        shelf.appendChild(section);
-      });
-    }
-
-    async function openCategory(name){
-      closePreferencesPanel();
-      state.isPublicView = false;
-      state.currentCategory = name;
-      resetShelfSearchQuery();
-
-      hideAllScreens();
-      document.getElementById("category-screen").classList.remove("hidden");
-      document.getElementById("category-title").textContent = translateCategory(name);
-
-      const addBtn = document.getElementById("add-new-btn");
-      const addFolderBtn = document.getElementById("add-folder-btn");
-      if(addBtn){
-        if(name === "Blacklist"){
-          addBtn.classList.add("hidden");
-          addBtn.style.display = "none";
-        } else {
-          addBtn.classList.remove("hidden");
-          addBtn.style.display = "";
-        }
-      }
-      if(addFolderBtn){
-        if(name === "Blacklist"){
-          addFolderBtn.classList.add("hidden");
-          addFolderBtn.style.display = "none";
-        } else {
-          addFolderBtn.classList.remove("hidden");
-          addFolderBtn.style.display = "";
-        }
-      }
-
-      const tabs = document.getElementById("public-category-tabs");
-      if(tabs){
-        tabs.classList.add("hidden");
-        tabs.style.display = "none";
-      }
-
-      await loadCategoryFromSupabase(name);
     }
 
     async function renderCategorySearchResults() {
@@ -3893,79 +3509,7 @@ const normalized = candidates
       return item;
     }
 
-    async function openCardById(id){
-      closeCardMenu();
-      state.currentOpenItemId = id;
-      const item = getItemById(state.currentCategory, id);
-
-      hideAllScreens();
-      document.getElementById("details-screen").classList.remove("hidden");
-
-      document.getElementById("details-title").textContent = item?.title || "";
-      document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(state.currentCategory);
-      document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
-
-      const coverBox = document.getElementById("details-cover-box");
-      if(item && item.cover){
-        coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`;
-      } else {
-        coverBox.textContent = t().labels.cover;
-      }
-
-      const descriptionEl = document.getElementById("details-description");
-
-      if(!item){
-        descriptionEl.textContent = t().labels.noDescription;
-      } else {
-        descriptionEl.textContent = t().labels.searching;
-        await ensureItemDescriptions(item);
-        const bestDescription = pickBestDescription(item, state.currentLanguage);
-        descriptionEl.textContent = bestDescription || t().labels.noDescription;
-      }
-
-      const canonicalSection = document.getElementById("canonical-key-section");
-      const canonicalInput = document.getElementById("canonical-key-input");
-      const folderSection = document.getElementById("details-folder-section");
-      const folderCurrent = document.getElementById("details-folder-current");
-      const folderButton = document.getElementById("open-folder-modal-btn");
-
-      if(canonicalInput && canonicalSection){
-        canonicalSection.classList.add("hidden");
-        canonicalInput.value = item?.canonical_key || "";
-      }
-
-      if(folderSection && folderCurrent && folderButton){
-        if(state.isPublicView){
-          folderSection.classList.add("hidden");
-        } else {
-          folderSection.classList.remove("hidden");
-          folderCurrent.textContent = item?.folder || t().labels.noFolder;
-          folderButton.disabled = !item;
-        }
-      }
-
-      const statusBtn = document.getElementById("change-status-details-btn");
-      const deleteBtn = document.getElementById("delete-details-btn");
-
-      if(statusBtn){
-        if(state.isPublicView){
-          statusBtn.classList.add("hidden");
-        } else {
-          statusBtn.classList.remove("hidden");
-        }
-      }
-
-      if(deleteBtn){
-        if(state.isPublicView){
-          deleteBtn.classList.add("hidden");
-        } else {
-          deleteBtn.classList.remove("hidden");
-        }
-      }
-    }
-
-    async function deleteItemById(id){
+       async function deleteItemById(id){
       if(state.isPublicView) return;
 
       const item = getItemById(state.currentCategory, id);
@@ -4087,41 +3631,13 @@ const normalized = candidates
       location.reload();
     }
 
-    function setAuthorizedButtons(isAuthorized){
-      const loginBtn = document.getElementById("login-top-btn");
-      const profileBtn = document.getElementById("profile-btn");
-
-      if(loginBtn){
-        loginBtn.classList.toggle("hidden", isAuthorized);
-      }
-
-      if(profileBtn){
-        profileBtn.classList.toggle("hidden", !isAuthorized);
-      }
-
-      if(!isAuthorized){
-        setAvatarPreview("", "", "");
-      }
-    }
-
-async function showAuthorizedUI(){
-  closePreferencesPanel();
-  setPublicRouteMode(false);
-  hideAllScreens();
-  document.getElementById("home-screen").classList.remove("hidden");
-
-      setAuthorizedButtons(true);
-      refreshAccountCollectionsUI();
-      safeLoadProfile("showAuthorizedUI");
-    }
-
-    async function checkAuth(){
+       async function checkAuth(){
       const user = await getCurrentUser();
 
       if(state.activeShareToken){
         setAuthorizedButtons(Boolean(user));
         if(user){
-          await ensurestate.currentProfileData();
+          await ensureCurrentProfileData();
         }
         return;
       }
@@ -4505,7 +4021,7 @@ function normalizePublicProfileRpcPayload(data){
   return { profile, items };
 }
 
-async function ensurestate.currentProfileData(){
+async function ensureCurrentProfileData(){
   const user = await getCurrentUser();
   if(!user) return null;
 
@@ -4555,7 +4071,7 @@ async function upsertCurrentProfilePatch(patch = {}){
     return null;
   }
 
-  const existing = await ensurestate.currentProfileData();
+  const existing = await ensureCurrentProfileData();
   const nextProfile = {
     ...(existing || {}),
     ...patch,
@@ -4605,54 +4121,6 @@ async function upsertCurrentProfilePatch(patch = {}){
   return state.currentProfileData;
 }
 
-function applyShareSettingsToOwnerPanels(profile = {}){
-  const token = profile.nfc_token || profile.public_share_token || "";
-  const url = token ? buildPublicShareUrl(token) : "";
-  const enabled = isShareEnabled(profile);
-  const title = profile.public_card_title || profile.display_name || profile.username || "";
-  const bio = profile.public_card_bio || "";
-  const mode = getShareLibraryMode(profile);
-  const nfcSupported = browserSupportsWebNfc();
-  const shouldShowIphoneHelp = !nfcSupported || isLikelyIphone();
-
-  setCheckedIfPresent("share-modal-public-enabled", enabled);
-  setValueIfPresent("share-modal-card-title", title);
-  setValueIfPresent("share-modal-card-bio", bio);
-  setValueIfPresent("share-modal-library-mode", mode);
-  setValueIfPresent("share-modal-link-input", url);
-  populateShareQr("share-modal-qr-box", "share-modal-qr-image", url);
-
-  setCheckedIfPresent("share-public-enabled-toggle", enabled);
-  setValueIfPresent("share-card-title", title);
-  setValueIfPresent("share-card-bio", bio);
-  setValueIfPresent("share-library-mode", mode);
-  setValueIfPresent("public-share-link-input", url);
-  setValueIfPresent("owner-share-link-input", url);
-  populateShareQr("public-share-qr-box", "public-share-qr-image", url);
-
-  const modalNfcBtn = document.getElementById("share-modal-write-nfc-btn");
-  const ownerNfcBtn = document.getElementById("owner-write-nfc-btn");
-  const modalNfcNote = document.getElementById("share-modal-nfc-note");
-  const ownerNfcNote = document.getElementById("share-nfc-support-note");
-
-  [modalNfcBtn, ownerNfcBtn].forEach((button) => {
-    if(!button) return;
-    button.classList.toggle("hidden", !nfcSupported);
-    button.textContent = t().share.writeNfc;
-  });
-
-  [modalNfcNote, ownerNfcNote].forEach((note) => {
-    if(!note) return;
-    note.classList.remove("hidden");
-    note.textContent = nfcSupported ? t().share.nfcReady : t().share.nfcNotSupported;
-  });
-
-  [document.getElementById("iphone-help-card"), document.getElementById("share-modal-iphone-help-card")].forEach((card) => {
-    if(!card) return;
-    card.classList.toggle("hidden", !shouldShowIphoneHelp);
-  });
-}
-
 function openShareModal(){
   const modal = document.getElementById("share-modal");
   if(modal){
@@ -4665,23 +4133,6 @@ function closeShareModal(){
   if(modal){
     modal.classList.add("hidden");
   }
-}
-
-async function shareLibrary(){
-  const user = await getCurrentUser();
-  if(!user){
-    alert(t().labels.mustBeLoggedIn);
-    return;
-  }
-
-  const profile = await ensurestate.currentProfileData();
-  if(!profile?.public_share_token){
-    alert(t().share.unavailable);
-    return;
-  }
-
-  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
-  openShareModal();
 }
 
 async function copyTextValue(value){
@@ -4771,7 +4222,7 @@ async function regeneratePublicShareToken(){
       const token = await regenerateProfileShareTokenRpc();
       nfcTag = { id: null, token };
     }
-    const refreshedProfile = await ensurestate.currentProfileData();
+    const refreshedProfile = await ensureCurrentProfileData();
     const profile = {
       ...(refreshedProfile || state.currentProfileData || {}),
       nfc_tag_id: nfcTag?.id || refreshedProfile?.nfc_tag_id || state.currentProfileData?.nfc_tag_id || null,
@@ -5466,7 +4917,7 @@ async function changePassword(){
       return;
     }
 
-    const data = await ensurestate.currentProfileData();
+    const data = await ensureCurrentProfileData();
     if(!data){
       resetProfileFields();
       return;
@@ -5754,7 +5205,7 @@ async function removeAvatar(){
         if(state.activeShareToken){
           setAuthorizedButtons(Boolean(session?.user));
           if(session?.user){
-            await ensurestate.currentProfileData();
+            await ensureCurrentProfileData();
           }
           if(isNfcRoute()){
             await loadNfcRoute(state.activeShareToken);
@@ -5782,134 +5233,6 @@ async function removeAvatar(){
         await checkAuth();
       }
     }
-
-    async function init(){
-      applyThemeMode();
-      applyTranslations();
-      updateHeaderCompactState();
-
-      systemThemeMedia.addEventListener("change", () => {
-        if(currentThemeMode === "system"){
-          applyThemeMode();
-        }
-      });
-
-      window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
-
-      document.addEventListener("click", (event) => {
-        const panel = document.getElementById("preferences-panel");
-        const button = document.getElementById("preferences-btn");
-        if(!panel || panel.classList.contains("hidden")) return;
-        if(panel.contains(event.target) || button?.contains(event.target)) return;
-        closePreferencesPanel();
-      });
-
-      document.addEventListener("keydown", (event) => {
-        if(event.key === "Escape"){
-          closePreferencesPanel();
-          closeShareItemModal();
-          closeFolderModal();
-        }
-      });
-
-      window.addEventListener("error", (event) => {
-        showRuntimeError(event?.message || "Unknown script error");
-      });
-
-      window.addEventListener("unhandledrejection", (event) => {
-        const reason = event?.reason;
-        const message = reason?.message || reason || "Unhandled promise rejection";
-        showRuntimeError(message);
-      });
-
-      if(isPublicShareRoute()){
-        await initPublicSharePage();
-        return;
-      }
-
-      await initApp();
-    }
-
-
-Object.assign(translations.en.topbar, {
-  nfc: "NFC"
-});
-Object.assign(translations.ru.topbar, {
-  nfc: "NFC"
-});
-Object.assign(translations.en.profile, {
-  nfcTitle: "NFC",
-  nfcHint: "Manage the connected tag, public card link and future replacement options in a separate settings section.",
-  openNfc: "Open NFC settings"
-});
-Object.assign(translations.ru.profile, {
-  nfcTitle: "NFC",
-  nfcHint: "Управление подключённой меткой, публичной ссылкой и будущей заменой вынесено в отдельный раздел настроек.",
-  openNfc: "Открыть NFC"
-});
-Object.assign(translations.en.buttons, {
-  addFab: "Add"
-});
-Object.assign(translations.ru.buttons, {
-  addFab: "Добавить"
-});
-Object.assign(translations.en.share, {
-  modalTitle: "NFC settings",
-  modalSubtitle: "Manage the public card, QR and NFC link for your profile.",
-  quickActions: "Share library"
-});
-Object.assign(translations.ru.share, {
-  modalTitle: "NFC",
-  modalSubtitle: "Управляйте публичной карточкой, QR-кодом и NFC-ссылкой для профиля.",
-  quickActions: "Поделиться библиотекой"
-});
-
-const baseApplyTranslations = applyTranslations;
-applyTranslations = function applyTranslationsWithRefresh(){
-  baseApplyTranslations();
-  setTextIfPresent("profile-menu-open-btn", t().profile.title);
-  setTextIfPresent("profile-menu-nfc-btn", t().topbar.nfc);
-  setTextIfPresent("profile-menu-logout-btn", t().profile.logout);
-  setTextIfPresent("profile-nfc-title", t().profile.nfcTitle);
-  setTextIfPresent("profile-nfc-hint", t().profile.nfcHint);
-  setTextIfPresent("profile-open-nfc-btn", t().profile.openNfc);
-  setTextIfPresent("share-library-btn", t().topbar.shareLibrary);
-  setTextIfPresent("share-library-copy-action", t().share.copyLink);
-  setTextIfPresent("share-library-qr-action", t().share.showQr);
-  setTextIfPresent("share-library-open-action", t().share.openPublicCard);
-  setTextIfPresent("global-add-fab-label", t().buttons.addFab);
-  updatePrimaryActionVisibility();
-  syncHeaderProfileIdentity();
-};
-
-const baseSetAvatarPreview = setAvatarPreview;
-setAvatarPreview = function setAvatarPreviewWithHeader(url, displayName = "", username = ""){
-  baseSetAvatarPreview(url, displayName, username);
-  const extraImgs = [document.getElementById("header-popover-avatar-img")];
-  const extraFallbacks = [document.getElementById("header-popover-avatar-fallback")];
-  const initials = getProfileInitials(displayName, username);
-  const hasUrl = Boolean(url && String(url).trim());
-
-  extraFallbacks.forEach((node) => {
-    if(node){
-      node.textContent = initials;
-      node.classList.toggle("hidden", hasUrl);
-    }
-  });
-
-  extraImgs.forEach((img) => {
-    if(!img) return;
-    if(hasUrl){
-      img.src = url;
-      img.classList.remove("hidden");
-    } else {
-      img.src = "";
-      img.classList.add("hidden");
-    }
-  });
-
-  syncHeaderProfileIdentity(displayName, username);
-};
 
 function getCurrentShareUrl(){
   return document.getElementById("share-modal-link-input")?.value || buildPublicShareUrl(state.currentProfileData?.nfc_token || state.currentProfileData?.public_share_token || "");
@@ -5959,11 +5282,6 @@ function closeShareMenu(){
   setTextIfPresent("share-library-qr-action", t().share.showQr);
 }
 
-function closePreferencesPanel(){
-  closeProfileMenu();
-  closeShareMenu();
-}
-
 function openProfileFromMenu(){
   closeProfileMenu();
   openProfileModal();
@@ -5976,7 +5294,7 @@ async function openNfcSettingsModal(){
     return;
   }
   closePreferencesPanel();
-  const profile = await ensurestate.currentProfileData();
+  const profile = await ensureCurrentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
@@ -6125,123 +5443,6 @@ function applyShareSettingsToOwnerPanels(profile = {}){
   if(shareBtn){
     shareBtn.disabled = !url;
   }
-}
-
-async function shareLibrary(){
-  const user = await getCurrentUser();
-  if(!user){
-    alert(t().labels.mustBeLoggedIn);
-    return;
-  }
-
-  const profile = await ensurestate.currentProfileData();
-  if(!profile?.public_share_token){
-    alert(t().share.unavailable);
-    return;
-  }
-
-  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
-  toggleShareMenu();
-}
-
-function renderShelf(){
-  const shelf = document.getElementById("shelf");
-  if(!shelf) return;
-
-  closeCardMenu();
-  shelf.innerHTML = "";
-  syncShelfSearchInput();
-
-  const filterToolbar = document.getElementById("filter-toolbar");
-  const statusFilterWrap = document.getElementById("status-filter-wrap");
-  if(filterToolbar){
-    filterToolbar.classList.toggle("hidden", state.currentCategory === "Blacklist");
-  }
-  if(statusFilterWrap){
-    statusFilterWrap.classList.toggle("hidden", state.currentCategory === "Blacklist");
-  }
-
-  const items = getFilteredItems();
-  if(items.length === 0){
-    shelf.innerHTML = `<div class="small">${escapeHtml(t().labels.noResults)}</div>`;
-    return;
-  }
-
-  const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
-  const createCard = (item) => {
-    const coverHtml = item.cover
-      ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
-      : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
-    const creatorLine = item.creator ? `<div class="media-meta">${escapeHtml(item.creator)}</div>` : "";
-    const chips = [
-      buildChip(item.folder || "", "is-folder"),
-      buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
-      buildChip(translateCategory(state.currentCategory), "is-category")
-    ].join("");
-    const menuHtml = state.isPublicView
-      ? ""
-      : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
-           <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
-           <div class="media-menu" role="menu">
-             <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(t().buttons.addToFolder)}</button>
-             <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
-             <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
-           </div>
-         </div>`;
-
-    const card = document.createElement("article");
-    card.className = "media-card";
-    card.dataset.itemId = item.id;
-    card.innerHTML = `
-      <div class="media-card-top">
-        <button class="media-cover-button" type="button" aria-label="${escapeHtml(item.title || t().buttons.open)}" onclick="event.stopPropagation(); openCardById(${item.id})">
-          <div class="media-cover">${coverHtml}</div>
-        </button>
-        ${menuHtml}
-      </div>
-      <div class="media-info">
-        <div class="media-meta-chips">${chips}</div>
-        <h3 class="media-title">${escapeHtml(item.title)}</h3>
-        ${creatorLine}
-      </div>
-    `;
-    return card;
-  };
-
-  const folders = [];
-  const ungroupedItems = [];
-  const grouped = new Map();
-
-  items.forEach((item) => {
-    const folder = getItemFolder(item);
-    if(!folder){
-      ungroupedItems.push(item);
-      return;
-    }
-    if(!grouped.has(folder)){
-      grouped.set(folder, []);
-      folders.push(folder);
-    }
-    grouped.get(folder).push(item);
-  });
-
-  if(ungroupedItems.length){
-    const defaultGrid = document.createElement("div");
-    defaultGrid.className = "shelf";
-    ungroupedItems.forEach((item) => defaultGrid.appendChild(createCard(item)));
-    shelf.appendChild(defaultGrid);
-  }
-
-  folders.forEach((folder) => {
-    const section = document.createElement("section");
-    section.className = "folder-block";
-    section.innerHTML = `<h3 class="folder-block-title"><span>${escapeHtml(folder)}</span><span class="small">${grouped.get(folder).length}</span></h3>`;
-    const folderGrid = document.createElement("div");
-    folderGrid.className = "shelf";
-    grouped.get(folder).forEach((item) => folderGrid.appendChild(createCard(item)));
-    section.appendChild(folderGrid);
-    shelf.appendChild(section);
-  });
 }
 
 function goHome(){
@@ -6478,105 +5679,6 @@ function updateHeaderCompactState(){
   document.body.classList.toggle("header-compact", window.scrollY > 8);
 }
 
-async function init(){
-  applyThemeMode();
-  applyTranslations();
-  updateHeaderCompactState();
-
-  systemThemeMedia.addEventListener("change", () => {
-    if(currentThemeMode === "system"){
-      applyThemeMode();
-    }
-  });
-
-  window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
-
-  document.addEventListener("click", (event) => {
-    const profileMenu = document.getElementById("profile-menu");
-    const profileButton = document.getElementById("profile-btn");
-    if(profileMenu && !profileMenu.classList.contains("hidden") && !profileMenu.contains(event.target) && !profileButton?.contains(event.target)){
-      closeProfileMenu();
-    }
-
-    const shareMenu = document.getElementById("share-library-menu");
-    const shareButton = document.getElementById("share-library-btn");
-    if(shareMenu && !shareMenu.classList.contains("hidden") && !shareMenu.contains(event.target) && !shareButton?.contains(event.target)){
-      closeShareMenu();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if(event.key === "Escape"){
-      closePreferencesPanel();
-      closeShareItemModal();
-      closeFolderModal();
-      toggleHomeAddPanel(false);
-    }
-  });
-
-  window.addEventListener("error", (event) => {
-    showRuntimeError(event?.message || "Unknown script error");
-  });
-
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event?.reason;
-    const message = reason?.message || reason || "Unhandled promise rejection";
-    showRuntimeError(message);
-  });
-
-  if(isPublicShareRoute()){
-    await initPublicSharePage();
-    updatePrimaryActionVisibility();
-    return;
-  }
-
-  await initApp();
-  updatePrimaryActionVisibility();
-}
-
-
-let currentFilterFolder = localStorage.getItem("plamut_folder_filter") || "All";
-let currentItemActionSheetId = null;
-
-Object.assign(translations.en.profile, {
-  folderManagerTitle: "Folders",
-  folderManagerHint: "Create, rename and delete folders inside the current category.",
-  createFolder: "Create folder",
-  renameFolder: "Rename",
-  deleteFolder: "Delete"
-});
-Object.assign(translations.ru.profile, {
-  folderManagerTitle: "Папки",
-  folderManagerHint: "Создавайте, переименовывайте и удаляйте папки внутри текущей категории.",
-  createFolder: "Создать папку",
-  renameFolder: "Переименовать",
-  deleteFolder: "Удалить"
-});
-Object.assign(translations.en.buttons, {
-  cancelShort: "Cancel",
-  removeFromFolder: "Remove from folder",
-  moveToFolder: "Move to folder",
-  manageFolders: "Manage folders"
-});
-Object.assign(translations.ru.buttons, {
-  cancelShort: "Отмена",
-  removeFromFolder: "Убрать из папки",
-  moveToFolder: "Переместить в папку",
-  manageFolders: "Папки"
-});
-Object.assign(translations.en.labels, {
-  foldersEmpty: "No folders yet",
-  foldersManage: "Folders",
-  allItems: "All items",
-  ungroupedItems: "Without folder"
-});
-Object.assign(translations.ru.labels, {
-  foldersEmpty: "Папок пока нет",
-  foldersManage: "Папки",
-  allItems: "Все элементы",
-  ungroupedItems: "Без папки"
-});
-
 function isMobileViewport(){
   return window.matchMedia("(max-width: 720px)").matches;
 }
@@ -6644,7 +5746,7 @@ async function shareLibrary(){
     alert(t().labels.mustBeLoggedIn);
     return;
   }
-  const profile = await ensurestate.currentProfileData();
+  const profile = await ensureCurrentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
