@@ -2960,8 +2960,6 @@ const normalized = candidates
         return;
       }
 
-      renderShelf();
-
       try {
         await loadCategoryFromSupabase(category);
       } catch (error) {
@@ -6160,6 +6158,7 @@ async function renderFolderRail(){
   if(state.isPublicView || state.currentCategory === "Blacklist"){
     rail.classList.add("hidden");
     rail.innerHTML = "";
+    rail.dataset.renderKey = "";
     return;
   }
 
@@ -6167,7 +6166,21 @@ async function renderFolderRail(){
   const usage = await getFolderUsageMap();
   const allCount = (state.demoData[state.currentCategory] || []).length;
   const ungroupedCount = (state.demoData[state.currentCategory] || []).filter((item) => !normalizeSpaces(item.folder || "")).length;
+  const folderSnapshot = folders.map((folder) => `${folder}:${usage.get(folder) || 0}`).join("|");
+  const renderKey = [
+    state.currentCategory,
+    state.currentFilterFolder,
+    state.currentLanguage,
+    allCount,
+    ungroupedCount,
+    folderSnapshot
+  ].join("::");
 
+  if(rail.dataset.renderKey === renderKey){
+    return;
+  }
+  rail.dataset.renderKey = renderKey;
+   
   rail.classList.remove("hidden");
   rail.innerHTML = "";
 
