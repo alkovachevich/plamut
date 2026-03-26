@@ -3047,7 +3047,7 @@ const normalized = candidates
       return true;
     }
 
-    async function loadCategoryFromSupabase(category){
+   async function loadCategoryFromSupabase(category, options = {}){
       const user = await getCurrentUser();
 
       if(!user){
@@ -3107,9 +3107,11 @@ const normalized = candidates
       await applyFolderAssignmentsToItems(category);
       clearRelationCache();
       clearSearchCaches();
+      if(options.render !== false){
       renderShelf();
+       }
       return true;
-    }
+       }
 
     function closeCardMenu(){
       state.currentOpenMenuItemId = null;
@@ -3200,7 +3202,7 @@ const normalized = candidates
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
-      await loadCategoryFromSupabase(state.currentCategory);
+      await loadCategoryFromSupabase(category, { render: false });
     }
 
     async function addSearchResultToLibrary(item){
@@ -5526,6 +5528,7 @@ async function openLibraryScreen(options = {}){
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
 
+  await renderLibraryCategories();
   await ensureLibraryDataLoaded(Boolean(options.forceReload));
   await renderLibraryCategories();
 
@@ -5547,7 +5550,6 @@ async function ensureLibraryDataLoaded(forceReload = false){
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
-  await ensureLibraryDataLoaded();
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
