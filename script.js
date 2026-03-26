@@ -5608,7 +5608,18 @@ async function openLibraryScreen(options = {}){
   state.currentOpenItemId = null;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
-  await renderLibraryCategories();
+  renderLibraryCategories();
+  void ensureLibraryDataLoaded()
+    .then((hasAnyLoadAttempt) => {
+      const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
+      if(!libraryVisible || !hasAnyLoadAttempt){
+        return;
+      }
+      renderLibraryCategories();
+    })
+    .catch((error) => {
+      console.error("Library background preload error:", error);
+    });
   updatePrimaryActionVisibility();
   if(!options.skipRouteSave){
     saveRouteState({ screen: "library", openItemId: null, isPublicShareRoute: false, shareToken: "" });
@@ -5617,6 +5628,7 @@ async function openLibraryScreen(options = {}){
 
 const libraryLoadedCategories = new Set();
 let librarySearchDebounceTimer = null;
+let libraryDataLoadingPromise = null;
 
 function handleLibrarySearchInput(){
   if(librarySearchDebounceTimer){
@@ -5628,22 +5640,36 @@ function handleLibrarySearchInput(){
 }
 
 async function ensureLibraryDataLoaded(){
-  const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-  for(const category of categories){
-    if(libraryLoadedCategories.has(category)){
-      continue;
+  if(libraryDataLoadingPromise){
+    return libraryDataLoadingPromise;
+  }
+
+  libraryDataLoadingPromise = (async () => {
+    let hasAnyLoadAttempt = false;
+    const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+    for(const category of categories){
+      if(libraryLoadedCategories.has(category)){
+        continue;
+      }
+      if(!(state.demoData[category] || []).length){
+        hasAnyLoadAttempt = true;
+        await loadCategoryFromSupabase(category);
+      }
+      libraryLoadedCategories.add(category);
     }
-    if(!(state.demoData[category] || []).length){
-      await loadCategoryFromSupabase(category);
-    }
-    libraryLoadedCategories.add(category);
+    return hasAnyLoadAttempt;
+  })();
+
+  try {
+    return await libraryDataLoadingPromise;
+  } finally {
+    libraryDataLoadingPromise = null;
   }
 }
 
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
-  await ensureLibraryDataLoaded();
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
