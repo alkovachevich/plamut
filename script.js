@@ -2170,14 +2170,14 @@ const normalized = candidates
         creator: row.creator || "",
         cover: row.cover_url || "",
         description: row.description || "",
-        description_ru: row.description_ru || "",
-        description_original: row.description_original || row.description_en || "",
-        description_en: row.description_en || "",
+        description_ru: "",
+        description_original: "",
+        description_en: "",
         work_key: row.work_key || "",
         canonical_key: row.canonical_key || "",
-        title_ru: row.title_ru || "",
-        title_en: row.title_en || "",
-        title_original: row.title_original || ""
+        title_ru: "",
+        title_en: "",
+        title_original: ""
       };
     }
 
@@ -2210,7 +2210,7 @@ const normalized = candidates
 
       const { data, error } = await supabaseClient
         .from("user_media")
-        .select("*")
+        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false })
@@ -3180,12 +3180,12 @@ const normalized = candidates
           status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
-          description_ru: item.description_ru || "",
-          description_original: item.description_original || item.description_en || "",
-          description_en: item.description_en || "",
-          title_ru: item.title_ru || "",
-          title_en: item.title_en || "",
-          title_original: item.title_original || "",
+          description_ru: "",
+          description_original: "",
+          description_en: "",
+          title_ru: "",
+          title_en: "",
+          title_original: "",
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
@@ -4085,7 +4085,7 @@ async function fetchPublicShareLibraryItems(ownerProfileId){
 
   let { data, error } = await supabaseClient
     .from("user_media")
-    .select("*")
+    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
     .eq("user_id", ownerProfileId)
     .or("is_public.is.null,is_public.eq.true")
     .order("id", { ascending: false });
@@ -4093,7 +4093,7 @@ async function fetchPublicShareLibraryItems(ownerProfileId){
   if(error && /is_public/i.test(error.message || "")){
     ({ data, error } = await supabaseClient
       .from("user_media")
-      .select("*")
+      .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
       .eq("user_id", ownerProfileId)
       .order("id", { ascending: false }));
   }
@@ -4419,7 +4419,7 @@ function exitPublicShareRoute(){
 async function fetchPublicLibraryItems(userId){
   const { data, error } = await supabaseClient
     .from("user_media")
-    .select("*")
+    .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
     .eq("user_id", userId)
     .order("id", { ascending: false });
 
