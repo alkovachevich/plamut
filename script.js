@@ -29,31 +29,31 @@ import { state } from "./js/state.js";
       return String(lang || "ru").toUpperCase();
     }
 
-    function getThemeModeLabel(mode = currentThemeMode){
+    function getThemeModeLabel(mode = state.currentThemeMode){
       if(mode === "light") return t().topbar.themeLight;
       if(mode === "dark") return t().topbar.themeDark;
       return t().topbar.themeSystem;
     }
 
-    function resolveThemeMode(mode = currentThemeMode){
+    function resolveThemeMode(mode = state.currentThemeMode){
       if(mode === "system"){
         return systemThemeMedia.matches ? "dark" : "light";
       }
       return mode === "light" ? "light" : "dark";
     }
 
-    function invalidateRelatedLibraryItemsCache(userId = relatedLibraryItemsCache.userId){
-      relatedLibraryItemsCache = { userId: userId || "", items: [], loaded: false, promise: null };
+    function invalidateRelatedLibraryItemsCache(userId = state.relatedLibraryItemsCache.userId){
+      state.relatedLibraryItemsCache = { userId: userId || "", items: [], loaded: false, promise: null };
     }
 
     function clearRelationCache(){
-      relationCache.clear();
-      invalidateRelatedLibraryItemsCache(relatedLibraryItemsCache.userId);
+      state.relationCache.clear();
+      invalidateRelatedLibraryItemsCache(state.relatedLibraryItemsCache.userId);
     }
 
     function clearSearchCaches(){
-      categorySearchCache.clear();
-      categorySearchInFlight.clear();
+  state.categorySearchCache.clear();
+  state.categorySearchInFlight.clear();
     }
 
     function getRelationCacheKey(item, category = state.currentCategory){
@@ -63,15 +63,15 @@ import { state } from "./js/state.js";
 
     function getCachedRelatedItems(item, category = state.currentCategory){
       const key = getRelationCacheKey(item, category);
-      if(!key || !relationCache.has(key)) return null;
-      return relationCache.get(key).map((entry) => ({ ...entry }));
+      if(!key || !state.relationCache.has(key)) return null;
+      return state.relationCache.get(key).map((entry) => ({ ...entry }));
     }
 
     function setCachedRelatedItems(item, category = state.currentCategory, relatedItems = []){
       const key = getRelationCacheKey(item, category);
       if(!key) return [];
       const snapshot = relatedItems.slice(0, 6).map((entry) => ({ ...entry }));
-      relationCache.set(key, snapshot);
+      state.relationCache.set(key, snapshot);
       return snapshot.map((entry) => ({ ...entry }));
     }
 
@@ -94,8 +94,8 @@ import { state } from "./js/state.js";
     }
 
     function setThemeMode(mode){
-      currentThemeMode = ["light", "dark", "system"].includes(mode) ? mode : "system";
-      localStorage.setItem("plamut_theme_mode", currentThemeMode);
+      state.currentThemeMode = ["light", "dark", "system"].includes(mode) ? mode : "system";
+      localStorage.setItem("plamut_theme_mode", state.currentThemeMode);
       applyThemeMode();
     }
 
@@ -132,7 +132,7 @@ import { state } from "./js/state.js";
       [["theme-option-light", "light", t().topbar.themeLight], ["theme-option-dark", "dark", t().topbar.themeDark], ["theme-option-system", "system", t().topbar.themeSystem]].forEach(([id, value, label]) => {
         const button = document.getElementById(id);
         if(!button) return;
-        const isActive = currentThemeMode === value;
+        const isActive = state.currentThemeMode === value;
         button.textContent = label;
         button.classList.toggle("is-active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
@@ -344,19 +344,19 @@ import { state } from "./js/state.js";
     }
 
     function setShelfSearchQuery(value){
-      currentShelfSearchQuery = normalizeSpaces(value);
+      state.currentShelfSearchQuery = normalizeSpaces(value);
       renderShelf();
     }
 
     function syncShelfSearchInput(){
       const input = document.getElementById("shelf-search-input");
       if(input){
-        input.value = currentShelfSearchQuery;
+        input.value = state.currentShelfSearchQuery;
       }
     }
 
     function resetShelfSearchQuery(){
-      currentShelfSearchQuery = "";
+      state.currentShelfSearchQuery = "";
       syncShelfSearchInput();
     }
 
@@ -523,7 +523,7 @@ import { state } from "./js/state.js";
       setTextIfPresent("public-share-back-btn", t().share.back);
       setTextIfPresent("public-share-link-label", t().share.nfcLink);
       setTextIfPresent("public-share-open-library-btn", t().share.openLibrary);
-      setTextIfPresent("public-share-save-btn", currentSavedLibraryState.saved ? t().share.saveToMineDone : t().share.saveToMine);
+      setTextIfPresent("public-share-save-btn", state.currentSavedLibraryState.saved ? t().share.saveToMineDone : t().share.saveToMine);
       setTextIfPresent("public-share-owner-controls-title", t().share.ownerControlsTitle);
       setTextIfPresent("public-share-owner-controls-hint", t().share.ownerControlsHint);
       setTextIfPresent("share-public-enabled-label", t().share.publicAccess);
@@ -685,7 +685,7 @@ import { state } from "./js/state.js";
       if(!button) return;
 
       const isOwner = Boolean(state.currentPublicProfile?.isOwner);
-      const isSaved = Boolean(currentSavedLibraryState.saved);
+      const isSaved = Boolean(state.currentSavedLibraryState.saved);
       button.disabled = isOwner || isSaved;
       button.classList.toggle("hidden", isOwner);
       button.textContent = isSaved ? t().share.saveToMineDone : t().share.saveToMine;
@@ -781,18 +781,6 @@ import { state } from "./js/state.js";
       });
     }
 
-    function openProfileModal(){
-      const modal = document.getElementById("profile-modal");
-
-      closePreferencesPanel();
-      resetProfileSecurityFields();
-
-      if(modal) modal.classList.remove("hidden");
-
-      refreshAccountCollectionsUI();
-      safeLoadProfile("openProfileModal");
-    }
-
     function closeProfileModal(){
       document.getElementById("profile-modal").classList.add("hidden");
     }
@@ -839,56 +827,6 @@ import { state } from "./js/state.js";
       applyTranslations();
       renderShelf();
       alert(`${status}: ${t().profile.customRemoved}`);
-    }
-
-    async function addCustomFolder(){
-      if(!isOwnerControlAllowed()) return;
-      const value = normalizeSpaces(prompt(t().profile.customFolderLabel, ""));
-      if(!value){
-        return;
-      }
-
-      const folders = await getCustomFolders();
-      if(folders.includes(value)){
-        alert(t().profile.customFolderExists);
-        return;
-      }
-
-      folders.push(value);
-      await setCustomFolders(folders);
-      renderFolderFilterOptions();
-      alert(t().profile.customFolderAdded);
-    }
-
-    async function removeCustomFolder(folder){
-      const folders = await getCustomFolders();
-      await setCustomFolders(folders.filter((item) => item !== folder));
-
-      const assignments = await getFolderAssignments();
-      Object.keys(assignments).forEach((key) => {
-        if(assignments[key] === folder){
-          assignments[key] = "";
-        }
-      });
-      await setFolderAssignments(assignments);
-
-      for (const category of Object.keys(state.demoData)){
-        state.demoData[category].forEach((item) => {
-          if(item.folder === folder){
-            item.folder = "";
-          }
-        });
-      }
-
-      renderFolderFilterOptions();
-      renderShelf();
-      alert(`${folder}: ${t().profile.customRemoved}`);
-    }
-
-    function showAuthScreen(){
-      closePreferencesPanel();
-      hideAllScreens();
-      document.getElementById("auth-screen").classList.remove("hidden");
     }
 
     function closeStatusModal(){
@@ -1077,16 +1015,16 @@ import { state } from "./js/state.js";
         return getLoadedLibraryItems();
       }
 
-      if(relatedLibraryItemsCache.loaded && relatedLibraryItemsCache.userId === user.id){
-        return relatedLibraryItemsCache.items;
+      if(state.relatedLibraryItemsCache.loaded && state.relatedLibraryItemsCache.userId === user.id){
+        return state.relatedLibraryItemsCache.items;
       }
 
-      if(relatedLibraryItemsCache.promise && relatedLibraryItemsCache.userId === user.id){
-        return await relatedLibraryItemsCache.promise;
+      if(state.relatedLibraryItemsCache.promise && state.relatedLibraryItemsCache.userId === user.id){
+        return await state.relatedLibraryItemsCache.promise;
       }
 
-      relatedLibraryItemsCache.userId = user.id;
-      relatedLibraryItemsCache.promise = (async () => {
+      state.relatedLibraryItemsCache.userId = user.id;
+      state.relatedLibraryItemsCache.promise = (async () => {
         const { data, error } = await supabaseClient
           .from("user_media")
           .select("id, title, status, cover_url, creator, work_key, canonical_key, category")
@@ -1115,15 +1053,15 @@ import { state } from "./js/state.js";
           return true;
         });
 
-        relatedLibraryItemsCache.items = items;
-        relatedLibraryItemsCache.loaded = true;
+        state.relatedLibraryItemsCache.items = items;
+        state.relatedLibraryItemsCache.loaded = true;
         return items;
       })();
 
       try {
-        return await relatedLibraryItemsCache.promise;
+        return await state.relatedLibraryItemsCache.promise;
       } finally {
-        relatedLibraryItemsCache.promise = null;
+        state.relatedLibraryItemsCache.promise = null;
       }
     }
 
@@ -1524,8 +1462,8 @@ async function fetchTmdbMovieRelations(item){
 
    async function buildRelationsInBackground(item, category, reason = "card_open"){
   const lockKey = `${category}:${item.id}`;
-  if(relationBuildLocks.has(lockKey)){
-    return relationBuildLocks.get(lockKey);
+  if(state.relationBuildLocks.has(lockKey)){
+    return state.relationBuildLocks.get(lockKey);
   }
 
   const task = (async () => {
@@ -1585,11 +1523,11 @@ const normalized = candidates
       updateDetailsRelationsState("error");
       await persistRelationsToDb(item, category, [], "error");
     } finally {
-      relationBuildLocks.delete(lockKey);
+      state.relationBuildLocks.delete(lockKey);
     }
   })();
 
-  relationBuildLocks.set(lockKey, task);
+  state.relationBuildLocks.set(lockKey, task);
   return task;
 }
 
@@ -2306,8 +2244,8 @@ const normalized = candidates
 
     async function buildBookDescriptions(title, author, workKey, isbn = ""){
       const cacheKey = [normalizeComparisonText(title), normalizeComparisonText(author), String(workKey || "").trim(), detectISBN(isbn)].join("|");
-      if(bookDescriptionCache.has(cacheKey)){
-        return { ...bookDescriptionCache.get(cacheKey) };
+      if(state.bookDescriptionCache.has(cacheKey)){
+        return { ...state.bookDescriptionCache.get(cacheKey) };
       }
       let description = "";
       let description_ru = "";
@@ -2369,7 +2307,7 @@ const normalized = candidates
         description_original: description_original || description_en || "",
         description_en: description_en || description_original || ""
       };
-      bookDescriptionCache.set(cacheKey, payload);
+      state.bookDescriptionCache.set(cacheKey, payload);
       return { ...payload };
     }
 
@@ -2596,11 +2534,11 @@ const normalized = candidates
         return [];
       }
       const cacheKey = [category, state.currentLanguage, queryMeta.comparison || queryMeta.isbn || ""].join("|");
-      if(categorySearchCache.has(cacheKey)){
-        return categorySearchCache.get(cacheKey).slice(0, limit);
+      if(state.categorySearchCache.has(cacheKey)){
+        return state.categorySearchCache.get(cacheKey).slice(0, limit);
       }
-      if(categorySearchInFlight.has(cacheKey)){
-        return (await categorySearchInFlight.get(cacheKey)).slice(0, limit);
+      if(state.categorySearchInFlight.has(cacheKey)){
+        return (await state.categorySearchInFlight.get(cacheKey)).slice(0, limit);
       }
 
       const searchPromise = (async () => {
@@ -2630,10 +2568,10 @@ const normalized = candidates
         return dedupeSearchResults(combined).slice(0, limit);
       })();
 
-      categorySearchInFlight.set(cacheKey, searchPromise);
+      state.categorySearchInFlight.set(cacheKey, searchPromise);
       const resolved = await searchPromise;
-      categorySearchInFlight.delete(cacheKey);
-      categorySearchCache.set(cacheKey, resolved.slice(0, limit));
+      state.categorySearchInFlight.delete(cacheKey);
+      state.categorySearchCache.set(cacheKey, resolved.slice(0, limit));
       return resolved.slice(0, limit);
     }
 
@@ -2830,15 +2768,15 @@ const normalized = candidates
       }
 
       const assignments = await getFolderAssignments();
-      assignments[getItemStorageKey({ ...item, category: state.currentCategory })] = pendingFolderSelection || "";
+      assignments[getItemStorageKey({ ...item, category: state.currentCategory })] = state.pendingFolderSelection || "";
       await setFolderAssignments(assignments);
 
-      item.folder = pendingFolderSelection || "";
+      item.folder = state.pendingFolderSelection || "";
       const user = await getCurrentUser();
       if(user && item?.id){
         const { error } = await supabaseClient
           .from("user_media")
-          .update({ folder_name: pendingFolderSelection || null })
+          .update({ folder_name: state.pendingFolderSelection || null })
           .eq("user_id", user.id)
           .eq("id", item.id);
 
@@ -3041,44 +2979,13 @@ const normalized = candidates
     }
 
     function closeCardMenu(){
-      currentOpenMenuItemId = null;
+      state.currentOpenMenuItemId = null;
       document.querySelectorAll(".media-card.menu-open").forEach((card) => {
         card.classList.remove("menu-open");
       });
       document.querySelectorAll(".media-menu-btn[aria-expanded='true']").forEach((button) => {
         button.setAttribute("aria-expanded", "false");
       });
-    }
-
-    function toggleCardMenu(event, id){
-      if(state.isPublicView){
-        if(event){
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
-      if(event){
-        event.preventDefault();
-        event.stopPropagation();
-      }
-
-      const nextId = currentOpenMenuItemId === id ? null : id;
-      closeCardMenu();
-      currentOpenMenuItemId = nextId;
-
-      if(nextId === null){
-        return;
-      }
-
-      const card = document.querySelector(`.media-card[data-item-id="${id}"]`);
-      const button = card?.querySelector(".media-menu-btn");
-      if(card){
-        card.classList.add("menu-open");
-      }
-      if(button){
-        button.setAttribute("aria-expanded", "true");
-      }
     }
 
     async function openFolderPickerById(id){
@@ -3088,10 +2995,10 @@ const normalized = candidates
     }
 
     async function renderCategorySearchResults() {
-      clearTimeout(searchTimer);
-      const searchToken = ++activeCategorySearchToken;
+      clearTimeout(state.searchTimer);
+      const searchToken = ++state.activeCategorySearchToken;
 
-      searchTimer = setTimeout(async () => {
+      state.searchTimer = setTimeout(async () => {
         const container = document.getElementById("search-results");
         const input = document.getElementById("search-input");
 
@@ -3109,7 +3016,7 @@ const normalized = candidates
 
         try {
           const results = dedupeSearchResults(await searchByCategory(state.currentCategory, query, 10));
-          if(searchToken !== activeCategorySearchToken) return;
+          if(searchToken !== state.activeCategorySearchToken) return;
           state.currentSearchResults = results;
 
           if(results.length === 0){
@@ -3143,7 +3050,7 @@ const normalized = candidates
           });
         } catch (error) {
           console.error("Category search error:", error);
-          if(searchToken !== activeCategorySearchToken) return;
+          if(searchToken !== state.activeCategorySearchToken) return;
           container.innerHTML = `
             <div class="small">${escapeHtml(t().labels.apiError)}: ${escapeHtml(error.message)}</div>
             <div class="modal-actions" style="justify-content:flex-start;margin-top:12px;">
@@ -3310,7 +3217,7 @@ const normalized = candidates
       closeCardMenu();
       const item = getItemById(state.currentCategory, id);
       if(!item) return;
-      currentStatusItemId = id;
+      state.currentStatusItemId = id;
       state.currentOpenItemId = id;
       renderStatusOptions();
       document.getElementById("status-modal").classList.remove("hidden");
@@ -3323,14 +3230,14 @@ const normalized = candidates
         alert(t().labels.itemNotFound);
         return;
       }
-      currentStatusItemId = item.id;
+      state.currentStatusItemId = item.id;
       renderStatusOptions();
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     async function setStatus(status){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(state.currentCategory, currentStatusItemId);
+      const item = getItemById(state.currentCategory, state.currentStatusItemId);
       if(!item) return;
 
       const oldStatus = item.status;
@@ -3359,7 +3266,7 @@ const normalized = candidates
         return;
       }
 
-      const item = getItemById(state.currentCategory, currentStatusItemId);
+      const item = getItemById(state.currentCategory, state.currentStatusItemId);
       if(!item) return;
 
       const confirmed = confirm(t().labels.confirmMoveToBlacklist);
@@ -3625,12 +3532,6 @@ const normalized = candidates
       await showAuthorizedUI();
     }
 
-    async function logout(){
-      closeProfileModal();
-      await supabaseClient.auth.signOut();
-      location.reload();
-    }
-
        async function checkAuth(){
       const user = await getCurrentUser();
 
@@ -3799,7 +3700,7 @@ async function saveLibraryFallback(ownerProfileId, token){
   const next = Array.isArray(saved) ? saved : [];
   const exists = next.some((item) => item.owner_profile_id === ownerProfileId || item.nfc_token === token);
   if(exists){
-    currentSavedLibraryState = { saved: true, source: "local" };
+    state.currentSavedLibraryState = { saved: true, source: "local" };
     return "exists";
   }
 
@@ -3809,15 +3710,15 @@ async function saveLibraryFallback(ownerProfileId, token){
     saved_at: new Date().toISOString()
   });
   await setAccountStorageValue("saved_libraries", next);
-  currentSavedLibraryState = { saved: true, source: "local" };
+  state.currentSavedLibraryState = { saved: true, source: "local" };
   return "saved";
 }
 
 async function getSavedLibraryState(ownerProfileId, token){
   const user = await getCurrentUser();
   if(!user || !ownerProfileId){
-    currentSavedLibraryState = { saved: false, source: "none" };
-    return currentSavedLibraryState;
+    state.currentSavedLibraryState = { saved: false, source: "none" };
+    return state.currentSavedLibraryState;
   }
 
   const { data, error } = await supabaseClient
@@ -3831,17 +3732,17 @@ async function getSavedLibraryState(ownerProfileId, token){
     console.error("Saved library lookup error:", error);
     const saved = await getAccountStorageValue("saved_libraries", []);
     const exists = Array.isArray(saved) && saved.some((item) => item.owner_profile_id === ownerProfileId || item.nfc_token === token);
-    currentSavedLibraryState = { saved: exists, source: exists ? "local" : "none" };
-    return currentSavedLibraryState;
+    state.currentSavedLibraryState = { saved: exists, source: exists ? "local" : "none" };
+    return state.currentSavedLibraryState;
   }
 
-  currentSavedLibraryState = { saved: Boolean(data?.length), source: data?.length ? "remote" : "none" };
-  return currentSavedLibraryState;
+  state.currentSavedLibraryState = { saved: Boolean(data?.length), source: data?.length ? "remote" : "none" };
+  return state.currentSavedLibraryState;
 }
 
 async function saveCurrentLibraryToCollection(){
-  const ownerProfileId = state.currentPublicProfile?.id || currentNfcContext?.ownerId || null;
-  const token = currentNfcContext?.token || state.activeShareToken || state.currentPublicProfile?.public_share_token || "";
+  const ownerProfileId = state.currentPublicProfile?.id || state.currentNfcContext?.ownerId || null;
+  const token = state.currentNfcContext?.token || state.activeShareToken || state.currentPublicProfile?.public_share_token || "";
   const user = await getCurrentUser();
 
   if(!user){
@@ -3860,7 +3761,7 @@ async function saveCurrentLibraryToCollection(){
     return;
   }
 
-  const nfcTagId = currentNfcContext?.tagId || null;
+  const nfcTagId = state.currentNfcContext?.tagId || null;
   const payload = {
     user_id: user.id,
     owner_profile_id: ownerProfileId,
@@ -3874,7 +3775,7 @@ async function saveCurrentLibraryToCollection(){
 
   if(error){
     if(/duplicate|unique/i.test(String(error.message || ""))){
-      currentSavedLibraryState = { saved: true, source: "remote" };
+      state.currentSavedLibraryState = { saved: true, source: "remote" };
       updatePublicSaveButton();
       alert(t().share.alreadySaved);
       return;
@@ -3887,7 +3788,7 @@ async function saveCurrentLibraryToCollection(){
     return;
   }
 
-  currentSavedLibraryState = { saved: true, source: "remote" };
+  state.currentSavedLibraryState = { saved: true, source: "remote" };
   updatePublicSaveButton();
   alert(t().share.savedToMine);
 }
@@ -4308,7 +4209,7 @@ async function fetchPublicLibraryItems(userId){
 
 function applyPublicLibraryItems(data = []){
   ensurePublicProfileCollectionsReset();
-  currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
+  state.currentPublicLibraryMeta = { categories: [], folders: [], statuses: [] };
   const seen = new Set();
   const categories = new Set();
   const folders = new Set();
@@ -4345,7 +4246,7 @@ function applyPublicLibraryItems(data = []){
     });
   });
 
-  currentPublicLibraryMeta = {
+  state.currentPublicLibraryMeta = {
     categories: Array.from(categories),
     folders: Array.from(folders),
     statuses: Array.from(statuses)
@@ -4403,7 +4304,7 @@ function getDefaultPublicCategory(){
 
 async function openOwnerLibraryFromNfc(profile = {}, token = ""){
   state.activeShareToken = "";
-  currentNfcContext = {
+  state.currentNfcContext = {
     token: token || "",
     ownerId: profile.id || null,
     mode: "owner",
@@ -4470,11 +4371,11 @@ function syncPublicQrButtons(){
 }
 
 function setPublicLibraryExpanded(expanded = false, options = {}){
-  publicLibraryExpanded = Boolean(expanded);
+  state.publicLibraryExpanded = Boolean(expanded);
   const section = document.getElementById("public-share-library-section");
   if(!section) return;
 
-  const shouldShowSection = publicLibraryExpanded && currentPublicShareState !== "error";
+  const shouldShowSection = state.publicLibraryExpanded && state.currentPublicShareState !== "error";
   section.classList.toggle("hidden", !shouldShowSection);
 
   if(shouldShowSection && options.scroll !== false){
@@ -4552,11 +4453,11 @@ async function showPublicShareScreen(profile){
 
 async function loadPublicShareRoute(token){
   state.activeShareToken = token || "";
-  currentNfcContext = null;
+  state.currentNfcContext = null;
   state.currentPublicProfile = null;
-  currentPublicShareItems = [];
-  currentPublicShareState = "loading";
-  publicLibraryExpanded = false;
+  state.currentPublicShareItems = [];
+  state.currentPublicShareState = "loading";
+  state.publicLibraryExpanded = false;
 
   setPublicRouteMode(true);
   hideAllScreens();
@@ -4594,10 +4495,10 @@ async function loadPublicShareRoute(token){
 async function loadNfcRoute(token){
   state.activeShareToken = token || "";
   state.currentPublicProfile = null;
-  currentPublicShareItems = [];
-  currentPublicShareState = "loading";
-  publicLibraryExpanded = true;
-  currentSavedLibraryState = { saved: false, source: "none" };
+  state.currentPublicShareItems = [];
+  state.currentPublicShareState = "loading";
+  state.publicLibraryExpanded = true;
+  state.currentSavedLibraryState = { saved: false, source: "none" };
 
   setPublicRouteMode(true);
   hideAllScreens();
@@ -4646,7 +4547,7 @@ async function loadNfcRoute(token){
       return true;
     }
 
-    currentNfcContext = {
+    state.currentNfcContext = {
       token: tag.token,
       ownerId: tag.user_id,
       mode: "guest",
@@ -4673,8 +4574,8 @@ async function loadNfcRoute(token){
   }
 }
 
-function renderShareState(state = "loading"){
-  currentPublicShareState = state;
+function renderShareState(viewState = "loading"){
+  state.currentPublicShareState = viewState;
   const loadingCard = document.getElementById("public-share-loading-card");
   const mainCard = document.getElementById("public-share-main-card");
   const errorCard = document.getElementById("public-share-error-card");
@@ -4683,19 +4584,19 @@ function renderShareState(state = "loading"){
   const empty = document.getElementById("public-share-empty");
   const grid = document.getElementById("public-share-preview-grid");
 
-  if(loadingCard) loadingCard.classList.toggle("hidden", state !== "loading");
-  if(errorCard) errorCard.classList.toggle("hidden", state !== "error");
-  if(mainCard) mainCard.classList.toggle("hidden", state === "loading" || state === "error" || !state.currentPublicProfile);
-  if(ownerControls && (state === "loading" || state === "error" || !state.currentPublicProfile)){
+  if(loadingCard) loadingCard.classList.toggle("hidden", viewState !== "loading");
+  if(errorCard) errorCard.classList.toggle("hidden", viewState !== "error");
+  if(mainCard) mainCard.classList.toggle("hidden", viewState === "loading" || viewState === "error" || !state.currentPublicProfile);
+  if(ownerControls && (viewState === "loading" || viewState === "error" || !state.currentPublicProfile)){
     ownerControls.classList.add("hidden");
   }
 
-  const showLibrarySection = publicLibraryExpanded && state !== "error";
+  const showLibrarySection = state.publicLibraryExpanded && viewState !== "error";
   setPublicLibraryExpanded(showLibrarySection, { scroll: false });
 
-  if(loading) loading.classList.toggle("hidden", !(showLibrarySection && state === "loading"));
-  if(empty) empty.classList.toggle("hidden", !(showLibrarySection && state === "empty"));
-  if(grid) grid.classList.toggle("hidden", !(showLibrarySection && state === "ready"));
+  if(loading) loading.classList.toggle("hidden", !(showLibrarySection && viewState === "loading"));
+  if(empty) empty.classList.toggle("hidden", !(showLibrarySection && viewState === "empty"));
+  if(grid) grid.classList.toggle("hidden", !(showLibrarySection && viewState === "ready"));
 }
 
 function buildShareMetaRow(label, value){
@@ -4788,22 +4689,22 @@ function renderShareLibrary(items = []){
   const grid = document.getElementById("public-share-preview-grid");
   if(!grid) return;
 
-  currentPublicShareItems = Array.isArray(items) ? items.map((item) => ({
+  state.currentPublicShareItems = Array.isArray(items) ? items.map((item) => ({
     ...item,
     cover: item.cover || item.cover_url || ""
   })) : [];
-  applyPublicLibraryItems(currentPublicShareItems);
+  applyPublicLibraryItems(state.currentPublicShareItems);
   applyTranslations();
   renderPublicLibraryMeta();
 
-  if(currentPublicShareItems.length === 0){
+  if(state.currentPublicShareItems.length === 0){
     grid.innerHTML = "";
     renderShareState("empty");
     return;
   }
 
   grid.innerHTML = "";
-  currentPublicShareItems.forEach((item) => {
+  state.currentPublicShareItems.forEach((item) => {
     grid.appendChild(renderShareItemCard(item));
   });
   renderShareState("ready");
@@ -4825,7 +4726,7 @@ function openSharedLibrary(){
       return;
     }
     setPublicLibraryExpanded(true);
-    renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState === "loading" ? "loading" : "empty");
+    renderShareState(state.currentPublicShareItems.length ? "ready" : state.currentPublicShareState === "loading" ? "loading" : "empty");
     return;
   }
 
@@ -5345,20 +5246,6 @@ function toggleShareMenuQr(){
   setTextIfPresent("share-library-qr-action", shouldOpen ? t().share.hideQr : t().share.showQr);
 }
 
-function handlePrimaryAddAction(){
-  if(document.getElementById("home-screen") && !document.getElementById("home-screen").classList.contains("hidden")){
-    toggleHomeAddPanel();
-    return;
-  }
-  if(document.getElementById("library-screen") && !document.getElementById("library-screen").classList.contains("hidden")){
-    openAddModal();
-    return;
-  }
-  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !state.isPublicView && state.currentCategory !== "Blacklist"){
-    openAddModal();
-  }
-}
-
 function updatePrimaryActionVisibility(){
   const fab = document.getElementById("global-add-fab");
   const libraryLaunch = document.querySelector(".home-library-launch-wrap");
@@ -5452,7 +5339,7 @@ function goHome(){
   if(state.activeShareToken && state.currentPublicProfile && !state.currentPublicProfile.isOwner){
     if(document.body.classList.contains("public-route-active")){
       showPublicShareScreen(state.currentPublicProfile);
-      renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
+      renderShareState(state.currentPublicShareItems.length ? "ready" : state.currentPublicShareState);
     } else {
       showPublicLibraryCategoryView(state.currentPublicProfile);
     }
@@ -5771,7 +5658,7 @@ function closeItemActionsSheetOnBackdrop(event){
 async function removeItemFromFolderById(id){
   const item = getItemById(state.currentCategory, id);
   if(!item) return;
-  pendingFolderSelection = "";
+  state.pendingFolderSelection = "";
   state.currentFolderModalItemId = id;
   await saveItemFolderFromModal();
   closeItemActionsSheet();
@@ -5848,9 +5735,9 @@ function toggleCardMenu(event, id){
     openItemActionsSheet(id);
     return;
   }
-  const nextId = currentOpenMenuItemId === id ? null : id;
+  const nextId = state.currentOpenMenuItemId === id ? null : id;
   closeCardMenu();
-  currentOpenMenuItemId = nextId;
+  state.currentOpenMenuItemId = nextId;
   if(nextId === null) return;
   const card = document.querySelector(`.media-card[data-item-id="${id}"]`);
   const button = card?.querySelector(".media-menu-btn");
@@ -6105,7 +5992,7 @@ async function openFolderModalById(id){
   const item = getItemById(state.currentCategory, id);
   if(!item) return;
   state.currentFolderModalItemId = id;
-  pendingFolderSelection = item.folder || "";
+  state.pendingFolderSelection = item.folder || "";
   await renderFolderModalOptions();
   document.getElementById("folder-modal")?.classList.remove("hidden");
   setBodySheetLock(true);
@@ -6114,7 +6001,7 @@ async function openFolderModalById(id){
 function closeFolderModal(){
   document.getElementById("folder-modal")?.classList.add("hidden");
   state.currentFolderModalItemId = null;
-  pendingFolderSelection = "";
+  state.pendingFolderSelection = "";
   syncBodySheetLock();
 }
 
@@ -6127,15 +6014,15 @@ async function renderFolderModalOptions(){
   options.forEach((folder) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "folder-option" + (pendingFolderSelection === folder ? " is-active" : "");
+    button.className = "folder-option" + (state.pendingFolderSelection === folder ? " is-active" : "");
     button.innerHTML = `
       <span>${escapeHtml(folder || t().labels.noFolder)}</span>
-      <span class="small">${pendingFolderSelection === folder ? "✓" : ""}</span>
+      <span class="small">${state.pendingFolderSelection === folder ? "✓" : ""}</span>
     `;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      pendingFolderSelection = folder;
+      state.pendingFolderSelection = folder;
       renderFolderModalOptions();
     });
     list.appendChild(button);
@@ -6150,7 +6037,7 @@ function closeFolderModalOnBackdrop(event){
 
 function getFilteredItems(){
   const items = state.demoData[state.currentCategory] || [];
-  const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
+  const searchComparison = normalizeComparisonText(state.currentShelfSearchQuery);
   return items.filter((item) => {
     const statusMatches = state.currentCategory === "Blacklist" || state.currentFilterStatus === "All" || item.status === state.currentFilterStatus;
     const folderMatches = currentFilterFolder === "All"
@@ -6288,7 +6175,7 @@ async function init(){
   applyTranslations();
   updateHeaderCompactState();
   systemThemeMedia.addEventListener("change", () => {
-    if(currentThemeMode === "system") applyThemeMode();
+    if(state.currentThemeMode === "system") applyThemeMode();
   });
   window.addEventListener("scroll", updateHeaderCompactState, { passive: true });
   window.addEventListener("resize", () => {
