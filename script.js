@@ -6341,6 +6341,12 @@ async function init(){
   applyThemeMode();
   applyTranslations();
   updateHeaderCompactState();
+
+   const librarySearchInput = document.getElementById("library-search-input");
+if(librarySearchInput){
+  librarySearchInput.addEventListener("input", handleLibrarySearchInput);
+}
+   
   systemThemeMedia.addEventListener("change", () => {
     if(state.currentThemeMode === "system") applyThemeMode();
   });
