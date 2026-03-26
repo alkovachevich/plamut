@@ -726,77 +726,47 @@ import { state } from "./js/state.js";
     }
 
     async function restoreRouteState(options = {}){
-      const routeState = readRouteState();
-      if(!routeState){
-        return false;
-      }
-
-      const isAuthenticated = Boolean(options.isAuthenticated);
-      if(!isAuthenticated && !routeState.isPublicShareRoute){
-        return false;
-      }
-
-      routeRestoreInProgress = true;
-      try {
-        if(routeState.isPublicShareRoute && routeState.shareToken){
-          if(routeState.sharePath === "nfc"){
-            return await loadNfcRoute(routeState.shareToken);
-          }
-          return await loadPublicShareRoute(routeState.shareToken);
-        }
-
-        if(!isAuthenticated){
-          return false;
-        }
-
-        const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-        const hasCategory = categories.includes(routeState.category);
-        const screen = routeState.screen || "home";
-
-        if(screen === "library"){
-        await openLibraryScreen({ forceReload: true });
-        return true;
-        }
-
-        if((screen === "category" || screen === "details") && hasCategory){
-  const categoryAlreadyLoaded =
-    state.currentCategory === routeState.category &&
-    Array.isArray(state.demoData[routeState.category]) &&
-    state.demoData[routeState.category].length > 0;
-
-  if(categoryAlreadyLoaded){
-    state.currentCategory = routeState.category;
-    hideAllScreens();
-    document.getElementById("category-screen").classList.remove("hidden");
-    document.getElementById("category-title").textContent = translateCategory(routeState.category);
-    renderShelf();
-  } else {
-    await openCategory(routeState.category);
+  const routeState = readRouteState();
+  if(!routeState){
+    return false;
   }
 
-  if(screen === "details" && Number.isFinite(Number(routeState.openItemId))){
-    const restoredItemId = Number(routeState.openItemId);
-    const item = getItemById(routeState.category, restoredItemId);
-    if(item){
-      await openCardById(restoredItemId);
+  const isAuthenticated = Boolean(options.isAuthenticated);
+  if(!isAuthenticated && !routeState.isPublicShareRoute){
+    return false;
+  }
+
+  routeRestoreInProgress = true;
+  try {
+    if(routeState.isPublicShareRoute && routeState.shareToken){
+      if(routeState.sharePath === "nfc"){
+        return await loadNfcRoute(routeState.shareToken);
+      }
+      return await loadPublicShareRoute(routeState.shareToken);
     }
+
+    if(!isAuthenticated){
+      return false;
+    }
+
+    if(routeState.screen === "home"){
+      goHome();
+      return true;
+    }
+
+    if(routeState.screen === "library"){
+      await openLibraryScreen();
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error("Route state restore error:", error);
+    return false;
+  } finally {
+    routeRestoreInProgress = false;
   }
-  return true;
 }
-
-        if(screen === "home"){
-          goHome();
-          return true;
-        }
-
-        return false;
-      } catch (error) {
-        console.error("Route state restore error:", error);
-        return false;
-      } finally {
-        routeRestoreInProgress = false;
-      }
-    }
 
     function setPublicRouteMode(active){
       document.body.classList.toggle("public-route-active", Boolean(active));
@@ -3670,7 +3640,7 @@ const normalized = candidates
         return;
       }
 
-      await showAuthorizedUI();
+     await showAuthorizedUI({ restoreRoute: true });
     }
 
        async function checkAuth(){
@@ -3691,7 +3661,7 @@ const normalized = candidates
         refreshAccountCollectionsUI();
         clearRouteState();
       } else {
-        await showAuthorizedUI();
+       await showAuthorizedUI({ restoreRoute: true });
       }
     }
 
@@ -5273,18 +5243,17 @@ async function removeAvatar(){
         }
 
         if(session?.user){
-          await showAuthorizedUI();
-        } else {
-          closePreferencesPanel();
-          hideAllScreens();
-          document.getElementById("auth-screen").classList.remove("hidden");
-          setAuthorizedButtons(false);
-          clearRouteState();
+  await showAuthorizedUI({ restoreRoute: false });
+} else {
+  closePreferencesPanel();
+  hideAllScreens();
+  document.getElementById("auth-screen").classList.remove("hidden");
+  setAuthorizedButtons(false);
+  clearRouteState();
 
-          if(loginBtn) loginBtn.classList.remove("hidden");
-          if(profileBtn) profileBtn.classList.add("hidden");
-        }
-      });
+  if(loginBtn) loginBtn.classList.remove("hidden");
+  if(profileBtn) profileBtn.classList.add("hidden");
+}
 
       const openedPublic = await checkPublicRoute();
       if(!openedPublic){
@@ -5526,7 +5495,7 @@ function handleLibrarySearchInput(){
   }, 120);
 }
 
-async function openLibraryScreen(options = {}){
+async function openLibraryScreen(){
   closePreferencesPanel();
   toggleHomeAddPanel(false);
   state.isPublicView = false;
@@ -5535,8 +5504,7 @@ async function openLibraryScreen(options = {}){
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
 
-  await renderLibraryCategories();
-  await ensureLibraryDataLoaded(Boolean(options.forceReload));
+  await ensureLibraryDataLoaded();
   await renderLibraryCategories();
 
   updatePrimaryActionVisibility();
@@ -5548,14 +5516,10 @@ async function openLibraryScreen(options = {}){
   });
 }
 
-async function ensureLibraryDataLoaded(forceReload = false){
+async function ensureLibraryDataLoaded(){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
 
   for(const category of categories){
-    if(!forceReload && libraryLoadedCategories.has(category)){
-      continue;
-    }
-
     await loadCategoryFromSupabase(category, { render: false });
     libraryLoadedCategories.add(category);
   }
@@ -5715,17 +5679,22 @@ async function openCardById(id){
 async function showAuthorizedUI(options = {}){
   closePreferencesPanel();
   setPublicRouteMode(false);
-  const shouldRestoreRoute = options.restoreRoute !== false;
-  const restored = shouldRestoreRoute ? await restoreRouteState({ isAuthenticated: true }) : false;
+
+  const shouldRestoreRoute = options.restoreRoute === true;
+  const restored = shouldRestoreRoute
+    ? await restoreRouteState({ isAuthenticated: true })
+    : false;
+
   if(!restored){
     hideAllScreens();
     document.getElementById("home-screen").classList.remove("hidden");
     saveRouteState({ screen: "home", isPublicShareRoute: false, shareToken: "" });
   }
+
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
   await safeLoadProfile("showAuthorizedUI");
-   updatePrimaryActionVisibility();
+  updatePrimaryActionVisibility();
 }
 
 function showAuthScreen(){
