@@ -6382,12 +6382,6 @@ async function init(){
     saveRouteState();
   }
 });
-    const user = await getCurrentUser();
-    const currentScreen = getVisibleScreenName();
-    if(user && (currentScreen === "home" || currentScreen === "auth")){
-      await restoreRouteState({ isAuthenticated: true });
-    }
-  });
   if(isPublicShareRoute()){
     await initPublicSharePage();
     updatePrimaryActionVisibility();
