@@ -1079,19 +1079,31 @@ import { state } from "./js/state.js";
       const meta = typeof query === "string" ? normalizeQuery(query) : (query || normalizeQuery(""));
       const clean = meta.text || normalizeSpaces(query);
       const list = [];
+      const seen = new Set();
+
+      function pushQuery(value){
+        const normalized = normalizeSpaces(value);
+        if(!normalized) return;
+        const key = normalizeComparisonText(normalized);
+        if(!key || seen.has(key)) return;
+        seen.add(key);
+        list.push(normalized);
+      }
+
       if(meta.isbn){
-        list.push(meta.isbn);
+        pushQuery(meta.isbn);
         return list;
       }
-      if(clean) list.push(clean);
+
+      pushQuery(clean);
 
       try {
         if(meta.hasCyrillic){
           const en = await translateTextToEnglish(clean);
-          if(en && !list.includes(en)) list.push(en);
+          pushQuery(en);
         } else if(meta.hasLatin){
           const ru = await translateTextToRussian(clean);
-          if(ru && !list.includes(ru)) list.push(ru);
+          pushQuery(ru);
         }
       } catch (e) {
         console.error("Search translation error:", e);
@@ -2174,9 +2186,9 @@ const normalized = candidates
         creator: row.creator || "",
         cover: row.cover_url || "",
         description: row.description || "",
-        description_ru: "",
-        description_original: "",
-        description_en: "",
+        description_ru: row.description_ru || "",
+        description_original: row.description_en || "",
+        description_en: row.description_en || "",
         work_key: row.work_key || "",
         canonical_key: row.canonical_key || "",
         title_ru: "",
@@ -2214,7 +2226,7 @@ const normalized = candidates
 
       const { data, error } = await supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
+        .select("id, title, status, cover_url, description, description_ru, description_en, creator, work_key, canonical_key, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false })
@@ -3145,7 +3157,7 @@ const normalized = candidates
 
       const { data, error } = await retryReadQuery(() => supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, category")
+        .select("id, title, status, cover_url, description, description_ru, description_en, creator, work_key, canonical_key, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false }), 2, 220);
@@ -3182,9 +3194,9 @@ const normalized = candidates
           status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
-          description_ru: "",
-          description_original: "",
-          description_en: "",
+          description_ru: item.description_ru || "",
+          description_original: item.description_en || "",
+          description_en: item.description_en || "",
           title_ru: "",
           title_en: "",
           title_original: "",
@@ -3320,7 +3332,7 @@ const normalized = candidates
       let finalDescription = item.description || "";
       let finalDescriptionRu = item.description_ru || "";
       let finalDescriptionOriginal = item.description_original || item.description_en || "";
-      let finalDescriptionEn = item.description_en || "";
+      let finalDescriptionEn = item.description_en || item.description_original || "";
 
       if(targetCategory === "Books"){
         const hasLocalized = Boolean(finalDescriptionRu && (finalDescriptionOriginal || finalDescriptionEn) && finalDescription);
@@ -3575,7 +3587,10 @@ const normalized = candidates
       let changed = false;
 
       if(state.currentCategory === "Books"){
-        if(!item.description_ru || !item.description_original || !item.description){
+        if(!item.description_original && item.description_en){
+          item.description_original = item.description_en;
+        }
+        if(!item.description_ru || !(item.description_original || item.description_en) || !item.description){
           const descriptions = await buildBookDescriptions(
             item.title || "",
             item.creator || "",
