@@ -667,6 +667,7 @@ import { state } from "./js/state.js";
 
     const ROUTE_STATE_STORAGE_KEY = "plamut_route_state";
     let routeRestoreInProgress = false;
+    let authBootstrapCompleted = false;
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -726,47 +727,74 @@ import { state } from "./js/state.js";
     }
 
     async function restoreRouteState(options = {}){
-  const routeState = readRouteState();
-  if(!routeState){
-    return false;
-  }
-
-  const isAuthenticated = Boolean(options.isAuthenticated);
-  if(!isAuthenticated && !routeState.isPublicShareRoute){
-    return false;
-  }
-
-  routeRestoreInProgress = true;
-  try {
-    if(routeState.isPublicShareRoute && routeState.shareToken){
-      if(routeState.sharePath === "nfc"){
-        return await loadNfcRoute(routeState.shareToken);
+      const routeState = readRouteState();
+      if(!routeState){
+        return false;
       }
-      return await loadPublicShareRoute(routeState.shareToken);
-    }
 
-    if(!isAuthenticated){
-      return false;
-    }
+      const isAuthenticated = Boolean(options.isAuthenticated);
+      if(!isAuthenticated && !routeState.isPublicShareRoute){
+        return false;
+      }
 
-    if(routeState.screen === "home"){
-      goHome();
-      return true;
-    }
+      routeRestoreInProgress = true;
+      try {
+        if(routeState.isPublicShareRoute && routeState.shareToken){
+          if(routeState.sharePath === "nfc"){
+            return await loadNfcRoute(routeState.shareToken);
+          }
+          return await loadPublicShareRoute(routeState.shareToken);
+        }
 
-    if(routeState.screen === "library"){
-      await openLibraryScreen();
-      return true;
-    }
+        if(!isAuthenticated){
+          return false;
+        }
 
-    return false;
-  } catch (error) {
-    console.error("Route state restore error:", error);
-    return false;
-  } finally {
-    routeRestoreInProgress = false;
-  }
-}
+        const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+        const hasCategory = categories.includes(routeState.category);
+        const screen = routeState.screen || "home";
+
+        if(screen === "library"){
+          await openLibraryScreen({ skipRouteSave: true });
+          return true;
+        }
+
+        if((screen === "category" || screen === "details") && hasCategory){
+          await openCategory(routeState.category, { skipRouteSave: true });
+          if(screen === "details" && Number.isFinite(Number(routeState.openItemId))){
+            const restoredItemId = Number(routeState.openItemId);
+            const item = getItemById(routeState.category, restoredItemId);
+            if(item){
+              await openCardById(restoredItemId, { skipRouteSave: true });
+            }
+          }
+          return true;
+        }
+
+        if(screen === "home"){
+          closePreferencesPanel();
+          state.isPublicView = false;
+          state.currentOpenItemId = null;
+          hideAllScreens();
+          document.getElementById("home-screen").classList.remove("hidden");
+          toggleCategoryFilters(false);
+          updatePrimaryActionVisibility();
+          return true;
+        }
+
+        if(!hasCategory){
+          await openLibraryScreen({ skipRouteSave: true });
+          return true;
+        }
+
+        return false;
+      } catch (error) {
+        console.error("Route state restore error:", error);
+        return false;
+      } finally {
+        routeRestoreInProgress = false;
+      }
+    }
 
     function setPublicRouteMode(active){
       document.body.classList.toggle("public-route-active", Boolean(active));
@@ -3017,77 +3045,69 @@ const normalized = candidates
       return true;
     }
 
-   async function loadCategoryFromSupabase(category, options = {}){
-  const user = await getCurrentUser();
+    async function loadCategoryFromSupabase(category){
+      const user = await getCurrentUser();
 
-  if(!user){
-    invalidateRelatedLibraryItemsCache("");
-    state.demoData[category] = [];
-    if(options.render !== false){
+      if(!user){
+        invalidateRelatedLibraryItemsCache("");
+        state.demoData[category] = [];
+        renderShelf();
+        return false;
+      }
+
+      const { data, error } = await supabaseClient
+        .from("user_media")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("category", category)
+        .order("id", { ascending: false });
+
+      if(error){
+        console.error("Supabase load error:", error);
+        renderShelf();
+        return false;
+      }
+
+      state.demoData[category] = [];
+      const seen = new Set();
+
+      data.forEach(item => {
+        const dedupeKey =
+          item.canonical_key ||
+          item.work_key ||
+          (item.title || "").trim().toLowerCase();
+
+        if(seen.has(dedupeKey)){
+          return;
+        }
+
+        seen.add(dedupeKey);
+
+        state.demoData[category].push({
+          id: item.id,
+          title: item.title,
+          status: item.status || "Planned",
+          cover: item.cover_url || "",
+          description: item.description || "",
+          description_ru: item.description_ru || "",
+          description_original: item.description_original || item.description_en || "",
+          description_en: item.description_en || "",
+          title_ru: item.title_ru || "",
+          title_en: item.title_en || "",
+          title_original: item.title_original || "",
+          creator: item.creator || "",
+          work_key: item.work_key || "",
+          canonical_key: item.canonical_key || "",
+          folder: item.folder_name || ""
+        });
+      });
+
+      await applyFolderAssignmentsToItems(category);
+      clearRelationCache();
+      clearSearchCaches();
       renderShelf();
+      return true;
     }
-    return false;
-  }
-
-  const { data, error } = await supabaseClient
-    .from("user_media")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("category", category)
-    .order("id", { ascending: false });
-
-  if(error){
-    console.error("Supabase load error:", error);
-    if(options.render !== false){
-      renderShelf();
-    }
-    return false;
-  }
-
-  state.demoData[category] = [];
-  const seen = new Set();
-
-  data.forEach(item => {
-    const dedupeKey =
-      item.canonical_key ||
-      item.work_key ||
-      (item.title || "").trim().toLowerCase();
-
-    if(seen.has(dedupeKey)){
-      return;
-    }
-
-    seen.add(dedupeKey);
-
-    state.demoData[category].push({
-      id: item.id,
-      title: item.title,
-      status: item.status || "Planned",
-      cover: item.cover_url || "",
-      description: item.description || "",
-      description_ru: item.description_ru || "",
-      description_original: item.description_original || item.description_en || "",
-      description_en: item.description_en || "",
-      title_ru: item.title_ru || "",
-      title_en: item.title_en || "",
-      title_original: item.title_original || "",
-      creator: item.creator || "",
-      work_key: item.work_key || "",
-      canonical_key: item.canonical_key || "",
-      folder: item.folder_name || ""
-    });
-  });
-
-  await applyFolderAssignmentsToItems(category);
-  clearRelationCache();
-  clearSearchCaches();
-
-  if(options.render !== false){
-    renderShelf();
-  }
-
-  return true;
-}
 
     function closeCardMenu(){
       state.currentOpenMenuItemId = null;
@@ -3178,7 +3198,7 @@ const normalized = candidates
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
-      await loadCategoryFromSupabase(category, { render: false });
+      await loadCategoryFromSupabase(state.currentCategory);
     }
 
     async function addSearchResultToLibrary(item){
@@ -3640,7 +3660,7 @@ const normalized = candidates
         return;
       }
 
-     await showAuthorizedUI({ restoreRoute: true });
+      await showAuthorizedUI();
     }
 
        async function checkAuth(){
@@ -3661,7 +3681,7 @@ const normalized = candidates
         refreshAccountCollectionsUI();
         clearRouteState();
       } else {
-       await showAuthorizedUI({ restoreRoute: true });
+        await showAuthorizedUI();
       }
     }
 
@@ -5226,6 +5246,10 @@ async function removeAvatar(){
       setPublicRouteMode(false);
 
       supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+        if(!authBootstrapCompleted){
+          return;
+        }
+
         const loginBtn = document.getElementById("login-top-btn");
         const profileBtn = document.getElementById("profile-btn");
 
@@ -5233,33 +5257,33 @@ async function removeAvatar(){
           setAuthorizedButtons(Boolean(session?.user));
           if(session?.user){
             await ensureCurrentProfileData();
-          }
-          if(isNfcRoute()){
-            await loadNfcRoute(state.activeShareToken);
-          } else {
-            await loadPublicShareRoute(state.activeShareToken);
+            await safeLoadProfile("authStateChange-public");
           }
           return;
         }
 
         if(session?.user){
-  await showAuthorizedUI({ restoreRoute: false });
-} else {
-  closePreferencesPanel();
-  hideAllScreens();
-  document.getElementById("auth-screen").classList.remove("hidden");
-  setAuthorizedButtons(false);
-  clearRouteState();
+          setAuthorizedButtons(true);
+          await ensureCurrentProfileData();
+          await safeLoadProfile("authStateChange");
+          updatePrimaryActionVisibility();
+        } else {
+          closePreferencesPanel();
+          hideAllScreens();
+          document.getElementById("auth-screen").classList.remove("hidden");
+          setAuthorizedButtons(false);
+          clearRouteState();
 
-  if(loginBtn) loginBtn.classList.remove("hidden");
-  if(profileBtn) profileBtn.classList.add("hidden");
-}
-});
-       
+          if(loginBtn) loginBtn.classList.remove("hidden");
+          if(profileBtn) profileBtn.classList.add("hidden");
+        }
+      });
+
       const openedPublic = await checkPublicRoute();
       if(!openedPublic){
         await checkAuth();
       }
+      authBootstrapCompleted = true;
     }
 
 function getCurrentShareUrl(){
@@ -5483,6 +5507,20 @@ function goHome(){
   saveRouteState({ screen: "home", category: "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
+async function openLibraryScreen(options = {}){
+  closePreferencesPanel();
+  toggleHomeAddPanel(false);
+  state.isPublicView = false;
+  state.currentOpenItemId = null;
+  hideAllScreens();
+  document.getElementById("library-screen")?.classList.remove("hidden");
+  await renderLibraryCategories();
+  updatePrimaryActionVisibility();
+  if(!options.skipRouteSave){
+    saveRouteState({ screen: "library", openItemId: null, isPublicShareRoute: false, shareToken: "" });
+  }
+}
+
 const libraryLoadedCategories = new Set();
 let librarySearchDebounceTimer = null;
 
@@ -5490,38 +5528,20 @@ function handleLibrarySearchInput(){
   if(librarySearchDebounceTimer){
     clearTimeout(librarySearchDebounceTimer);
   }
-
   librarySearchDebounceTimer = setTimeout(() => {
     renderLibraryCategories();
   }, 120);
 }
 
-async function openLibraryScreen(){
-  closePreferencesPanel();
-  toggleHomeAddPanel(false);
-  state.isPublicView = false;
-  state.currentOpenItemId = null;
-
-  hideAllScreens();
-  document.getElementById("library-screen")?.classList.remove("hidden");
-
-  await ensureLibraryDataLoaded();
-  await renderLibraryCategories();
-
-  updatePrimaryActionVisibility();
-  saveRouteState({
-    screen: "library",
-    openItemId: null,
-    isPublicShareRoute: false,
-    shareToken: ""
-  });
-}
-
 async function ensureLibraryDataLoaded(){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-
   for(const category of categories){
-    await loadCategoryFromSupabase(category, { render: false });
+    if(libraryLoadedCategories.has(category)){
+      continue;
+    }
+    if(!(state.demoData[category] || []).length){
+      await loadCategoryFromSupabase(category);
+    }
     libraryLoadedCategories.add(category);
   }
 }
@@ -5529,7 +5549,7 @@ async function ensureLibraryDataLoaded(){
 async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
-
+  await ensureLibraryDataLoaded();
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   grid.innerHTML = "";
@@ -5539,9 +5559,7 @@ async function renderLibraryCategories(){
     const count = query
       ? items.filter((item) => normalizeComparisonText(item.title || "").includes(query)).length
       : items.length;
-
     if(query && count === 0) return;
-
     const card = document.createElement("button");
     card.type = "button";
     card.className = "card category-card library-category-card";
@@ -5568,7 +5586,7 @@ function backToCategory(){
   saveRouteState({ screen: "category", category: state.currentCategory || "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
-async function openCategory(name){
+async function openCategory(name, options = {}){
   closePreferencesPanel();
   state.isPublicView = false;
   state.currentCategory = name;
@@ -5595,22 +5613,18 @@ async function openCategory(name){
 
   await loadCategoryFromSupabase(name);
   updatePrimaryActionVisibility();
-  saveRouteState({ screen: "category", category: name, openItemId: null, isPublicShareRoute: false, shareToken: "" });
+  if(!options.skipRouteSave){
+    saveRouteState({ screen: "category", category: name, openItemId: null, isPublicShareRoute: false, shareToken: "" });
+  }
 }
 
-async function openCardById(id){
+async function openCardById(id, options = {}){
   closeCardMenu();
   closeDetailsMenu();
   closePreferencesPanel();
   state.currentOpenItemId = id;
   const item = getItemById(state.currentCategory, id);
-  
-  if(!item){
-  console.error("openCardById: item not found", { id, category: state.currentCategory });
-  backToCategory();
-  return;
-  }
-   
+
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
 
@@ -5668,30 +5682,27 @@ async function openCardById(id){
   updateDetailsRelationsState("not_built");
   deferRelatedItemsRender(item, state.currentCategory);
   updatePrimaryActionVisibility();
-  saveRouteState({
-    screen: "details",
-    category: state.currentCategory || "",
-    openItemId: Number.isFinite(Number(id)) ? Number(id) : null,
-    isPublicShareRoute: Boolean(state.activeShareToken),
-    shareToken: state.activeShareToken || ""
-  });
+  if(!options.skipRouteSave){
+    saveRouteState({
+      screen: "details",
+      category: state.currentCategory || "",
+      openItemId: Number.isFinite(Number(id)) ? Number(id) : null,
+      isPublicShareRoute: Boolean(state.activeShareToken),
+      shareToken: state.activeShareToken || ""
+    });
+  }
 }
 
 async function showAuthorizedUI(options = {}){
   closePreferencesPanel();
   setPublicRouteMode(false);
-
-  const shouldRestoreRoute = options.restoreRoute === true;
-  const restored = shouldRestoreRoute
-    ? await restoreRouteState({ isAuthenticated: true })
-    : false;
-
+  const shouldRestoreRoute = options.restoreRoute !== false;
+  const restored = shouldRestoreRoute ? await restoreRouteState({ isAuthenticated: true }) : false;
   if(!restored){
     hideAllScreens();
     document.getElementById("home-screen").classList.remove("hidden");
     saveRouteState({ screen: "home", isPublicShareRoute: false, shareToken: "" });
   }
-
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
   await safeLoadProfile("showAuthorizedUI");
@@ -6339,16 +6350,22 @@ function handlePrimaryAddAction(){
   }
 }
 
+async function restoreRouteStateIfNeededOnForeground(){
+  const user = await getCurrentUser();
+  if(!user) return;
+  const routeState = readRouteState();
+  if(!routeState) return;
+  const currentScreen = getVisibleScreenName();
+  const shouldRestore = routeState.isPublicShareRoute || routeState.screen === "library" || routeState.screen === "category" || routeState.screen === "details";
+  if(shouldRestore && (currentScreen === "home" || currentScreen === "auth")){
+    await restoreRouteState({ isAuthenticated: true });
+  }
+}
+
 async function init(){
   applyThemeMode();
   applyTranslations();
   updateHeaderCompactState();
-
-   const librarySearchInput = document.getElementById("library-search-input");
-if(librarySearchInput){
-  librarySearchInput.addEventListener("input", handleLibrarySearchInput);
-}
-   
   systemThemeMedia.addEventListener("change", () => {
     if(state.currentThemeMode === "system") applyThemeMode();
   });
@@ -6380,11 +6397,19 @@ if(librarySearchInput){
     const reason = event?.reason;
     showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
   });
-  document.addEventListener("visibilitychange", () => {
-  if(document.visibilityState === "hidden"){
-    saveRouteState();
-  }
-});
+  document.addEventListener("visibilitychange", async () => {
+    if(document.visibilityState === "hidden"){
+      saveRouteState();
+      return;
+    }
+    await restoreRouteStateIfNeededOnForeground();
+  });
+  window.addEventListener("focus", async () => {
+    await restoreRouteStateIfNeededOnForeground();
+  });
+  window.addEventListener("pageshow", async () => {
+    await restoreRouteStateIfNeededOnForeground();
+  });
   if(isPublicShareRoute()){
     await initPublicSharePage();
     updatePrimaryActionVisibility();
@@ -6414,6 +6439,7 @@ Object.assign(window, {
   toggleHomeAddPanel,
   startQuickAdd,
   openLibraryScreen,
+  handleLibrarySearchInput,
   openCategory,
   toggleCategoryFilters,
   setShelfSearchQuery,
