@@ -754,8 +754,8 @@ import { state } from "./js/state.js";
         const screen = routeState.screen || "home";
 
         if(screen === "library"){
-          await openLibraryScreen();
-          return true;
+        await openLibraryScreen({ forceReload: true });
+        return true;
         }
 
         if((screen === "category" || screen === "details") && hasCategory){
@@ -5505,39 +5505,28 @@ function goHome(){
   saveRouteState({ screen: "home", category: "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
-async function openLibraryScreen(){
+async function openLibraryScreen(options = {}){
   closePreferencesPanel();
   toggleHomeAddPanel(false);
   state.isPublicView = false;
   state.currentOpenItemId = null;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
+
+  await ensureLibraryDataLoaded(Boolean(options.forceReload));
   await renderLibraryCategories();
+
   updatePrimaryActionVisibility();
   saveRouteState({ screen: "library", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
-const libraryLoadedCategories = new Set();
-let librarySearchDebounceTimer = null;
-
-function handleLibrarySearchInput(){
-  if(librarySearchDebounceTimer){
-    clearTimeout(librarySearchDebounceTimer);
-  }
-  librarySearchDebounceTimer = setTimeout(() => {
-    renderLibraryCategories();
-  }, 120);
-}
-
-async function ensureLibraryDataLoaded(){
+async function ensureLibraryDataLoaded(forceReload = false){
   const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   for(const category of categories){
-    if(libraryLoadedCategories.has(category)){
+    if(!forceReload && libraryLoadedCategories.has(category)){
       continue;
     }
-    if(!(state.demoData[category] || []).length){
-      await loadCategoryFromSupabase(category);
-    }
+    await loadCategoryFromSupabase(category);
     libraryLoadedCategories.add(category);
   }
 }
@@ -5703,8 +5692,8 @@ async function showAuthorizedUI(options = {}){
   }
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
-  safeLoadProfile("showAuthorizedUI");
-  updatePrimaryActionVisibility();
+  await safeLoadProfile("showAuthorizedUI");
+   updatePrimaryActionVisibility();
 }
 
 function showAuthScreen(){
