@@ -1,6 +1,8 @@
     export const state = {
   currentLanguage: localStorage.getItem("plamut_language") || "ru",
   currentThemeMode: localStorage.getItem("plamut_theme_mode") || "system",
+  currentFilterFolder: localStorage.getItem("plamut_folder_filter") || "All",
+  currentItemActionSheetId: null,
   currentCategory: null,
   currentOpenItemId: null,
   currentRelationsItemId: null,
