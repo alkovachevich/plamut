@@ -759,16 +759,30 @@ import { state } from "./js/state.js";
         }
 
         if((screen === "category" || screen === "details") && hasCategory){
-          await openCategory(routeState.category);
-          if(screen === "details" && Number.isFinite(Number(routeState.openItemId))){
-            const restoredItemId = Number(routeState.openItemId);
-            const item = getItemById(routeState.category, restoredItemId);
-            if(item){
-              await openCardById(restoredItemId);
-            }
-          }
-          return true;
-        }
+  const categoryAlreadyLoaded =
+    state.currentCategory === routeState.category &&
+    Array.isArray(state.demoData[routeState.category]) &&
+    state.demoData[routeState.category].length > 0;
+
+  if(categoryAlreadyLoaded){
+    state.currentCategory = routeState.category;
+    hideAllScreens();
+    document.getElementById("category-screen").classList.remove("hidden");
+    document.getElementById("category-title").textContent = translateCategory(routeState.category);
+    renderShelf();
+  } else {
+    await openCategory(routeState.category);
+  }
+
+  if(screen === "details" && Number.isFinite(Number(routeState.openItemId))){
+    const restoredItemId = Number(routeState.openItemId);
+    const item = getItemById(routeState.category, restoredItemId);
+    if(item){
+      await openCardById(restoredItemId);
+    }
+  }
+  return true;
+}
 
         if(screen === "home"){
           goHome();
@@ -6363,26 +6377,14 @@ async function init(){
     const reason = event?.reason;
     showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
   });
-  document.addEventListener("visibilitychange", async () => {
-    if(document.visibilityState === "hidden"){
-      saveRouteState();
-      return;
-    }
+  document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "hidden"){
+    saveRouteState();
+  }
+});
     const user = await getCurrentUser();
     const currentScreen = getVisibleScreenName();
     if(user && (currentScreen === "home" || currentScreen === "auth")){
-      await restoreRouteState({ isAuthenticated: true });
-    }
-  });
-  window.addEventListener("focus", async () => {
-    const user = await getCurrentUser();
-    if(user){
-      await restoreRouteState({ isAuthenticated: true });
-    }
-  });
-  window.addEventListener("pageshow", async () => {
-    const user = await getCurrentUser();
-    if(user){
       await restoreRouteState({ isAuthenticated: true });
     }
   });
