@@ -21,9 +21,11 @@ import {
   setTextIfPresent
 } from "./js/utils.js";
 
+import { state } from "./js/state.js";
+
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
-    function getLanguageLabel(lang = currentLanguage){
+    function getLanguageLabel(lang = state.currentLanguage){
       return String(lang || "ru").toUpperCase();
     }
 
@@ -54,18 +56,18 @@ import {
       categorySearchInFlight.clear();
     }
 
-    function getRelationCacheKey(item, category = currentCategory){
+    function getRelationCacheKey(item, category = state.currentCategory){
       if(!item) return "";
-      return buildRelationIdentity(item, category || item.category || currentCategory || "");
+      return buildRelationIdentity(item, category || item.category || state.currentCategory || "");
     }
 
-    function getCachedRelatedItems(item, category = currentCategory){
+    function getCachedRelatedItems(item, category = state.currentCategory){
       const key = getRelationCacheKey(item, category);
       if(!key || !relationCache.has(key)) return null;
       return relationCache.get(key).map((entry) => ({ ...entry }));
     }
 
-    function setCachedRelatedItems(item, category = currentCategory, relatedItems = []){
+    function setCachedRelatedItems(item, category = state.currentCategory, relatedItems = []){
       const key = getRelationCacheKey(item, category);
       if(!key) return [];
       const snapshot = relatedItems.slice(0, 6).map((entry) => ({ ...entry }));
@@ -73,7 +75,7 @@ import {
       return snapshot.map((entry) => ({ ...entry }));
     }
 
-    function deferRelatedItemsRender(item, category = currentCategory){
+    function deferRelatedItemsRender(item, category = state.currentCategory){
       const run = () => renderRelatedItemsSection(item, category).catch((error) => {
         console.error("Related items render error:", error);
       });
@@ -122,7 +124,7 @@ import {
       [["lang-option-ru", "ru"], ["lang-option-en", "en"]].forEach(([id, value]) => {
         const button = document.getElementById(id);
         if(!button) return;
-        const isActive = currentLanguage === value;
+        const isActive = state.currentLanguage === value;
         button.classList.toggle("is-active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
       });
@@ -180,7 +182,7 @@ import {
     }
 
     function isOwnerControlAllowed(){
-      if(!isPublicView) return true;
+      if(!state.isPublicView) return true;
       alert(t().share.ownerOnlyAction);
       return false;
     }
@@ -251,16 +253,16 @@ import {
     }
 
     function ensurePublicProfileCollectionsReset(){
-      demoData.Books = [];
-      demoData.Movies = [];
-      demoData.Series = [];
-      demoData.Anime = [];
-      demoData.Manga = [];
-      demoData.Blacklist = [];
+      state.demoData.Books = [];
+      state.demoData.Movies = [];
+      state.demoData.Series = [];
+      state.demoData.Anime = [];
+      state.demoData.Manga = [];
+      state.demoData.Blacklist = [];
     }
 
     function getItemStorageKey(itemOrParts = {}){
-      const category = itemOrParts.category || currentCategory || "";
+      const category = itemOrParts.category || state.currentCategory || "";
       const canonicalKey = itemOrParts.canonical_key || itemOrParts.canonicalKey || "";
       const workKey = itemOrParts.work_key || itemOrParts.workKey || "";
       const title = normalizeSpaces(itemOrParts.title || "").toLowerCase();
@@ -313,7 +315,7 @@ import {
 
     async function getAvailableStatuses(){
       const customStatuses = await getCustomStatuses();
-      const dynamicStatuses = Object.values(demoData)
+      const dynamicStatuses = Object.values(state.demoData)
         .flat()
         .map((item) => normalizeSpaces(item?.status || ""))
         .filter(Boolean);
@@ -322,7 +324,7 @@ import {
 
     async function getAvailableFolders(){
       const customFolders = await getCustomFolders();
-      const dynamicFolders = Object.values(demoData)
+      const dynamicFolders = Object.values(state.demoData)
         .flat()
         .map((item) => normalizeSpaces(item?.folder || ""))
         .filter(Boolean);
@@ -330,7 +332,7 @@ import {
     }
 
     function setLanguage(lang) {
-      currentLanguage = lang;
+      state.currentLanguage = lang;
       localStorage.setItem("plamut_language", lang);
       document.documentElement.lang = lang;
       applyTranslations();
@@ -340,8 +342,8 @@ import {
     }
 
     function setStatusFilter(value){
-      currentFilterStatus = value || "All";
-      localStorage.setItem("plamut_status_filter", currentFilterStatus);
+      state.currentFilterStatus = value || "All";
+      localStorage.setItem("plamut_status_filter", state.currentFilterStatus);
       renderShelf();
     }
 
@@ -400,7 +402,7 @@ import {
     }
 
     function applyTranslations() {
-      document.documentElement.lang = currentLanguage;
+      document.documentElement.lang = state.currentLanguage;
 
       document.getElementById("home-subtitle").textContent = t().subtitle;
       document.getElementById("hero-badge").textContent = t().home.heroBadge;
@@ -564,7 +566,7 @@ import {
         publicQrBtn.setAttribute("aria-label", t().share.showQr);
       }
 
-      const iphoneSteps = currentLanguage === "ru"
+      const iphoneSteps = state.currentLanguage === "ru"
         ? [
             "Скопируйте свою публичную ссылку Plamut.",
             "Установите приложение для записи NFC-меток, например NFC Tools.",
@@ -605,8 +607,8 @@ import {
             <option value="All">${escapeHtml(t().labels.allStatuses)}</option>
             ${statuses.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(translateStatus(status))}</option>`).join("")}
           `;
-          filterSelect.value = statuses.includes(currentFilterStatus) || currentFilterStatus === "All"
-            ? currentFilterStatus
+          filterSelect.value = statuses.includes(state.currentFilterStatus) || state.currentFilterStatus === "All"
+            ? state.currentFilterStatus
             : "All";
         });
       }
@@ -616,30 +618,30 @@ import {
     }
 
     function rerenderCurrentScreen() {
-      if (!document.getElementById("category-screen").classList.contains("hidden") && currentCategory) {
-        if (isPublicView) {
+      if (!document.getElementById("category-screen").classList.contains("hidden") && state.currentCategory) {
+        if (state.isPublicView) {
           document.getElementById("category-title").textContent =
-            currentPublicProfileName + " — " + translateCategory(currentCategory);
+            state.currentPublicProfileName + " — " + translateCategory(state.currentCategory);
         } else {
-          document.getElementById("category-title").textContent = translateCategory(currentCategory);
+          document.getElementById("category-title").textContent = translateCategory(state.currentCategory);
         }
         renderShelf();
       }
 
-      if(!document.getElementById("public-share-screen").classList.contains("hidden") && currentPublicProfile){
-        renderPublicShareProfile(currentPublicProfile);
+      if(!document.getElementById("public-share-screen").classList.contains("hidden") && state.currentPublicProfile){
+        renderPublicShareProfile(state.currentPublicProfile);
       }
 
-      if (!document.getElementById("details-screen").classList.contains("hidden") && currentOpenItemId) {
-        const item = getItemById(currentCategory, currentOpenItemId);
-        if(item) openCardById(currentOpenItemId);
+      if (!document.getElementById("details-screen").classList.contains("hidden") && state.currentOpenItemId) {
+        const item = getItemById(state.currentCategory, state.currentOpenItemId);
+        if(item) openCardById(state.currentOpenItemId);
       }
 
-      if(!document.getElementById("relations-screen").classList.contains("hidden") && currentRelationsItemId){
-        const item = getItemById(currentRelationsCategory || currentCategory, currentRelationsItemId);
+      if(!document.getElementById("relations-screen").classList.contains("hidden") && state.currentRelationsItemId){
+        const item = getItemById(state.currentRelationsCategory || state.currentCategory, state.currentRelationsItemId);
         if(item){
           document.getElementById("relations-current-item-title").textContent = item.title || "—";
-          renderRelationsScreen(item, currentRelationsCategory || currentCategory);
+          renderRelationsScreen(item, state.currentRelationsCategory || state.currentCategory);
         }
       }
     }
@@ -697,7 +699,7 @@ import {
       const button = document.getElementById("public-share-save-btn");
       if(!button) return;
 
-      const isOwner = Boolean(currentPublicProfile?.isOwner);
+      const isOwner = Boolean(state.currentPublicProfile?.isOwner);
       const isSaved = Boolean(currentSavedLibraryState.saved);
       button.disabled = isOwner || isSaved;
       button.classList.toggle("hidden", isOwner);
@@ -709,14 +711,14 @@ import {
       if(!container) return;
 
       const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-      const categoryValues = orderedCategories.filter((category) => (demoData[category] || []).length).map((category) => translateCategory(category));
+      const categoryValues = orderedCategories.filter((category) => (state.demoData[category] || []).length).map((category) => translateCategory(category));
       const folderValues = [];
       const statusValues = [];
       const folderSet = new Set();
       const statusSet = new Set();
 
       orderedCategories.forEach((category) => {
-        (demoData[category] || []).forEach((item) => {
+        (state.demoData[category] || []).forEach((item) => {
           if(item.folder && !folderSet.has(item.folder)){
             folderSet.add(item.folder);
             folderValues.push(item.folder);
@@ -751,16 +753,16 @@ import {
       closePreferencesPanel();
       resetShelfSearchQuery();
       toggleHomeAddPanel(false);
-      if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
+      if(state.activeShareToken && state.currentPublicProfile && !state.currentPublicProfile.isOwner){
         if(document.body.classList.contains("public-route-active")){
-          showPublicShareScreen(currentPublicProfile);
+          showPublicShareScreen(state.currentPublicProfile);
           renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
         } else {
-          showPublicLibraryCategoryView(currentPublicProfile);
+          showPublicLibraryCategoryView(state.currentPublicProfile);
         }
         return;
       }
-      isPublicView = false;
+      state.isPublicView = false;
       hideAllScreens();
       document.getElementById("home-screen").classList.remove("hidden");
     }
@@ -778,7 +780,7 @@ import {
       document.getElementById("add-modal").classList.remove("hidden");
       document.getElementById("search-input").value = "";
       document.getElementById("search-results").innerHTML = "";
-      currentSearchResults = [];
+      state.currentSearchResults = [];
       document.getElementById("search-input").focus();
     }
 
@@ -861,13 +863,13 @@ import {
       const nextStatuses = statuses.filter((item) => item !== status);
       await setCustomStatuses(nextStatuses);
 
-      if(currentFilterStatus === status){
-        currentFilterStatus = "All";
-        localStorage.setItem("plamut_status_filter", currentFilterStatus);
+      if(state.currentFilterStatus === status){
+        state.currentFilterStatus = "All";
+        localStorage.setItem("plamut_status_filter", state.currentFilterStatus);
       }
 
-      for (const category of Object.keys(demoData)){
-        demoData[category].forEach((item) => {
+      for (const category of Object.keys(state.demoData)){
+        state.demoData[category].forEach((item) => {
           if(item.status === status){
             item.status = "Planned";
           }
@@ -910,8 +912,8 @@ import {
       });
       await setFolderAssignments(assignments);
 
-      for (const category of Object.keys(demoData)){
-        demoData[category].forEach((item) => {
+      for (const category of Object.keys(state.demoData)){
+        state.demoData[category].forEach((item) => {
           if(item.folder === folder){
             item.folder = "";
           }
@@ -934,10 +936,10 @@ import {
     }
 
     function getFilteredItems(){
-      const items = demoData[currentCategory] || [];
+      const items = state.demoData[state.currentCategory] || [];
       const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
       return items.filter((item) => {
-        const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
+        const statusMatches = state.currentCategory === "Blacklist" || state.currentFilterStatus === "All" || item.status === state.currentFilterStatus;
         const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
         const searchMatches = !searchComparison || haystack.includes(searchComparison);
         return statusMatches && searchMatches;
@@ -945,7 +947,7 @@ import {
     }
 
     function getItemById(category, id){
-      return (demoData[category] || []).find(item => item.id === id) || null;
+      return (state.demoData[category] || []).find(item => item.id === id) || null;
     }
 
     function hasCyrillic(text){
@@ -1097,7 +1099,7 @@ import {
     }
 
     function buildRelationCandidateSnapshot(item = {}, category = ""){
-      const resolvedCategory = category || item.category || currentCategory || "";
+      const resolvedCategory = category || item.category || state.currentCategory || "";
       return {
         ...item,
         category: resolvedCategory,
@@ -1112,11 +1114,11 @@ import {
 
     function getLoadedLibraryItems(){
       const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-      return categories.flatMap((category) => (demoData[category] || []).map((item) => ({ ...item, category })));
+      return categories.flatMap((category) => (state.demoData[category] || []).map((item) => ({ ...item, category })));
     }
 
     async function getLibraryItemsForRelations(){
-      if(isPublicView){
+      if(state.isPublicView){
         return getLoadedLibraryItems();
       }
 
@@ -1227,7 +1229,7 @@ import {
       return finalizeComputedRelatedItems(source, titleMatches);
     }
 
-    async function getRelatedItemsForItem(item, category = currentCategory){
+    async function getRelatedItemsForItem(item, category = state.currentCategory){
       if(!item) return [];
       const cached = getCachedRelatedItems(item, category);
       if(cached) return cached;
@@ -1276,7 +1278,7 @@ import {
 
     function translateRelationType(type){
       const value = String(type || "related_work");
-      const map = currentLanguage === "ru"
+      const map = state.currentLanguage === "ru"
         ? {
           same_universe: "Одна вселенная",
           same_series: "Одна серия",
@@ -1357,8 +1359,8 @@ import {
     canonical_key: canonicalKey,
     category,
     title_primary: item.title || "",
-    title_ru: currentLanguage === "ru" ? (item.title || "") : "",
-    title_en: currentLanguage === "en" ? (item.title || "") : "",
+    title_ru: state.currentLanguage === "ru" ? (item.title || "") : "",
+    title_en: state.currentLanguage === "en" ? (item.title || "") : "",
     year: getItemYear(item),
     cover_url: item.cover || "",
     relations_status: status,
@@ -1402,8 +1404,8 @@ import {
       canonical_key: relatedCanonicalKey,
       category: relatedCategory,
       title_primary: relatedItem.title || "",
-      title_ru: currentLanguage === "ru" ? (relatedItem.title || "") : "",
-      title_en: currentLanguage === "en" ? (relatedItem.title || "") : "",
+      title_ru: state.currentLanguage === "ru" ? (relatedItem.title || "") : "",
+      title_en: state.currentLanguage === "en" ? (relatedItem.title || "") : "",
       year: getItemYear(relatedItem),
       cover_url: relatedItem.cover || "",
       relations_status: "not_built"
@@ -1659,11 +1661,11 @@ async function fetchTmdbMovieRelations(item){
   const movieId = match[1];
 
   try {
-    const details = await fetchJson(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${TMDB_API_KEY}&language=${currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
+    const details = await fetchJson(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${TMDB_API_KEY}&language=${state.currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
     const collectionId = details?.belongs_to_collection?.id;
     if(!collectionId) return [];
 
-    const collection = await fetchJson(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${TMDB_API_KEY}&language=${currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
+    const collection = await fetchJson(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${TMDB_API_KEY}&language=${state.currentLanguage === "ru" ? "ru-RU" : "en-US"}`);
     const parts = Array.isArray(collection?.parts) ? collection.parts : [];
     if(!parts.length) return [];
 
@@ -1677,8 +1679,8 @@ async function fetchTmdbMovieRelations(item){
         category: "Movies",
         cover: part.poster_path ? `https://image.tmdb.org/t/p/w500${part.poster_path}` : "",
         description: part.overview || "",
-        description_ru: currentLanguage === "ru" ? (part.overview || "") : "",
-        description_en: currentLanguage === "en" ? (part.overview || "") : "",
+        description_ru: state.currentLanguage === "ru" ? (part.overview || "") : "",
+        description_en: state.currentLanguage === "en" ? (part.overview || "") : "",
         work_key: `tmdb:movie:${part.id}`,
         canonical_key: buildCanonicalKey("Movies", "tmdb", `movie:${part.id}`, part.title || ""),
         year: part.release_date ? Number(String(part.release_date).slice(0, 4)) : null,
@@ -1768,15 +1770,15 @@ const normalized = candidates
 
     async function openRelatedItemFromDetails(id, category){
       if(!id || !category) return;
-      if(isPublicView){
-        if(category !== currentCategory){
-          openPublicCategory(category, currentPublicProfileName);
+      if(state.isPublicView){
+        if(category !== state.currentCategory){
+          openPublicCategory(category, state.currentPublicProfileName);
         }
         await openCardById(id);
         return;
       }
 
-      if(category !== currentCategory){
+      if(category !== state.currentCategory){
         await openCategory(category);
       }
       await openCardById(id);
@@ -1837,14 +1839,14 @@ const normalized = candidates
   return button;
 }
 
-    async function renderRelatedItemsSection(item, category = currentCategory){
+    async function renderRelatedItemsSection(item, category = state.currentCategory){
       if(!item){
         updateDetailsRelationsState("not_built");
         return;
       }
 
       const relationResult = await loadRelationsFromDb(item, category);
-      if(currentOpenItemId !== item.id || currentCategory !== category){
+      if(state.currentOpenItemId !== item.id || state.currentCategory !== category){
         return;
       }
       updateDetailsRelationsState(relationResult.status || "not_built");
@@ -1854,20 +1856,20 @@ const normalized = candidates
     }
 
     async function openRelationsScreen(){
-      const item = getItemById(currentCategory, currentOpenItemId);
+      const item = getItemById(state.currentCategory, state.currentOpenItemId);
       if(!item) return;
 
-      currentRelationsItemId = item.id;
-      currentRelationsCategory = currentCategory;
+      state.currentRelationsItemId = item.id;
+      state.currentRelationsCategory = state.currentCategory;
       hideAllScreens();
       document.getElementById("relations-screen").classList.remove("hidden");
       document.getElementById("relations-current-item-title").textContent = item.title || "—";
-      await renderRelationsScreen(item, currentCategory);
+      await renderRelationsScreen(item, state.currentCategory);
     }
 
     function backToDetailsFromRelations(){
-      if(currentRelationsItemId){
-        openCardById(currentRelationsItemId);
+      if(state.currentRelationsItemId){
+        openCardById(state.currentRelationsItemId);
         return;
       }
       backToCategory();
@@ -2222,7 +2224,7 @@ const normalized = candidates
     }
 
     async function searchLocalSupabaseCached(category, queryMeta, limit = 10){
-      const localItems = (demoData[category] || []).filter((item) => itemMatchesQuery(item, queryMeta));
+      const localItems = (state.demoData[category] || []).filter((item) => itemMatchesQuery(item, queryMeta));
       const user = await getCurrentUser();
       if(!user){
         return dedupeSearchResults(localItems).slice(0, limit);
@@ -2248,7 +2250,7 @@ const normalized = candidates
       return dedupeSearchResults([...localItems, ...fromDb]).slice(0, limit);
     }
 
-    async function fetchOpenLibraryDescription(workKey, preferredLang = currentLanguage){
+    async function fetchOpenLibraryDescription(workKey, preferredLang = state.currentLanguage){
       if(!workKey) return { text: "", language: "" };
       const normalizedWorkKey = String(workKey || "").trim();
       if(!normalizedWorkKey.startsWith("/works/") && !/^OL\d+W$/i.test(normalizedWorkKey)){
@@ -2328,7 +2330,7 @@ const normalized = candidates
       }
     }
 
-    async function fetchGoogleBooksDescription(title, author = "", preferredLang = currentLanguage){
+    async function fetchGoogleBooksDescription(title, author = "", preferredLang = state.currentLanguage){
       try {
         const targetLang = preferredLang === "ru" ? "ru" : "en";
         const isbn = detectISBN(title);
@@ -2488,7 +2490,7 @@ const normalized = candidates
       let description_en = "";
       const normalizedIsbn = detectISBN(isbn);
 
-      const olCurrent = await fetchOpenLibraryDescription(workKey, currentLanguage);
+      const olCurrent = await fetchOpenLibraryDescription(workKey, state.currentLanguage);
       if(olCurrent.text){
         description = olCurrent.text;
         if(olCurrent.language === "ru") description_ru = olCurrent.text;
@@ -2593,7 +2595,7 @@ const normalized = candidates
 
     async function searchTMDbApi(query, mediaType = "movie", limit = 10){
       try {
-        const languagesToTry = currentLanguage === "ru" ? ["ru-RU", "en-US"] : ["en-US", "ru-RU"];
+        const languagesToTry = state.currentLanguage === "ru" ? ["ru-RU", "en-US"] : ["en-US", "ru-RU"];
         let results = [];
 
         for(const language of languagesToTry){
@@ -2768,7 +2770,7 @@ const normalized = candidates
       if(!queryMeta.text && !queryMeta.isbn){
         return [];
       }
-      const cacheKey = [category, currentLanguage, queryMeta.comparison || queryMeta.isbn || ""].join("|");
+      const cacheKey = [category, state.currentLanguage, queryMeta.comparison || queryMeta.isbn || ""].join("|");
       if(categorySearchCache.has(cacheKey)){
         return categorySearchCache.get(cacheKey).slice(0, limit);
       }
@@ -2811,7 +2813,7 @@ const normalized = candidates
     }
 
     function isDuplicateItem(category, title, workKey = ""){
-      const items = demoData[category] || [];
+      const items = state.demoData[category] || [];
 
       return items.some(item => {
         if(workKey && item.work_key && item.work_key === workKey){
@@ -2943,8 +2945,8 @@ const normalized = candidates
         return;
       }
 
-      if(!demoData[category]){
-        demoData[category] = [];
+      if(!state.demoData[category]){
+        state.demoData[category] = [];
       }
 
       const dedupeKey =
@@ -2952,7 +2954,7 @@ const normalized = candidates
         item.work_key ||
         normalizeSpaces(item.title || "").toLowerCase();
 
-      const alreadyExists = demoData[category].some((row) => {
+      const alreadyExists = state.demoData[category].some((row) => {
         const rowKey =
           row.canonical_key ||
           row.work_key ||
@@ -2962,7 +2964,7 @@ const normalized = candidates
       });
 
       if(!alreadyExists){
-        demoData[category].unshift(item);
+        state.demoData[category].unshift(item);
         clearRelationCache();
         clearSearchCaches();
       }
@@ -2970,13 +2972,13 @@ const normalized = candidates
 
     async function applyFolderAssignmentsToItems(category){
       const assignments = await getFolderAssignments();
-      (demoData[category] || []).forEach((item) => {
+      (state.demoData[category] || []).forEach((item) => {
         item.folder = assignments[getItemStorageKey({ ...item, category })] || item.folder || "";
       });
     }
 
     async function renderAndSyncCategory(category){
-      if(currentCategory !== category){
+      if(state.currentCategory !== category){
         return;
       }
 
@@ -3014,23 +3016,23 @@ const normalized = candidates
 
     async function openFolderModalById(id){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(currentCategory, id);
+      const item = getItemById(state.currentCategory, id);
       if(!item) return;
 
-      currentFolderModalItemId = id;
+      state.currentFolderModalItemId = id;
       pendingFolderSelection = item.folder || "";
       await renderFolderModalOptions();
       document.getElementById("folder-modal")?.classList.remove("hidden");
     }
 
     async function openFolderModalByCurrentItem(){
-      if(!currentOpenItemId) return;
-      await openFolderModalById(currentOpenItemId);
+      if(!state.currentOpenItemId) return;
+      await openFolderModalById(state.currentOpenItemId);
     }
 
     function closeFolderModal(){
       document.getElementById("folder-modal")?.classList.add("hidden");
-      currentFolderModalItemId = null;
+      state.currentFolderModalItemId = null;
       pendingFolderSelection = "";
     }
 
@@ -3042,14 +3044,14 @@ const normalized = candidates
 
     async function saveItemFolderFromModal(){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(currentCategory, currentFolderModalItemId);
+      const item = getItemById(state.currentCategory, state.currentFolderModalItemId);
       if(!item){
         closeFolderModal();
         return;
       }
 
       const assignments = await getFolderAssignments();
-      assignments[getItemStorageKey({ ...item, category: currentCategory })] = pendingFolderSelection || "";
+      assignments[getItemStorageKey({ ...item, category: state.currentCategory })] = pendingFolderSelection || "";
       await setFolderAssignments(assignments);
 
       item.folder = pendingFolderSelection || "";
@@ -3068,7 +3070,7 @@ const normalized = candidates
       closeFolderModal();
       renderShelf();
 
-      if(currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
+      if(state.currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
         await openCardById(item.id);
       }
 
@@ -3142,7 +3144,7 @@ const normalized = candidates
       return true;
     }
 
-  async function deleteItemFromSupabase(item, category = currentCategory){
+  async function deleteItemFromSupabase(item, category = state.currentCategory){
       const user = await getCurrentUser();
       if(!user || !item?.id) return false;
 
@@ -3200,7 +3202,7 @@ const normalized = candidates
 
       if(!user){
         invalidateRelatedLibraryItemsCache("");
-        demoData[category] = [];
+        state.demoData[category] = [];
         renderShelf();
         return false;
       }
@@ -3218,7 +3220,7 @@ const normalized = candidates
         return false;
       }
 
-      demoData[category] = [];
+      state.demoData[category] = [];
       const seen = new Set();
 
       data.forEach(item => {
@@ -3233,7 +3235,7 @@ const normalized = candidates
 
         seen.add(dedupeKey);
 
-        demoData[category].push({
+        state.demoData[category].push({
           id: item.id,
           title: item.title,
           status: item.status || "Planned",
@@ -3270,7 +3272,7 @@ const normalized = candidates
     }
 
     function toggleCardMenu(event, id){
-      if(isPublicView){
+      if(state.isPublicView){
         if(event){
           event.preventDefault();
           event.stopPropagation();
@@ -3317,14 +3319,14 @@ const normalized = candidates
       const filterToolbar = document.getElementById("filter-toolbar");
       const statusFilterWrap = document.getElementById("status-filter-wrap");
       if(filterToolbar){
-        if(currentCategory === "Blacklist"){
+        if(state.currentCategory === "Blacklist"){
           filterToolbar.classList.add("hidden");
         } else {
           filterToolbar.classList.remove("hidden");
         }
       }
       if(statusFilterWrap){
-        statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
+        statusFilterWrap.classList.toggle("hidden", state.currentCategory === "Blacklist");
       }
 
       const items = getFilteredItems();
@@ -3343,7 +3345,7 @@ const normalized = candidates
           ? `<div class="media-meta">${escapeHtml(item.creator)}</div>`
           : "";
 
-        const menuHtml = isPublicView
+        const menuHtml = state.isPublicView
           ? ""
           : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
                <button
@@ -3431,8 +3433,8 @@ const normalized = candidates
 
     async function openCategory(name){
       closePreferencesPanel();
-      isPublicView = false;
-      currentCategory = name;
+      state.isPublicView = false;
+      state.currentCategory = name;
       resetShelfSearchQuery();
 
       hideAllScreens();
@@ -3490,9 +3492,9 @@ const normalized = candidates
         container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
 
         try {
-          const results = dedupeSearchResults(await searchByCategory(currentCategory, query, 10));
+          const results = dedupeSearchResults(await searchByCategory(state.currentCategory, query, 10));
           if(searchToken !== activeCategorySearchToken) return;
-          currentSearchResults = results;
+          state.currentSearchResults = results;
 
           if(results.length === 0){
             container.innerHTML = `
@@ -3538,11 +3540,11 @@ const normalized = candidates
 
     async function addCategorySearchResult(index){
       if(!isOwnerControlAllowed()) return;
-      const item = currentSearchResults[index];
+      const item = state.currentSearchResults[index];
       if(!item) return;
       await addSearchResultToLibrary(item);
       closeAddModal();
-      await loadCategoryFromSupabase(currentCategory);
+      await loadCategoryFromSupabase(state.currentCategory);
     }
 
     async function addSearchResultToLibrary(item){
@@ -3636,17 +3638,17 @@ const normalized = candidates
         return;
       }
 
-      const canonicalKey = buildCanonicalKey(currentCategory, "manual", "", title);
+      const canonicalKey = buildCanonicalKey(state.currentCategory, "manual", "", title);
 
-      if(isDuplicateItem(currentCategory, title)){
+      if(isDuplicateItem(state.currentCategory, title)){
         alert(t().labels.alreadyExists);
         return;
       }
 
-      const existsInDb = await existsInSupabase(currentCategory, title, "", canonicalKey);
+      const existsInDb = await existsInSupabase(state.currentCategory, title, "", canonicalKey);
       if(existsInDb){
         alert(t().labels.alreadyExists);
-        await loadCategoryFromSupabase(currentCategory);
+        await loadCategoryFromSupabase(state.currentCategory);
         return;
       }
 
@@ -3654,7 +3656,7 @@ const normalized = candidates
 
       const saved = await saveItemToSupabase(
         title,
-        currentCategory,
+        state.currentCategory,
         "Planned",
         cover,
         description,
@@ -3668,9 +3670,9 @@ const normalized = candidates
 
       if(!saved) return;
 
-      insertLocalShelfItem(currentCategory, buildLocalShelfItem({
+      insertLocalShelfItem(state.currentCategory, buildLocalShelfItem({
         title: title,
-        category: currentCategory,
+        category: state.currentCategory,
         status: "Planned",
         cover: cover,
         description: description,
@@ -3684,23 +3686,23 @@ const normalized = candidates
 
       closeManualModal();
       closeAddModal();
-      await renderAndSyncCategory(currentCategory);
+      await renderAndSyncCategory(state.currentCategory);
     }
 
     function changeStatusById(id){
       if(!isOwnerControlAllowed()) return;
       closeCardMenu();
-      const item = getItemById(currentCategory, id);
+      const item = getItemById(state.currentCategory, id);
       if(!item) return;
       currentStatusItemId = id;
-      currentOpenItemId = id;
+      state.currentOpenItemId = id;
       renderStatusOptions();
       document.getElementById("status-modal").classList.remove("hidden");
     }
 
     function changeStatusFromDetails(){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(currentCategory, currentOpenItemId);
+      const item = getItemById(state.currentCategory, state.currentOpenItemId);
       if(!item){
         alert(t().labels.itemNotFound);
         return;
@@ -3712,7 +3714,7 @@ const normalized = candidates
 
     async function setStatus(status){
       if(!isOwnerControlAllowed()) return;
-      const item = getItemById(currentCategory, currentStatusItemId);
+      const item = getItemById(state.currentCategory, currentStatusItemId);
       if(!item) return;
 
       const oldStatus = item.status;
@@ -3729,35 +3731,35 @@ const normalized = candidates
         return;
       }
 
-      if(currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
-        openCardById(currentOpenItemId);
+      if(state.currentOpenItemId === item.id && !document.getElementById("details-screen").classList.contains("hidden")){
+        openCardById(state.currentOpenItemId);
       }
     }
 
     async function moveCurrentItemToBlacklist(){
-      if(isPublicView) return;
-      if(currentCategory === "Blacklist"){
+      if(state.isPublicView) return;
+      if(state.currentCategory === "Blacklist"){
         closeStatusModal();
         return;
       }
 
-      const item = getItemById(currentCategory, currentStatusItemId);
+      const item = getItemById(state.currentCategory, currentStatusItemId);
       if(!item) return;
 
       const confirmed = confirm(t().labels.confirmMoveToBlacklist);
       if(!confirmed) return;
 
-      const oldCategory = currentCategory;
-      const oldIndex = (demoData[oldCategory] || []).findIndex(x => x.id === item.id);
+      const oldCategory = state.currentCategory;
+      const oldIndex = (state.demoData[oldCategory] || []).findIndex(x => x.id === item.id);
       const movedItem = { ...item, status: "Dropped" };
 
       if(oldIndex !== -1){
-        demoData[oldCategory].splice(oldIndex, 1);
+        state.demoData[oldCategory].splice(oldIndex, 1);
       }
 
-      const alreadyThere = demoData.Blacklist.some(x => x.id === item.id || (x.canonical_key && x.canonical_key === item.canonical_key));
+      const alreadyThere = state.demoData.Blacklist.some(x => x.id === item.id || (x.canonical_key && x.canonical_key === item.canonical_key));
       if(!alreadyThere){
-        demoData.Blacklist.unshift(movedItem);
+        state.demoData.Blacklist.unshift(movedItem);
       }
 
       clearRelationCache();
@@ -3768,16 +3770,16 @@ const normalized = candidates
 
       if(!updated){
         if(oldIndex !== -1){
-          demoData[oldCategory].splice(oldIndex, 0, item);
+          state.demoData[oldCategory].splice(oldIndex, 0, item);
         }
-        demoData.Blacklist = demoData.Blacklist.filter(x => x.id !== item.id);
+        state.demoData.Blacklist = state.demoData.Blacklist.filter(x => x.id !== item.id);
         renderShelf();
         alert(t().labels.moveError);
         return;
       }
 
-      if(currentOpenItemId === item.id){
-        currentCategory = "Blacklist";
+      if(state.currentOpenItemId === item.id){
+        state.currentCategory = "Blacklist";
         openCardById(item.id);
       }
     }
@@ -3796,7 +3798,7 @@ const normalized = candidates
         return;
       }
 
-      const item = getItemById(currentCategory, currentOpenItemId);
+      const item = getItemById(state.currentCategory, state.currentOpenItemId);
       if(!item?.id){
         alert(t().labels.itemNotFound);
         return;
@@ -3816,7 +3818,7 @@ const normalized = candidates
 
       item.canonical_key = key;
       clearRelationCache();
-      await loadCategoryFromSupabase(currentCategory);
+      await loadCategoryFromSupabase(state.currentCategory);
       alert(t().labels.canonicalSaved);
     }
 
@@ -3825,7 +3827,7 @@ const normalized = candidates
 
       let changed = false;
 
-      if(currentCategory === "Books"){
+      if(state.currentCategory === "Books"){
         if(!item.description_ru || !item.description_original || !item.description){
           const descriptions = await buildBookDescriptions(
             item.title || "",
@@ -3852,7 +3854,7 @@ const normalized = candidates
           }
         }
       } else {
-        if(currentLanguage === "ru" && !item.description_ru && item.description){
+        if(state.currentLanguage === "ru" && !item.description_ru && item.description){
           if(looksLikeRussian(item.description)){
             item.description_ru = item.description;
             changed = true;
@@ -3865,7 +3867,7 @@ const normalized = candidates
           }
         }
 
-        if(currentLanguage === "en" && !item.description_en && item.description){
+        if(state.currentLanguage === "en" && !item.description_en && item.description){
           if(looksLikeEnglish(item.description)){
             item.description_en = item.description;
             changed = true;
@@ -3879,7 +3881,7 @@ const normalized = candidates
         }
       }
 
-      if(changed && !isPublicView){
+      if(changed && !state.isPublicView){
         await updateDescriptionsInSupabase(
           item.id,
           item.description || "",
@@ -3893,15 +3895,15 @@ const normalized = candidates
 
     async function openCardById(id){
       closeCardMenu();
-      currentOpenItemId = id;
-      const item = getItemById(currentCategory, id);
+      state.currentOpenItemId = id;
+      const item = getItemById(state.currentCategory, id);
 
       hideAllScreens();
       document.getElementById("details-screen").classList.remove("hidden");
 
       document.getElementById("details-title").textContent = item?.title || "";
       document.getElementById("details-creator").textContent = item?.creator || "";
-      document.getElementById("details-category").textContent = translateCategory(currentCategory);
+      document.getElementById("details-category").textContent = translateCategory(state.currentCategory);
       document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
 
       const coverBox = document.getElementById("details-cover-box");
@@ -3918,7 +3920,7 @@ const normalized = candidates
       } else {
         descriptionEl.textContent = t().labels.searching;
         await ensureItemDescriptions(item);
-        const bestDescription = pickBestDescription(item, currentLanguage);
+        const bestDescription = pickBestDescription(item, state.currentLanguage);
         descriptionEl.textContent = bestDescription || t().labels.noDescription;
       }
 
@@ -3934,7 +3936,7 @@ const normalized = candidates
       }
 
       if(folderSection && folderCurrent && folderButton){
-        if(isPublicView){
+        if(state.isPublicView){
           folderSection.classList.add("hidden");
         } else {
           folderSection.classList.remove("hidden");
@@ -3947,7 +3949,7 @@ const normalized = candidates
       const deleteBtn = document.getElementById("delete-details-btn");
 
       if(statusBtn){
-        if(isPublicView){
+        if(state.isPublicView){
           statusBtn.classList.add("hidden");
         } else {
           statusBtn.classList.remove("hidden");
@@ -3955,7 +3957,7 @@ const normalized = candidates
       }
 
       if(deleteBtn){
-        if(isPublicView){
+        if(state.isPublicView){
           deleteBtn.classList.add("hidden");
         } else {
           deleteBtn.classList.remove("hidden");
@@ -3964,39 +3966,39 @@ const normalized = candidates
     }
 
     async function deleteItemById(id){
-      if(isPublicView) return;
+      if(state.isPublicView) return;
 
-      const item = getItemById(currentCategory, id);
+      const item = getItemById(state.currentCategory, id);
       if(!item) return;
 
       const confirmed = confirm(t().labels.confirmDelete);
       if(!confirmed) return;
 
-      const index = (demoData[currentCategory] || []).findIndex(x => x.id === id);
+      const index = (state.demoData[state.currentCategory] || []).findIndex(x => x.id === id);
       const removedItem = item;
 
       if(index !== -1){
-        demoData[currentCategory].splice(index, 1);
+        state.demoData[state.currentCategory].splice(index, 1);
         clearRelationCache();
       }
       renderShelf();
 
-      const deleted = await deleteItemFromSupabase(removedItem, currentCategory);
+      const deleted = await deleteItemFromSupabase(removedItem, state.currentCategory);
 
       if(!deleted){
         if(index !== -1){
-          demoData[currentCategory].splice(index, 0, removedItem);
+          state.demoData[state.currentCategory].splice(index, 0, removedItem);
         }
         renderShelf();
         alert(t().labels.deleteError);
         return;
       }
 
-      if(currentOpenItemId === removedItem.id){
-        currentOpenItemId = null;
+      if(state.currentOpenItemId === removedItem.id){
+        state.currentOpenItemId = null;
       }
 
-      await loadCategoryFromSupabase(currentCategory);
+      await loadCategoryFromSupabase(state.currentCategory);
     }
 
     document.addEventListener("click", (event) => {
@@ -4012,10 +4014,10 @@ const normalized = candidates
     });
 
     async function deleteCurrentItem(){
-      if(isPublicView) return;
-      if(!currentOpenItemId) return;
+      if(state.isPublicView) return;
+      if(!state.currentOpenItemId) return;
 
-      const item = getItemById(currentCategory, currentOpenItemId);
+      const item = getItemById(state.currentCategory, state.currentOpenItemId);
       if(!item){
         alert(t().labels.itemNotFound);
         return;
@@ -4024,25 +4026,25 @@ const normalized = candidates
       const confirmed = confirm(t().labels.confirmDelete);
       if(!confirmed) return;
 
-      const index = (demoData[currentCategory] || []).findIndex(x => x.id === item.id);
+      const index = (state.demoData[state.currentCategory] || []).findIndex(x => x.id === item.id);
       if(index !== -1){
-        demoData[currentCategory].splice(index, 1);
+        state.demoData[state.currentCategory].splice(index, 1);
         clearRelationCache();
       }
 
-      const deleted = await deleteItemFromSupabase(item, currentCategory);
+      const deleted = await deleteItemFromSupabase(item, state.currentCategory);
 
       if(!deleted){
         if(index !== -1){
-          demoData[currentCategory].splice(index, 0, item);
+          state.demoData[state.currentCategory].splice(index, 0, item);
         }
         alert(t().labels.deleteError);
         return;
       }
 
-      currentOpenItemId = null;
+      state.currentOpenItemId = null;
       backToCategory();
-     await loadCategoryFromSupabase(currentCategory);
+     await loadCategoryFromSupabase(state.currentCategory);
     }
 
     async function register(){
@@ -4116,10 +4118,10 @@ async function showAuthorizedUI(){
     async function checkAuth(){
       const user = await getCurrentUser();
 
-      if(activeShareToken){
+      if(state.activeShareToken){
         setAuthorizedButtons(Boolean(user));
         if(user){
-          await ensureCurrentProfileData();
+          await ensurestate.currentProfileData();
         }
         return;
       }
@@ -4322,8 +4324,8 @@ async function getSavedLibraryState(ownerProfileId, token){
 }
 
 async function saveCurrentLibraryToCollection(){
-  const ownerProfileId = currentPublicProfile?.id || currentNfcContext?.ownerId || null;
-  const token = currentNfcContext?.token || activeShareToken || currentPublicProfile?.public_share_token || "";
+  const ownerProfileId = state.currentPublicProfile?.id || currentNfcContext?.ownerId || null;
+  const token = currentNfcContext?.token || state.activeShareToken || state.currentPublicProfile?.public_share_token || "";
   const user = await getCurrentUser();
 
   if(!user){
@@ -4483,7 +4485,7 @@ function normalizePublicProfileRpcPayload(data){
     public_share_enabled: typeof profileSource.public_share_enabled === "boolean"
       ? profileSource.public_share_enabled
       : profileSource.is_public !== false,
-    public_share_token: profileSource.public_share_token || profileSource.token || profileSource.p_token || activeShareToken || "",
+    public_share_token: profileSource.public_share_token || profileSource.token || profileSource.p_token || state.activeShareToken || "",
     public_library_mode: profileSource.public_library_mode || "preview"
   };
 
@@ -4503,7 +4505,7 @@ function normalizePublicProfileRpcPayload(data){
   return { profile, items };
 }
 
-async function ensureCurrentProfileData(){
+async function ensurestate.currentProfileData(){
   const user = await getCurrentUser();
   if(!user) return null;
 
@@ -4526,7 +4528,7 @@ async function ensureCurrentProfileData(){
     }
   }
 
-  currentProfileData = profile
+  state.currentProfileData = profile
     ? {
         ...profile,
         nfc_tag_id: nfcTag?.id || null,
@@ -4543,7 +4545,7 @@ async function ensureCurrentProfileData(){
         public_library_mode: "preview"
       };
 
-  return currentProfileData;
+  return state.currentProfileData;
 }
 
 async function upsertCurrentProfilePatch(patch = {}){
@@ -4553,7 +4555,7 @@ async function upsertCurrentProfilePatch(patch = {}){
     return null;
   }
 
-  const existing = await ensureCurrentProfileData();
+  const existing = await ensurestate.currentProfileData();
   const nextProfile = {
     ...(existing || {}),
     ...patch,
@@ -4599,8 +4601,8 @@ async function upsertCurrentProfilePatch(patch = {}){
     return null;
   }
 
-  currentProfileData = { ...nextProfile, ...payload };
-  return currentProfileData;
+  state.currentProfileData = { ...nextProfile, ...payload };
+  return state.currentProfileData;
 }
 
 function applyShareSettingsToOwnerPanels(profile = {}){
@@ -4672,13 +4674,13 @@ async function shareLibrary(){
     return;
   }
 
-  const profile = await ensureCurrentProfileData();
+  const profile = await ensurestate.currentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
   }
 
-  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
   openShareModal();
 }
 
@@ -4737,15 +4739,15 @@ async function savePublicShareSettingsFromInputs(prefix = "share-modal"){
     public_card_title: title || null,
     public_card_bio: bio || null,
     public_library_mode: mode,
-    public_share_token: currentProfileData?.public_share_token || ""
+    public_share_token: state.currentProfileData?.public_share_token || ""
   });
 
   if(!profile) return null;
 
   applyShareSettingsToOwnerPanels(profile);
-  if(currentPublicProfile && currentPublicProfile.id === profile.id){
-    currentPublicProfile = { ...currentPublicProfile, ...profile };
-    renderPublicShareProfile(currentPublicProfile);
+  if(state.currentPublicProfile && state.currentPublicProfile.id === profile.id){
+    state.currentPublicProfile = { ...state.currentPublicProfile, ...profile };
+    renderPublicShareProfile(state.currentPublicProfile);
   }
   alert(t().share.settingsSaved);
   return profile;
@@ -4769,18 +4771,18 @@ async function regeneratePublicShareToken(){
       const token = await regenerateProfileShareTokenRpc();
       nfcTag = { id: null, token };
     }
-    const refreshedProfile = await ensureCurrentProfileData();
+    const refreshedProfile = await ensurestate.currentProfileData();
     const profile = {
-      ...(refreshedProfile || currentProfileData || {}),
-      nfc_tag_id: nfcTag?.id || refreshedProfile?.nfc_tag_id || currentProfileData?.nfc_tag_id || null,
-      nfc_token: nfcTag?.token || refreshedProfile?.nfc_token || currentProfileData?.nfc_token || ""
+      ...(refreshedProfile || state.currentProfileData || {}),
+      nfc_tag_id: nfcTag?.id || refreshedProfile?.nfc_tag_id || state.currentProfileData?.nfc_tag_id || null,
+      nfc_token: nfcTag?.token || refreshedProfile?.nfc_token || state.currentProfileData?.nfc_token || ""
     };
 
-    currentProfileData = profile;
+    state.currentProfileData = profile;
     applyShareSettingsToOwnerPanels(profile);
-    if(currentPublicProfile && currentPublicProfile.id === profile.id){
-      currentPublicProfile = { ...currentPublicProfile, ...profile };
-      renderPublicShareProfile(currentPublicProfile);
+    if(state.currentPublicProfile && state.currentPublicProfile.id === profile.id){
+      state.currentPublicProfile = { ...state.currentPublicProfile, ...profile };
+      renderPublicShareProfile(state.currentPublicProfile);
     }
     alert(t().share.tokenRegenerated);
   } catch (error) {
@@ -4869,15 +4871,15 @@ function applyPublicLibraryItems(data = []){
     }
     seen.add(fullKey);
 
-    if(!demoData[item.category]){
-      demoData[item.category] = [];
+    if(!state.demoData[item.category]){
+      state.demoData[item.category] = [];
     }
 
     if(item.category) categories.add(translateCategory(item.category));
     if(item.folder_name || item.folder) folders.add(item.folder_name || item.folder);
     if(item.status) statuses.add(translateStatus(item.status));
 
-    demoData[item.category].push({
+    state.demoData[item.category].push({
       id: item.id,
       title: item.title,
       status: item.status || "Planned",
@@ -4903,7 +4905,7 @@ function collectPublicPreviewItems(limit = 8){
   const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
   const items = [];
   orderedCategories.forEach((category) => {
-    (demoData[category] || []).forEach((item) => {
+    (state.demoData[category] || []).forEach((item) => {
       items.push({ ...item, category });
     });
   });
@@ -4912,14 +4914,14 @@ function collectPublicPreviewItems(limit = 8){
 
 function getDefaultPublicCategory(){
   const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-  return orderedCategories.find((category) => (demoData[category] || []).length > 0) || "Books";
+  return orderedCategories.find((category) => (state.demoData[category] || []).length > 0) || "Books";
 }
 
     function showPublicLibraryCategoryView(profile = {}){
-      isPublicView = true;
-      currentPublicProfile = profile;
-      currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
-      currentCategory = getDefaultPublicCategory();
+      state.isPublicView = true;
+      state.currentPublicProfile = profile;
+      state.currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+      state.currentCategory = getDefaultPublicCategory();
       resetShelfSearchQuery();
 
   hideAllScreens();
@@ -4943,22 +4945,22 @@ function getDefaultPublicCategory(){
   }
 
   document.getElementById("category-title").textContent =
-    currentPublicProfileName + " — " + translateCategory(currentCategory);
+    state.currentPublicProfileName + " — " + translateCategory(state.currentCategory);
 
   renderShelf();
 }
 
 async function openOwnerLibraryFromNfc(profile = {}, token = ""){
-  activeShareToken = "";
+  state.activeShareToken = "";
   currentNfcContext = {
     token: token || "",
     ownerId: profile.id || null,
     mode: "owner",
     tagId: profile.nfc_tag_id || null
   };
-  currentPublicProfile = { ...profile, isOwner: true };
-  currentProfileData = { ...(currentProfileData || {}), ...profile };
-  isPublicView = false;
+  state.currentPublicProfile = { ...profile, isOwner: true };
+  state.currentProfileData = { ...(state.currentProfileData || {}), ...profile };
+  state.isPublicView = false;
   window.history.replaceState({}, "", "/");
   await showAuthorizedUI();
 }
@@ -4980,7 +4982,7 @@ function renderPublicPreviewGrid(profile = {}){
     card.type = "button";
     card.className = "media-card";
     card.addEventListener("click", () => {
-      openPublicCategory(item.category, currentPublicProfileName);
+      openPublicCategory(item.category, state.currentPublicProfileName);
       openCardById(item.id);
     });
     card.innerHTML = `
@@ -5041,9 +5043,9 @@ function renderOwnerPanel(profile = {}){
 }
 
 function renderPublicCard(profile = {}){
-  currentPublicProfile = profile;
-  activeShareToken = profile.nfc_token || profile.public_share_token || activeShareToken;
-  currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+  state.currentPublicProfile = profile;
+  state.activeShareToken = profile.nfc_token || profile.public_share_token || state.activeShareToken;
+  state.currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
 
   const loadingCard = document.getElementById("public-share-loading-card");
   const mainCard = document.getElementById("public-share-main-card");
@@ -5091,16 +5093,16 @@ function renderPublicShareProfile(profile = {}){
 }
 
 async function showPublicShareScreen(profile){
-  isPublicView = true;
+  state.isPublicView = true;
   renderPublicShareProfile(profile);
   hideAllScreens();
   document.getElementById("public-share-screen").classList.remove("hidden");
 }
 
 async function loadPublicShareRoute(token){
-  activeShareToken = token || "";
+  state.activeShareToken = token || "";
   currentNfcContext = null;
-  currentPublicProfile = null;
+  state.currentPublicProfile = null;
   currentPublicShareItems = [];
   currentPublicShareState = "loading";
   publicLibraryExpanded = false;
@@ -5113,15 +5115,15 @@ async function loadPublicShareRoute(token){
   try {
     const profile = await fetchPublicProfileByToken(token);
     if(!profile || !isShareEnabled(profile)){
-      currentPublicProfile = null;
+      state.currentPublicProfile = null;
       renderShareState("error");
       return true;
     }
 
     const user = await getCurrentUser();
     const isOwner = Boolean(user && user.id === profile.id);
-    currentPublicProfile = { ...profile, isOwner, public_share_token: token };
-    renderPublicShareProfile(currentPublicProfile);
+    state.currentPublicProfile = { ...profile, isOwner, public_share_token: token };
+    renderPublicShareProfile(state.currentPublicProfile);
 
     const items = await fetchPublicShareLibraryItems(profile.id);
     if(!isOwner){
@@ -5132,15 +5134,15 @@ async function loadPublicShareRoute(token){
     return true;
   } catch (error) {
     console.error("Public share page init error:", error);
-    currentPublicProfile = null;
+    state.currentPublicProfile = null;
     renderShareState("error");
     return true;
   }
 }
 
 async function loadNfcRoute(token){
-  activeShareToken = token || "";
-  currentPublicProfile = null;
+  state.activeShareToken = token || "";
+  state.currentPublicProfile = null;
   currentPublicShareItems = [];
   currentPublicShareState = "loading";
   publicLibraryExpanded = true;
@@ -5168,7 +5170,7 @@ async function loadNfcRoute(token){
     }
 
     if(!tag){
-      currentPublicProfile = null;
+      state.currentPublicProfile = null;
       renderShareState("error");
       return true;
     }
@@ -5188,7 +5190,7 @@ async function loadNfcRoute(token){
     }
 
     if(!profile || !isShareEnabled(profile)){
-      currentPublicProfile = null;
+      state.currentPublicProfile = null;
       renderShareState("error");
       return true;
     }
@@ -5199,7 +5201,7 @@ async function loadNfcRoute(token){
       mode: "guest",
       tagId: tag.id
     };
-    currentPublicProfile = {
+    state.currentPublicProfile = {
       ...profile,
       isOwner: false,
       nfc_tag_id: tag.id,
@@ -5209,12 +5211,12 @@ async function loadNfcRoute(token){
     const items = await fetchPublicShareLibraryItems(profile.id);
     applyPublicLibraryItems(items);
     await getSavedLibraryState(profile.id, tag.token);
-    renderPublicShareProfile(currentPublicProfile);
+    renderPublicShareProfile(state.currentPublicProfile);
     renderShareLibrary(items);
     return true;
   } catch (error) {
     console.error("NFC page init error:", error);
-    currentPublicProfile = null;
+    state.currentPublicProfile = null;
     renderShareState("error");
     return true;
   }
@@ -5232,8 +5234,8 @@ function renderShareState(state = "loading"){
 
   if(loadingCard) loadingCard.classList.toggle("hidden", state !== "loading");
   if(errorCard) errorCard.classList.toggle("hidden", state !== "error");
-  if(mainCard) mainCard.classList.toggle("hidden", state === "loading" || state === "error" || !currentPublicProfile);
-  if(ownerControls && (state === "loading" || state === "error" || !currentPublicProfile)){
+  if(mainCard) mainCard.classList.toggle("hidden", state === "loading" || state === "error" || !state.currentPublicProfile);
+  if(ownerControls && (state === "loading" || state === "error" || !state.currentPublicProfile)){
     ownerControls.classList.add("hidden");
   }
 
@@ -5367,8 +5369,8 @@ async function initPublicSharePage(){
 
 function openSharedLibrary(){
   if(document.body.classList.contains("public-route-active")){
-    if(currentPublicProfile && !currentPublicProfile.isOwner){
-      showPublicLibraryCategoryView(currentPublicProfile);
+    if(state.currentPublicProfile && !state.currentPublicProfile.isOwner){
+      showPublicLibraryCategoryView(state.currentPublicProfile);
       return;
     }
     setPublicLibraryExpanded(true);
@@ -5376,10 +5378,10 @@ function openSharedLibrary(){
     return;
   }
 
-  if(!currentPublicProfile){
+  if(!state.currentPublicProfile){
     return;
   }
-  openPublicCategory(getDefaultPublicCategory(), currentPublicProfileName);
+  openPublicCategory(getDefaultPublicCategory(), state.currentPublicProfileName);
 }
 
 async function changePassword(){
@@ -5427,10 +5429,10 @@ async function changePassword(){
     display_name: displayName || null,
     public_share_enabled: isPublic,
     is_public: isPublic,
-    public_share_token: currentProfileData?.public_share_token || "",
-    public_card_title: currentProfileData?.public_card_title || null,
-    public_card_bio: currentProfileData?.public_card_bio || null,
-    public_library_mode: currentProfileData?.public_library_mode || "preview"
+    public_share_token: state.currentProfileData?.public_share_token || "",
+    public_card_title: state.currentProfileData?.public_card_title || null,
+    public_card_bio: state.currentProfileData?.public_card_bio || null,
+    public_library_mode: state.currentProfileData?.public_library_mode || "preview"
   });
 
   if(!profile){
@@ -5448,7 +5450,7 @@ async function changePassword(){
   const publicInput = document.getElementById("profile-public");
 
   const resetProfileFields = () => {
-    currentProfileData = null;
+    state.currentProfileData = null;
     if(usernameInput) usernameInput.value = "";
     if(displayNameInput) displayNameInput.value = "";
     if(publicInput) publicInput.checked = true;
@@ -5464,7 +5466,7 @@ async function changePassword(){
       return;
     }
 
-    const data = await ensureCurrentProfileData();
+    const data = await ensurestate.currentProfileData();
     if(!data){
       resetProfileFields();
       return;
@@ -5484,11 +5486,11 @@ async function changePassword(){
 
     function openPublicCategory(name, profileName = "Library"){
       closePreferencesPanel();
-      if(!isPublicView){
+      if(!state.isPublicView){
         return;
       }
 
-      currentCategory = name;
+      state.currentCategory = name;
       resetShelfSearchQuery();
 
       hideAllScreens();
@@ -5542,9 +5544,9 @@ async function changePassword(){
 
       const items = await fetchPublicLibraryItems(profile.id);
       applyPublicLibraryItems(items);
-      isPublicView = true;
-      currentPublicProfile = profile;
-      currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
+      state.isPublicView = true;
+      state.currentPublicProfile = profile;
+      state.currentPublicProfileName = profile.display_name || profile.username || getShareCardTitle(profile) || "Library";
 
       hideAllScreens();
       document.getElementById("category-screen").classList.remove("hidden");
@@ -5566,9 +5568,9 @@ async function changePassword(){
         tabs.style.display = "flex";
       }
 
-      currentCategory = "Books";
+      state.currentCategory = "Books";
       document.getElementById("category-title").textContent =
-        currentPublicProfileName + " — " + translateCategory("Books");
+        state.currentPublicProfileName + " — " + translateCategory("Books");
 
       renderShelf();
       return true;
@@ -5598,7 +5600,7 @@ async function changePassword(){
         }
       }
 
-      activeShareToken = "";
+      state.activeShareToken = "";
       return false;
     }
 
@@ -5686,13 +5688,13 @@ async function uploadAvatar(){
   const displayName = document.getElementById("profile-display-name")?.value || "";
   const username = document.getElementById("profile-username")?.value || "";
   setAvatarPreview(avatarUrl, displayName, username);
-  if(currentProfileData){
-    currentProfileData.avatar_url = avatarUrl;
-    applyShareSettingsToOwnerPanels(currentProfileData);
+  if(state.currentProfileData){
+    state.currentProfileData.avatar_url = avatarUrl;
+    applyShareSettingsToOwnerPanels(state.currentProfileData);
   }
-  if(currentPublicProfile?.isOwner){
-    currentPublicProfile.avatar_url = avatarUrl;
-    renderPublicShareProfile(currentPublicProfile);
+  if(state.currentPublicProfile?.isOwner){
+    state.currentPublicProfile.avatar_url = avatarUrl;
+    renderPublicShareProfile(state.currentPublicProfile);
   }
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarUpdated);
@@ -5719,13 +5721,13 @@ async function removeAvatar(){
   const displayName = document.getElementById("profile-display-name")?.value || "";
   const username = document.getElementById("profile-username")?.value || "";
   setAvatarPreview("", displayName, username);
-  if(currentProfileData){
-    currentProfileData.avatar_url = "";
-    applyShareSettingsToOwnerPanels(currentProfileData);
+  if(state.currentProfileData){
+    state.currentProfileData.avatar_url = "";
+    applyShareSettingsToOwnerPanels(state.currentProfileData);
   }
-  if(currentPublicProfile?.isOwner){
-    currentPublicProfile.avatar_url = "";
-    renderPublicShareProfile(currentPublicProfile);
+  if(state.currentPublicProfile?.isOwner){
+    state.currentPublicProfile.avatar_url = "";
+    renderPublicShareProfile(state.currentPublicProfile);
   }
   const fileInput = document.getElementById("avatar-file");
   if(fileInput) fileInput.value = "";
@@ -5749,15 +5751,15 @@ async function removeAvatar(){
         const loginBtn = document.getElementById("login-top-btn");
         const profileBtn = document.getElementById("profile-btn");
 
-        if(activeShareToken){
+        if(state.activeShareToken){
           setAuthorizedButtons(Boolean(session?.user));
           if(session?.user){
-            await ensureCurrentProfileData();
+            await ensurestate.currentProfileData();
           }
           if(isNfcRoute()){
-            await loadNfcRoute(activeShareToken);
+            await loadNfcRoute(state.activeShareToken);
           } else {
-            await loadPublicShareRoute(activeShareToken);
+            await loadPublicShareRoute(state.activeShareToken);
           }
           return;
         }
@@ -5910,11 +5912,11 @@ setAvatarPreview = function setAvatarPreviewWithHeader(url, displayName = "", us
 };
 
 function getCurrentShareUrl(){
-  return document.getElementById("share-modal-link-input")?.value || buildPublicShareUrl(currentProfileData?.nfc_token || currentProfileData?.public_share_token || "");
+  return document.getElementById("share-modal-link-input")?.value || buildPublicShareUrl(state.currentProfileData?.nfc_token || state.currentProfileData?.public_share_token || "");
 }
 
 function syncHeaderProfileIdentity(displayName = "", username = ""){
-  const profile = currentProfileData || {};
+  const profile = state.currentProfileData || {};
   const resolvedName = normalizeSpaces(displayName || profile.display_name || profile.public_card_title || profile.username || "Plamut");
   const resolvedUsername = normalizeSpaces(username || profile.username || "");
   const nameNode = document.getElementById("header-popover-name");
@@ -5974,12 +5976,12 @@ async function openNfcSettingsModal(){
     return;
   }
   closePreferencesPanel();
-  const profile = await ensureCurrentProfileData();
+  const profile = await ensurestate.currentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
   }
-  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
   openShareModal();
 }
 
@@ -6034,7 +6036,7 @@ function handlePrimaryAddAction(){
     openAddModal();
     return;
   }
-  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !isPublicView && currentCategory !== "Blacklist"){
+  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !state.isPublicView && state.currentCategory !== "Blacklist"){
     openAddModal();
   }
 }
@@ -6064,7 +6066,7 @@ function setAuthorizedButtons(isAuthorized){
 
   if(!isAuthorized){
     setAvatarPreview("", "", "");
-    currentProfileData = null;
+    state.currentProfileData = null;
     closePreferencesPanel();
   }
 
@@ -6132,13 +6134,13 @@ async function shareLibrary(){
     return;
   }
 
-  const profile = await ensureCurrentProfileData();
+  const profile = await ensurestate.currentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
   }
 
-  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
   toggleShareMenu();
 }
 
@@ -6153,10 +6155,10 @@ function renderShelf(){
   const filterToolbar = document.getElementById("filter-toolbar");
   const statusFilterWrap = document.getElementById("status-filter-wrap");
   if(filterToolbar){
-    filterToolbar.classList.toggle("hidden", currentCategory === "Blacklist");
+    filterToolbar.classList.toggle("hidden", state.currentCategory === "Blacklist");
   }
   if(statusFilterWrap){
-    statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
+    statusFilterWrap.classList.toggle("hidden", state.currentCategory === "Blacklist");
   }
 
   const items = getFilteredItems();
@@ -6174,9 +6176,9 @@ function renderShelf(){
     const chips = [
       buildChip(item.folder || "", "is-folder"),
       buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
-      buildChip(translateCategory(currentCategory), "is-category")
+      buildChip(translateCategory(state.currentCategory), "is-category")
     ].join("");
-    const menuHtml = isPublicView
+    const menuHtml = state.isPublicView
       ? ""
       : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
            <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
@@ -6246,17 +6248,17 @@ function goHome(){
   closePreferencesPanel();
   resetShelfSearchQuery();
   toggleHomeAddPanel(false);
-  if(activeShareToken && currentPublicProfile && !currentPublicProfile.isOwner){
+  if(state.activeShareToken && state.currentPublicProfile && !state.currentPublicProfile.isOwner){
     if(document.body.classList.contains("public-route-active")){
-      showPublicShareScreen(currentPublicProfile);
+      showPublicShareScreen(state.currentPublicProfile);
       renderShareState(currentPublicShareItems.length ? "ready" : currentPublicShareState);
     } else {
-      showPublicLibraryCategoryView(currentPublicProfile);
+      showPublicLibraryCategoryView(state.currentPublicProfile);
     }
     updatePrimaryActionVisibility();
     return;
   }
-  isPublicView = false;
+  state.isPublicView = false;
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
   toggleCategoryFilters(false);
@@ -6266,7 +6268,7 @@ function goHome(){
 async function openLibraryScreen(){
   closePreferencesPanel();
   toggleHomeAddPanel(false);
-  isPublicView = false;
+  state.isPublicView = false;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
   await renderLibraryCategories();
@@ -6291,7 +6293,7 @@ async function ensureLibraryDataLoaded(){
     if(libraryLoadedCategories.has(category)){
       continue;
     }
-    if(!(demoData[category] || []).length){
+    if(!(state.demoData[category] || []).length){
       await loadCategoryFromSupabase(category);
     }
     libraryLoadedCategories.add(category);
@@ -6307,7 +6309,7 @@ async function renderLibraryCategories(){
   grid.innerHTML = "";
 
   categories.forEach((category) => {
-    const items = demoData[category] || [];
+    const items = state.demoData[category] || [];
     const count = query
       ? items.filter((item) => normalizeComparisonText(item.title || "").includes(query)).length
       : items.length;
@@ -6323,7 +6325,7 @@ async function renderLibraryCategories(){
 
 function toggleCategoryFilters(force){
   const panel = document.getElementById("filter-toolbar");
-  if(!panel || currentCategory === "Blacklist") return;
+  if(!panel || state.currentCategory === "Blacklist") return;
   const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
   panel.classList.toggle("hidden", !shouldOpen);
 }
@@ -6338,8 +6340,8 @@ function backToCategory(){
 
 async function openCategory(name){
   closePreferencesPanel();
-  isPublicView = false;
-  currentCategory = name;
+  state.isPublicView = false;
+  state.currentCategory = name;
   resetShelfSearchQuery();
 
   hideAllScreens();
@@ -6368,15 +6370,15 @@ async function openCardById(id){
   closeCardMenu();
   closeDetailsMenu();
   closePreferencesPanel();
-  currentOpenItemId = id;
-  const item = getItemById(currentCategory, id);
+  state.currentOpenItemId = id;
+  const item = getItemById(state.currentCategory, id);
 
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
 
   document.getElementById("details-title").textContent = item?.title || "";
   document.getElementById("details-creator").textContent = item?.creator || "";
-  document.getElementById("details-category").textContent = translateCategory(currentCategory);
+  document.getElementById("details-category").textContent = translateCategory(state.currentCategory);
   document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
   document.getElementById("details-folder-badge").textContent = item?.folder || t().labels.noFolder;
 
@@ -6393,7 +6395,7 @@ async function openCardById(id){
   } else {
     descriptionEl.textContent = t().labels.searching;
     await ensureItemDescriptions(item);
-    const bestDescription = pickBestDescription(item, currentLanguage);
+    const bestDescription = pickBestDescription(item, state.currentLanguage);
     descriptionEl.textContent = bestDescription || t().labels.noDescription;
   }
 
@@ -6409,7 +6411,7 @@ async function openCardById(id){
   }
 
   if(folderSection && folderCurrent && folderButton){
-    if(isPublicView){
+    if(state.isPublicView){
       folderSection.classList.add("hidden");
     } else {
       folderSection.classList.remove("hidden");
@@ -6421,12 +6423,12 @@ async function openCardById(id){
   const statusBtn = document.getElementById("change-status-details-btn");
   const deleteBtn = document.getElementById("delete-details-btn");
   const detailsActions = document.getElementById("details-toolbar-actions");
-  if(statusBtn) statusBtn.classList.toggle("hidden", isPublicView);
-  if(deleteBtn) deleteBtn.classList.toggle("hidden", isPublicView);
-  if(detailsActions) detailsActions.classList.toggle("hidden", isPublicView);
+  if(statusBtn) statusBtn.classList.toggle("hidden", state.isPublicView);
+  if(deleteBtn) deleteBtn.classList.toggle("hidden", state.isPublicView);
+  if(detailsActions) detailsActions.classList.toggle("hidden", state.isPublicView);
 
   updateDetailsRelationsState("not_built");
-  deferRelatedItemsRender(item, currentCategory);
+  deferRelatedItemsRender(item, state.currentCategory);
   updatePrimaryActionVisibility();
 }
 
@@ -6642,12 +6644,12 @@ async function shareLibrary(){
     alert(t().labels.mustBeLoggedIn);
     return;
   }
-  const profile = await ensureCurrentProfileData();
+  const profile = await ensurestate.currentProfileData();
   if(!profile?.public_share_token){
     alert(t().share.unavailable);
     return;
   }
-  applyShareSettingsToOwnerPanels(currentProfileData || profile || {});
+  applyShareSettingsToOwnerPanels(state.currentProfileData || profile || {});
   openShareSheet();
 }
 
@@ -6665,10 +6667,10 @@ function closeItemActionsSheetOnBackdrop(event){
 }
 
 async function removeItemFromFolderById(id){
-  const item = getItemById(currentCategory, id);
+  const item = getItemById(state.currentCategory, id);
   if(!item) return;
   pendingFolderSelection = "";
-  currentFolderModalItemId = id;
+  state.currentFolderModalItemId = id;
   await saveItemFolderFromModal();
   closeItemActionsSheet();
 }
@@ -6711,13 +6713,13 @@ function buildItemActions(item){
 }
 
 function openItemActionsSheet(id){
-  const item = getItemById(currentCategory, id);
+  const item = getItemById(state.currentCategory, id);
   if(!item) return;
   const list = document.getElementById("item-actions-list");
   if(!list) return;
   currentItemActionSheetId = id;
   setTextIfPresent("item-actions-title", item.title || t().buttons.moreActions);
-  setTextIfPresent("item-actions-subtitle", item.folder ? `${t().labels.folder}: ${item.folder}` : translateCategory(currentCategory));
+  setTextIfPresent("item-actions-subtitle", item.folder ? `${t().labels.folder}: ${item.folder}` : translateCategory(state.currentCategory));
   list.innerHTML = "";
   buildItemActions(item).forEach((action) => {
     const button = document.createElement("button");
@@ -6732,7 +6734,7 @@ function openItemActionsSheet(id){
 }
 
 function toggleCardMenu(event, id){
-  if(isPublicView){
+  if(state.isPublicView){
     if(event){ event.preventDefault(); event.stopPropagation(); }
     return;
   }
@@ -6756,7 +6758,7 @@ function toggleCardMenu(event, id){
 
 async function getFolderUsageMap(){
   const usage = new Map();
-  (demoData[currentCategory] || []).forEach((item) => {
+  (state.demoData[state.currentCategory] || []).forEach((item) => {
     const key = normalizeSpaces(item.folder || "");
     if(!key) return;
     usage.set(key, (usage.get(key) || 0) + 1);
@@ -6783,8 +6785,8 @@ async function renameCustomFolder(oldFolder, nextFolder){
   });
   await setFolderAssignments(assignments);
 
-  for(const category of Object.keys(demoData)){
-    demoData[category].forEach((item) => {
+  for(const category of Object.keys(state.demoData)){
+    state.demoData[category].forEach((item) => {
       if(item.folder === oldName) item.folder = newName;
     });
   }
@@ -6825,8 +6827,8 @@ async function removeCustomFolder(folder){
   });
   await setFolderAssignments(assignments);
 
-  for(const category of Object.keys(demoData)){
-    demoData[category].forEach((item) => {
+  for(const category of Object.keys(state.demoData)){
+    state.demoData[category].forEach((item) => {
       if(item.folder === folderName){
         item.folder = "";
       }
@@ -6865,7 +6867,7 @@ function setFolderFilter(value){
 async function renderFolderRail(){
   const rail = document.getElementById("folder-rail");
   if(!rail) return;
-  if(isPublicView || currentCategory === "Blacklist"){
+  if(state.isPublicView || state.currentCategory === "Blacklist"){
     rail.classList.add("hidden");
     rail.innerHTML = "";
     return;
@@ -6873,8 +6875,8 @@ async function renderFolderRail(){
 
   const folders = await getAvailableFolders();
   const usage = await getFolderUsageMap();
-  const allCount = (demoData[currentCategory] || []).length;
-  const ungroupedCount = (demoData[currentCategory] || []).filter((item) => !normalizeSpaces(item.folder || "")).length;
+  const allCount = (state.demoData[state.currentCategory] || []).length;
+  const ungroupedCount = (state.demoData[state.currentCategory] || []).filter((item) => !normalizeSpaces(item.folder || "")).length;
 
   rail.classList.remove("hidden");
   rail.innerHTML = "";
@@ -6919,7 +6921,7 @@ async function renderFolderManagerList(){
     row.innerHTML = `
       <div class="folder-manager-row-main">
         <div class="folder-manager-row-title">${escapeHtml(folder)}</div>
-        <div class="folder-manager-row-meta">${escapeHtml(String(usage.get(folder) || 0))} · ${escapeHtml(translateCategory(currentCategory || ""))}</div>
+        <div class="folder-manager-row-meta">${escapeHtml(String(usage.get(folder) || 0))} · ${escapeHtml(translateCategory(state.currentCategory || ""))}</div>
       </div>
     `;
 
@@ -6998,9 +7000,9 @@ function addCustomFolder(){
 async function openFolderModalById(id){
   if(!isOwnerControlAllowed()) return;
   closeItemActionsSheet();
-  const item = getItemById(currentCategory, id);
+  const item = getItemById(state.currentCategory, id);
   if(!item) return;
-  currentFolderModalItemId = id;
+  state.currentFolderModalItemId = id;
   pendingFolderSelection = item.folder || "";
   await renderFolderModalOptions();
   document.getElementById("folder-modal")?.classList.remove("hidden");
@@ -7009,7 +7011,7 @@ async function openFolderModalById(id){
 
 function closeFolderModal(){
   document.getElementById("folder-modal")?.classList.add("hidden");
-  currentFolderModalItemId = null;
+  state.currentFolderModalItemId = null;
   pendingFolderSelection = "";
   syncBodySheetLock();
 }
@@ -7045,10 +7047,10 @@ function closeFolderModalOnBackdrop(event){
 }
 
 function getFilteredItems(){
-  const items = demoData[currentCategory] || [];
+  const items = state.demoData[state.currentCategory] || [];
   const searchComparison = normalizeComparisonText(currentShelfSearchQuery);
   return items.filter((item) => {
-    const statusMatches = currentCategory === "Blacklist" || currentFilterStatus === "All" || item.status === currentFilterStatus;
+    const statusMatches = state.currentCategory === "Blacklist" || state.currentFilterStatus === "All" || item.status === state.currentFilterStatus;
     const folderMatches = currentFilterFolder === "All"
       || (currentFilterFolder === "__ungrouped__" ? !normalizeSpaces(item.folder || "") : normalizeSpaces(item.folder || "") === currentFilterFolder);
     const haystack = normalizeComparisonText([item.title, item.creator, item.description_ru, item.description_original, item.description_en].filter(Boolean).join(" "));
@@ -7067,8 +7069,8 @@ function renderShelf(){
 
   const filterToolbar = document.getElementById("filter-toolbar");
   const statusFilterWrap = document.getElementById("status-filter-wrap");
-  if(filterToolbar) filterToolbar.classList.toggle("hidden", currentCategory === "Blacklist");
-  if(statusFilterWrap) statusFilterWrap.classList.toggle("hidden", currentCategory === "Blacklist");
+  if(filterToolbar) filterToolbar.classList.toggle("hidden", state.currentCategory === "Blacklist");
+  if(statusFilterWrap) statusFilterWrap.classList.toggle("hidden", state.currentCategory === "Blacklist");
 
   const items = getFilteredItems();
   if(items.length === 0){
@@ -7085,11 +7087,11 @@ function renderShelf(){
     const creatorLine = item.creator ? `<div class="media-meta">${escapeHtml(item.creator)}</div>` : "";
     const chips = [
       buildChip(translateStatus(item.status || t().labels.unknownStatus), "is-status"),
-      buildChip(translateCategory(currentCategory), "is-category"),
+      buildChip(translateCategory(state.currentCategory), "is-category"),
       buildChip(item.folder || "", "is-folder"),
-      isUserCreatedItem(item) ? buildChip(currentLanguage === "ru" ? "Пользовательское" : "Custom", "is-custom") : ""
+      isUserCreatedItem(item) ? buildChip(state.currentLanguage === "ru" ? "Пользовательское" : "Custom", "is-custom") : ""
     ].join("");
-    const menuHtml = isPublicView ? "" : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
+    const menuHtml = state.isPublicView ? "" : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
       <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
       <div class="media-menu" role="menu">
         <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(item.folder ? t().buttons.moveToFolder : t().buttons.addToFolder)}</button>
@@ -7123,10 +7125,10 @@ function renderShelf(){
 const mobileRefineApplyTranslations = applyTranslations;
 applyTranslations = function applyTranslationsMobileRefine(){
   mobileRefineApplyTranslations();
-  setTextIfPresent("home-open-library-btn", currentLanguage === "ru" ? "Библиотека" : "Library");
+  setTextIfPresent("home-open-library-btn", state.currentLanguage === "ru" ? "Библиотека" : "Library");
   setTextIfPresent("library-screen-title", t().home.libraryTitle);
   setTextIfPresent("back-library-home-btn", t().buttons.backHome);
-  setTextIfPresent("filter-toggle-btn", currentLanguage === "ru" ? "Фильтр" : "Filter");
+  setTextIfPresent("filter-toggle-btn", state.currentLanguage === "ru" ? "Фильтр" : "Filter");
   setTextIfPresent("details-menu-folder-btn", t().buttons.addToFolder);
   setTextIfPresent("details-menu-status-btn", t().buttons.changeStatus);
   setTextIfPresent("details-menu-delete-btn", t().buttons.delete);
@@ -7174,7 +7176,7 @@ function handlePrimaryAddAction(){
     toggleHomeAddPanel();
     return;
   }
-  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !isPublicView && currentCategory !== "Blacklist"){
+  if(document.getElementById("category-screen") && !document.getElementById("category-screen").classList.contains("hidden") && !state.isPublicView && state.currentCategory !== "Blacklist"){
     openAddModal();
   }
 }
