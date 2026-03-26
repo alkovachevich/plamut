@@ -6406,7 +6406,6 @@ Object.assign(window, {
   toggleHomeAddPanel,
   startQuickAdd,
   openLibraryScreen,
-  handleLibrarySearchInput,
   openCategory,
   toggleCategoryFilters,
   setShelfSearchQuery,
