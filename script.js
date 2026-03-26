@@ -665,6 +665,125 @@ import { state } from "./js/state.js";
       return window.location.pathname.startsWith("/share/") || window.location.pathname.startsWith("/nfc/");
     }
 
+    const ROUTE_STATE_STORAGE_KEY = "plamut_route_state";
+    let routeRestoreInProgress = false;
+
+    function getVisibleScreenName(){
+      if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
+      if(!document.getElementById("category-screen")?.classList.contains("hidden")) return "category";
+      if(!document.getElementById("library-screen")?.classList.contains("hidden")) return "library";
+      if(!document.getElementById("public-share-screen")?.classList.contains("hidden")) return "public-share";
+      if(!document.getElementById("auth-screen")?.classList.contains("hidden")) return "auth";
+      return "home";
+    }
+
+    function getCurrentRouteSnapshot(){
+      return {
+        screen: getVisibleScreenName(),
+        category: state.currentCategory || "",
+        openItemId: Number.isFinite(Number(state.currentOpenItemId)) ? Number(state.currentOpenItemId) : null,
+        isPublicShareRoute: Boolean(state.activeShareToken),
+        shareToken: state.activeShareToken || "",
+        sharePath: isNfcRoute() ? "nfc" : "share"
+      };
+    }
+
+    function saveRouteState(routePatch = {}){
+      if(routeRestoreInProgress) return;
+      const payload = {
+        ...getCurrentRouteSnapshot(),
+        ...routePatch,
+        updatedAt: Date.now()
+      };
+      try {
+        sessionStorage.setItem(ROUTE_STATE_STORAGE_KEY, JSON.stringify(payload));
+      } catch (error) {
+        console.error("Route state save error:", error);
+      }
+    }
+
+    function readRouteState(){
+      try {
+        const raw = sessionStorage.getItem(ROUTE_STATE_STORAGE_KEY);
+        if(!raw) return null;
+        const parsed = JSON.parse(raw);
+        if(!parsed || typeof parsed !== "object"){
+          return null;
+        }
+        return parsed;
+      } catch (error) {
+        console.error("Route state read error:", error);
+        return null;
+      }
+    }
+
+    function clearRouteState(){
+      try {
+        sessionStorage.removeItem(ROUTE_STATE_STORAGE_KEY);
+      } catch (error) {
+        console.error("Route state clear error:", error);
+      }
+    }
+
+    async function restoreRouteState(options = {}){
+      const routeState = readRouteState();
+      if(!routeState){
+        return false;
+      }
+
+      const isAuthenticated = Boolean(options.isAuthenticated);
+      if(!isAuthenticated && !routeState.isPublicShareRoute){
+        return false;
+      }
+
+      routeRestoreInProgress = true;
+      try {
+        if(routeState.isPublicShareRoute && routeState.shareToken){
+          if(routeState.sharePath === "nfc"){
+            return await loadNfcRoute(routeState.shareToken);
+          }
+          return await loadPublicShareRoute(routeState.shareToken);
+        }
+
+        if(!isAuthenticated){
+          return false;
+        }
+
+        const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+        const hasCategory = categories.includes(routeState.category);
+        const screen = routeState.screen || "home";
+
+        if(screen === "library"){
+          await openLibraryScreen();
+          return true;
+        }
+
+        if((screen === "category" || screen === "details") && hasCategory){
+          await openCategory(routeState.category);
+          if(screen === "details" && Number.isFinite(Number(routeState.openItemId))){
+            const restoredItemId = Number(routeState.openItemId);
+            const item = getItemById(routeState.category, restoredItemId);
+            if(item){
+              await openCardById(restoredItemId);
+            }
+          }
+          return true;
+        }
+
+        if(screen === "home"){
+          goHome();
+          return true;
+        }
+
+        return false;
+      } catch (error) {
+        console.error("Route state restore error:", error);
+        return false;
+      } finally {
+        routeRestoreInProgress = false;
+      }
+    }
+
     function setPublicRouteMode(active){
       document.body.classList.toggle("public-route-active", Boolean(active));
       const appShell = document.getElementById("app-shell");
@@ -3548,6 +3667,7 @@ const normalized = candidates
         document.getElementById("home-screen").classList.add("hidden");
         setAuthorizedButtons(false);
         refreshAccountCollectionsUI();
+        clearRouteState();
       } else {
         await showAuthorizedUI();
       }
@@ -4300,6 +4420,13 @@ function getDefaultPublicCategory(){
     state.currentPublicProfileName + " — " + translateCategory(state.currentCategory);
 
   renderShelf();
+  saveRouteState({
+    screen: "category",
+    category: state.currentCategory,
+    openItemId: null,
+    isPublicShareRoute: Boolean(state.activeShareToken),
+    shareToken: state.activeShareToken || ""
+  });
 }
 
 async function openOwnerLibraryFromNfc(profile = {}, token = ""){
@@ -4314,7 +4441,7 @@ async function openOwnerLibraryFromNfc(profile = {}, token = ""){
   state.currentProfileData = { ...(state.currentProfileData || {}), ...profile };
   state.isPublicView = false;
   window.history.replaceState({}, "", "/");
-  await showAuthorizedUI();
+  await showAuthorizedUI({ restoreRoute: false });
 }
 
 function renderPublicPreviewGrid(profile = {}){
@@ -4449,6 +4576,7 @@ async function showPublicShareScreen(profile){
   renderPublicShareProfile(profile);
   hideAllScreens();
   document.getElementById("public-share-screen").classList.remove("hidden");
+  saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: state.activeShareToken || "" });
 }
 
 async function loadPublicShareRoute(token){
@@ -4483,6 +4611,7 @@ async function loadPublicShareRoute(token){
       updatePublicSaveButton();
     }
     renderShareLibrary(items);
+    saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: token || "", sharePath: "share", openItemId: null });
     return true;
   } catch (error) {
     console.error("Public share page init error:", error);
@@ -4565,6 +4694,7 @@ async function loadNfcRoute(token){
     await getSavedLibraryState(profile.id, tag.token);
     renderPublicShareProfile(state.currentPublicProfile);
     renderShareLibrary(items);
+    saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: token || "", sharePath: "nfc", openItemId: null });
     return true;
   } catch (error) {
     console.error("NFC page init error:", error);
@@ -4727,12 +4857,14 @@ function openSharedLibrary(){
     }
     setPublicLibraryExpanded(true);
     renderShareState(state.currentPublicShareItems.length ? "ready" : state.currentPublicShareState === "loading" ? "loading" : "empty");
+    saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: state.activeShareToken || "" });
     return;
   }
 
   if(!state.currentPublicProfile){
     return;
   }
+  saveRouteState({ screen: "category", category: getDefaultPublicCategory(), isPublicShareRoute: true, shareToken: state.activeShareToken || "" });
   openPublicCategory(getDefaultPublicCategory(), state.currentPublicProfileName);
 }
 
@@ -4843,6 +4975,7 @@ async function changePassword(){
       }
 
       state.currentCategory = name;
+      state.currentOpenItemId = null;
       resetShelfSearchQuery();
 
       hideAllScreens();
@@ -4869,6 +5002,7 @@ async function changePassword(){
         profileName + " — " + translateCategory(name);
 
       renderShelf();
+      saveRouteState({ screen: "category", category: name, openItemId: null, isPublicShareRoute: Boolean(state.activeShareToken), shareToken: state.activeShareToken || "" });
     }
 
     async function loadPublicLibrary(username){
@@ -5123,6 +5257,7 @@ async function removeAvatar(){
           hideAllScreens();
           document.getElementById("auth-screen").classList.remove("hidden");
           setAuthorizedButtons(false);
+          clearRouteState();
 
           if(loginBtn) loginBtn.classList.remove("hidden");
           if(profileBtn) profileBtn.classList.add("hidden");
@@ -5344,23 +5479,28 @@ function goHome(){
       showPublicLibraryCategoryView(state.currentPublicProfile);
     }
     updatePrimaryActionVisibility();
+    saveRouteState({ screen: "public-share" });
     return;
   }
   state.isPublicView = false;
+  state.currentOpenItemId = null;
   hideAllScreens();
   document.getElementById("home-screen").classList.remove("hidden");
   toggleCategoryFilters(false);
   updatePrimaryActionVisibility();
+  saveRouteState({ screen: "home", category: "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
 async function openLibraryScreen(){
   closePreferencesPanel();
   toggleHomeAddPanel(false);
   state.isPublicView = false;
+  state.currentOpenItemId = null;
   hideAllScreens();
   document.getElementById("library-screen")?.classList.remove("hidden");
   await renderLibraryCategories();
   updatePrimaryActionVisibility();
+  saveRouteState({ screen: "library", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
 const libraryLoadedCategories = new Set();
@@ -5421,15 +5561,18 @@ function toggleCategoryFilters(force){
 function backToCategory(){
   closePreferencesPanel();
   syncShelfSearchInput();
+  state.currentOpenItemId = null;
   hideAllScreens();
   document.getElementById("category-screen").classList.remove("hidden");
   updatePrimaryActionVisibility();
+  saveRouteState({ screen: "category", category: state.currentCategory || "", openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
 async function openCategory(name){
   closePreferencesPanel();
   state.isPublicView = false;
   state.currentCategory = name;
+  state.currentOpenItemId = null;
   resetShelfSearchQuery();
 
   hideAllScreens();
@@ -5452,6 +5595,7 @@ async function openCategory(name){
 
   await loadCategoryFromSupabase(name);
   updatePrimaryActionVisibility();
+  saveRouteState({ screen: "category", category: name, openItemId: null, isPublicShareRoute: false, shareToken: "" });
 }
 
 async function openCardById(id){
@@ -5518,13 +5662,25 @@ async function openCardById(id){
   updateDetailsRelationsState("not_built");
   deferRelatedItemsRender(item, state.currentCategory);
   updatePrimaryActionVisibility();
+  saveRouteState({
+    screen: "details",
+    category: state.currentCategory || "",
+    openItemId: Number.isFinite(Number(id)) ? Number(id) : null,
+    isPublicShareRoute: Boolean(state.activeShareToken),
+    shareToken: state.activeShareToken || ""
+  });
 }
 
-async function showAuthorizedUI(){
+async function showAuthorizedUI(options = {}){
   closePreferencesPanel();
   setPublicRouteMode(false);
-  hideAllScreens();
-  document.getElementById("home-screen").classList.remove("hidden");
+  const shouldRestoreRoute = options.restoreRoute !== false;
+  const restored = shouldRestoreRoute ? await restoreRouteState({ isAuthenticated: true }) : false;
+  if(!restored){
+    hideAllScreens();
+    document.getElementById("home-screen").classList.remove("hidden");
+    saveRouteState({ screen: "home", isPublicShareRoute: false, shareToken: "" });
+  }
   setAuthorizedButtons(true);
   refreshAccountCollectionsUI();
   safeLoadProfile("showAuthorizedUI");
@@ -5536,12 +5692,14 @@ function showAuthScreen(){
   hideAllScreens();
   document.getElementById("auth-screen").classList.remove("hidden");
   updatePrimaryActionVisibility();
+  clearRouteState();
 }
 
 async function logout(){
   closePreferencesPanel();
   closeProfileModal();
   closeShareModal();
+  clearRouteState();
   await supabaseClient.auth.signOut();
   location.reload();
 }
@@ -6204,6 +6362,29 @@ async function init(){
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event?.reason;
     showRuntimeError(reason?.message || reason || "Unhandled promise rejection");
+  });
+  document.addEventListener("visibilitychange", async () => {
+    if(document.visibilityState === "hidden"){
+      saveRouteState();
+      return;
+    }
+    const user = await getCurrentUser();
+    const currentScreen = getVisibleScreenName();
+    if(user && (currentScreen === "home" || currentScreen === "auth")){
+      await restoreRouteState({ isAuthenticated: true });
+    }
+  });
+  window.addEventListener("focus", async () => {
+    const user = await getCurrentUser();
+    if(user){
+      await restoreRouteState({ isAuthenticated: true });
+    }
+  });
+  window.addEventListener("pageshow", async () => {
+    const user = await getCurrentUser();
+    if(user){
+      await restoreRouteState({ isAuthenticated: true });
+    }
   });
   if(isPublicShareRoute()){
     await initPublicSharePage();
