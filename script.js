@@ -54,6 +54,7 @@ import { state } from "./js/state.js";
     function clearSearchCaches(){
   state.categorySearchCache.clear();
   state.categorySearchInFlight.clear();
+  bookSearchResponseCache.clear();
     }
 
     function getRelationCacheKey(item, category = state.currentCategory){
@@ -701,6 +702,10 @@ import { state } from "./js/state.js";
     const RELATION_BUILD_COOLDOWN_MS = 15000;
     const RELATION_BUILD_FAILURE_COOLDOWN_MS = 35000;
     const relatedBuildCooldowns = new Map();
+    const BOOK_SEARCH_CACHE_TTL_MS = 120000;
+    const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
+    const bookSearchResponseCache = new Map();
+    const wikidataBookResolveCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -1950,21 +1955,37 @@ const normalized = candidates
 
     function getBookSourcePriority(source, queryMeta = {}){
       const normalizedSource = String(source || "").toLowerCase();
-      if(queryMeta.hasCyrillic){
-        if(normalizedSource === "fantlab") return 32;
-        if(normalizedSource === "google") return 18;
-        if(normalizedSource === "openlibrary") return 10;
+      if(queryMeta.isbn){
+        if(normalizedSource === "openlibrary") return 34;
+        if(normalizedSource === "google") return 28;
+        if(normalizedSource === "fantlab") return 10;
       }
-      if(normalizedSource === "google") return 24;
-      if(normalizedSource === "openlibrary") return 14;
-      if(normalizedSource === "fantlab") return 12;
+      if(queryMeta.hasCyrillic){
+        if(normalizedSource === "fantlab") return 36;
+        if(normalizedSource === "openlibrary") return 24;
+        if(normalizedSource === "google") return 12;
+      }
+      if(queryMeta.hasLatin){
+        if(normalizedSource === "openlibrary") return 34;
+        if(normalizedSource === "google") return 22;
+        if(normalizedSource === "fantlab") return 8;
+      }
+      if(normalizedSource === "openlibrary") return 26;
+      if(normalizedSource === "google") return 18;
+      if(normalizedSource === "fantlab") return 8;
       return 0;
     }
 
     function buildBookIdentityKey(item = {}){
       if(item.isbn) return `isbn:${item.isbn}`;
-      const titleKey = normalizeComparisonText(item.title || "");
+      const titleKey = normalizeComparisonText(item.title || "")
+        .replace(/\b(book|книга|том|часть|vol|volume)\s*[\divxlc]+\b/giu, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       const authorKey = normalizeComparisonText(item.creator || "");
+      const workKey = normalizeComparisonText(String(item.work_key || "").replace(/^.*:/, ""));
+      if(workKey) return `work:${workKey}`;
       return `meta:${titleKey}::${authorKey}`;
     }
 
@@ -1981,6 +2002,32 @@ const normalized = candidates
       const authorKey = normalizeComparisonText(item.creator || "");
       const queryKey = queryMeta.comparison || "";
       let score = getBookSourcePriority(item.source, queryMeta);
+      const titleProbe = normalizeComparisonText([item.title || "", item.title_original || "", item.title_en || "", item.title_ru || ""].join(" "));
+
+      const secondaryPatterns = [
+        /\bвсе о\b/iu,
+        /\bо\s+[а-яёa-z0-9]/iu,
+        /\bмир\b/iu,
+        /\bфакт(ы|ов)?\b/iu,
+        /\bэнциклопед(ия|и[яи])\b/iu,
+        /\bбиограф(ия|ии|ический)\b/iu,
+        /\bисследован(ие|ия|ий)\b/iu,
+        /\bпереводческ/iu,
+        /\bнеофициальн/iu,
+        /\bпо мотивам\b/iu,
+        /\bсправочник\b/iu,
+        /\bжизни и любви\b/iu,
+        /\babout\b/iu,
+        /\bguide\b/iu,
+        /\bcompanion\b/iu,
+        /\bunofficial\b/iu,
+        /\bfacts?\b/iu,
+        /\bencyclopedia\b/iu,
+        /\bbiograph(y|ies|ical)\b/iu,
+        /\bstud(y|ies)\b/iu,
+        /\bessays?\b/iu,
+        /\bworld of\b/iu
+      ];
 
       if(item.isbn && queryMeta.isbn && item.isbn === queryMeta.isbn) score += 240;
       if(queryKey && titleKey === queryKey) score += 160;
@@ -1994,12 +2041,43 @@ const normalized = candidates
       if(item.description_ru) score += 18;
       if(item.description_original || item.description_en) score += 14;
       if(item.isbn) score += 12;
+      if((item.source || "") === "fantlab" && queryMeta.hasCyrillic) score += 12;
+
+      secondaryPatterns.forEach((pattern) => {
+        if(pattern.test(titleProbe)){
+          score -= 55;
+        }
+      });
+
+      const titleWordCount = titleKey.split(/\s+/).filter(Boolean).length;
+      if(titleWordCount > 0 && titleWordCount <= 6) score += 18;
+      if(queryKey && titleKey === queryKey) score += 16;
+      if(queryKey && titleKey.startsWith(queryKey) && titleWordCount <= 8) score += 12;
+      if(authorKey && authorKey.length <= 45) score += 8;
+      if(item.wikidata_relevance === "main") score += 44;
+      if(item.wikidata_relevance === "secondary") score -= 44;
 
       const filledFields = ["title", "creator", "cover", "description_ru", "description_original", "isbn"].filter((field) => Boolean(item[field])).length;
       score += filledFields * 4;
 
       if(!isBookResultUsable(item)) score -= 120;
       return score;
+    }
+
+    function shouldMergeBookCandidates(left = {}, right = {}){
+      if(!left || !right) return false;
+      if(left.isbn && right.isbn && left.isbn === right.isbn) return true;
+      if(left.work_key && right.work_key && left.work_key === right.work_key) return true;
+      if(left.canonical_key && right.canonical_key && left.canonical_key === right.canonical_key) return true;
+
+      const leftTitle = normalizeComparisonText(left.title || "");
+      const rightTitle = normalizeComparisonText(right.title || "");
+      if(!leftTitle || !rightTitle || leftTitle !== rightTitle) return false;
+
+      const leftCreator = normalizeComparisonText(left.creator || "");
+      const rightCreator = normalizeComparisonText(right.creator || "");
+      if(leftCreator && rightCreator) return leftCreator === rightCreator;
+      return true;
     }
 
     function mergeBookResultPair(left = {}, right = {}, queryMeta = {}){
@@ -2028,16 +2106,16 @@ const normalized = candidates
     }
 
     function mergeBookResults(results = [], queryMeta = {}){
-      const grouped = new Map();
+      const grouped = [];
       results.filter(Boolean).forEach((item) => {
-        const key = buildBookIdentityKey(item);
-        if(!grouped.has(key)){
-          grouped.set(key, item);
+        const index = grouped.findIndex((existing) => shouldMergeBookCandidates(existing, item) || buildBookIdentityKey(existing) === buildBookIdentityKey(item));
+        if(index === -1){
+          grouped.push(item);
           return;
         }
-        grouped.set(key, mergeBookResultPair(grouped.get(key), item, queryMeta));
+        grouped[index] = mergeBookResultPair(grouped[index], item, queryMeta);
       });
-      return Array.from(grouped.values());
+      return grouped;
     }
 
     function mergeResults(results = [], queryMeta = {}){
@@ -2404,9 +2482,11 @@ const normalized = candidates
       }
     }
 
-    async function searchFantLab(queryMeta, limit = 10){
+    async function searchFantLab(queryMeta, limit = 10, queriesOverride = null){
       if(!queryMeta?.text && !queryMeta?.isbn) return [];
-      const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
+      const queries = queryMeta.isbn
+        ? [queryMeta.isbn]
+        : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
       const endpointBuilders = [
         (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
         (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`,
@@ -2437,9 +2517,11 @@ const normalized = candidates
       return [];
     }
 
-    async function searchGoogleBooks(queryMeta, limit = 10){
+    async function searchGoogleBooks(queryMeta, limit = 10, queriesOverride = null){
       try {
-        const queries = queryMeta.isbn ? [`isbn:${queryMeta.isbn}`] : await buildSearchQueries(queryMeta);
+        const queries = queryMeta.isbn
+          ? [`isbn:${queryMeta.isbn}`]
+          : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
         const results = [];
         for(const query of queries){
           const url =
@@ -2459,9 +2541,11 @@ const normalized = candidates
       }
     }
 
-    async function searchOpenLibrary(queryMeta, limit = 10){
+    async function searchOpenLibrary(queryMeta, limit = 10, queriesOverride = null){
       try {
-        const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
+        const queries = queryMeta.isbn
+          ? [queryMeta.isbn]
+          : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
         const results = [];
         for(const query of queries){
           const url = queryMeta.isbn
@@ -2475,6 +2559,71 @@ const normalized = candidates
       } catch (error) {
         console.error("Open Library search error:", error);
         return [];
+      }
+    }
+
+    function getBookSearchCacheKey(queryMeta = {}){
+      return [
+        state.currentLanguage || "",
+        queryMeta.text || "",
+        queryMeta.comparison || "",
+        queryMeta.isbn || "",
+        queryMeta.hasCyrillic ? "cy" : "",
+        queryMeta.hasLatin ? "la" : ""
+      ].join("|");
+    }
+
+    function isBroadBookQuery(queryMeta = {}){
+      if(queryMeta.isbn) return false;
+      const words = normalizeComparisonText(queryMeta.text || "").split(/\s+/).filter(Boolean);
+      return words.length > 0 && words.length <= 3;
+    }
+
+    async function resolveBookCandidateWithWikidata(item, queryMeta = {}){
+      const title = normalizeSpaces(item?.title || "");
+      if(!title || queryMeta?.isbn) return { relevance: "", scoreDelta: 0 };
+      const cacheKey = `${normalizeComparisonText(title)}::${normalizeComparisonText(item?.creator || "")}`;
+      const cached = wikidataBookResolveCache.get(cacheKey);
+      if(cached && (Date.now() - cached.at) < WIKIDATA_BOOK_RESOLVE_TTL_MS){
+        return { ...cached.value };
+      }
+
+      const language = queryMeta?.hasCyrillic ? "ru" : "en";
+      try {
+        const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=${encodeURIComponent(language)}&type=item&limit=1&search=${encodeURIComponent(title)}&origin=*`;
+        const searchData = await fetchJson(searchUrl);
+        const entityId = searchData?.search?.[0]?.id;
+        if(!entityId){
+          const emptyValue = { relevance: "", scoreDelta: 0 };
+          wikidataBookResolveCache.set(cacheKey, { at: Date.now(), value: emptyValue });
+          return emptyValue;
+        }
+
+        const entityData = await fetchJson(`https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(entityId)}.json`);
+        const entity = entityData?.entities?.[entityId];
+        const instanceOf = (entity?.claims?.P31 || [])
+          .map((claim) => claim?.mainsnak?.datavalue?.value?.id)
+          .filter(Boolean);
+
+        const positive = new Set(["Q7725634", "Q8261", "Q47461344", "Q277759"]);
+        const negative = new Set(["Q3331189", "Q5707594", "Q134556", "Q12136", "Q42814"]);
+
+        let relevance = "";
+        let scoreDelta = 0;
+        if(instanceOf.some((id) => positive.has(id))){
+          relevance = "main";
+          scoreDelta = 28;
+        } else if(instanceOf.some((id) => negative.has(id))){
+          relevance = "secondary";
+          scoreDelta = -32;
+        }
+
+        const value = { relevance, scoreDelta };
+        wikidataBookResolveCache.set(cacheKey, { at: Date.now(), value });
+        return value;
+      } catch (error) {
+        console.error("Wikidata book resolve error:", error);
+        return { relevance: "", scoreDelta: 0 };
       }
     }
 
@@ -2581,19 +2730,64 @@ const normalized = candidates
       if(!queryMeta.text && !queryMeta.isbn){
         return [];
       }
+      const cacheKey = getBookSearchCacheKey(queryMeta);
+      const cached = bookSearchResponseCache.get(cacheKey);
+      if(cached && (Date.now() - cached.at) < BOOK_SEARCH_CACHE_TTL_MS){
+        return cached.results.slice(0, limit);
+      }
 
       try {
-        const fantlab = queryMeta.hasCyrillic ? await searchFantLab(queryMeta, limit) : [];
-        const google = await searchGoogleBooks(queryMeta, limit);
-        const openLibrary = await searchOpenLibrary(queryMeta, limit);
+        const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
+        const primaryQueries = queries.slice(0, 1);
+        const fallbackQueries = queries.length > 1 ? queries : primaryQueries;
+        let collected = [];
+        const stageLimit = Math.max(limit, 8);
 
-        const merged = mergeResults([
-          ...fantlab,
-          ...google,
-          ...openLibrary
-        ], queryMeta);
+        async function runStage(searchFn, stageQueries){
+          const results = await searchFn(queryMeta, stageLimit, stageQueries);
+          if(results?.length){
+            collected = dedupeResults([...collected, ...results], queryMeta);
+          }
+          return rankResults(collected, queryMeta);
+        }
 
-        return rankResults(dedupeResults(merged, queryMeta), queryMeta).slice(0, limit);
+        if(queryMeta.isbn){
+          await runStage(searchOpenLibrary, [queryMeta.isbn]);
+          if(collected.length < Math.min(4, limit)){
+            await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
+          }
+        } else if(queryMeta.hasCyrillic){
+          await runStage(searchFantLab, primaryQueries);
+          if(collected.length < Math.min(5, limit)){
+            await runStage(searchOpenLibrary, fallbackQueries);
+          }
+          if(collected.length < Math.min(4, limit)){
+            await runStage(searchGoogleBooks, fallbackQueries);
+          }
+        } else {
+          await runStage(searchOpenLibrary, fallbackQueries);
+          if(collected.length < Math.min(5, limit)){
+            await runStage(searchGoogleBooks, fallbackQueries);
+          }
+          if(collected.length === 0){
+            await runStage(searchFantLab, fallbackQueries);
+          }
+        }
+
+        let ranked = rankResults(dedupeResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
+        if(isBroadBookQuery(queryMeta) && !queryMeta.isbn){
+          const topCount = Math.min(4, ranked.length);
+          for(let i = 0; i < topCount; i += 1){
+            const resolved = await resolveBookCandidateWithWikidata(ranked[i], queryMeta);
+            ranked[i].wikidata_relevance = resolved.relevance || "";
+            ranked[i].wikidata_score_delta = resolved.scoreDelta || 0;
+          }
+          ranked = ranked.sort((a, b) => (buildBookResultScore(b, queryMeta) + (b.wikidata_score_delta || 0)) - (buildBookResultScore(a, queryMeta) + (a.wikidata_score_delta || 0)));
+        }
+
+        const finalResults = ranked.slice(0, limit);
+        bookSearchResponseCache.set(cacheKey, { at: Date.now(), results: finalResults.slice() });
+        return finalResults;
       } catch (e) {
         console.error("Books search error:", e);
         return [];
