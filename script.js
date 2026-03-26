@@ -1114,6 +1114,7 @@ import { state } from "./js/state.js";
 
     function looksLikeRussian(text){
       if(!text) return false;
+      if(/[іїєґІЇЄҐ]/.test(text)) return false;
       const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
       if(letters.length < 10) return false;
       const cyrillic = text.match(/[А-Яа-яЁё]/g) || [];
@@ -1148,7 +1149,11 @@ import { state } from "./js/state.js";
         if(candidate === "en" && item.description_original) return item.description_original;
       }
 
-      return item.description || item.description_ru || item.description_en || item.description_original || "";
+      if(appLang === "ru" || systemLang === "ru"){
+        return item.description_ru || item.description_en || item.description_original || item.description || "";
+      }
+
+      return item.description || item.description_en || item.description_original || item.description_ru || "";
     }
 
     function buildCanonicalKey(category, source, rawId, title){
@@ -2528,6 +2533,14 @@ const normalized = candidates
         }
       }
 
+      if(!description_ru && (description_original || description_en)){
+        const translatedRu = await translateTextToRussian(description_original || description_en);
+        if(translatedRu){
+          description_ru = translatedRu;
+          if(!description) description = translatedRu;
+        }
+      }
+
       if(!description){
         description = description_ru || description_original || description_en || "";
       }
@@ -2774,12 +2787,27 @@ const normalized = candidates
 
       const searchPromise = (async () => {
         const localResults = await searchLocalSupabaseCached(category, queryMeta, limit);
-        if(localResults.length > 0){
-          return dedupeSearchResults(localResults).slice(0, limit);
-        }
 
         if(category === "Books"){
-          return await searchBooksApi(query, limit);
+          const externalResults = await searchBooksApi(query, limit);
+          const combinedBooks = dedupeSearchResults([...externalResults, ...localResults]);
+          const existingBooks = state.demoData.Books || [];
+          const availableBooks = combinedBooks.filter((book) => {
+            const normalizedTitle = normalizeComparisonText(book.title || "");
+            const normalizedCreator = normalizeComparisonText(book.creator || "");
+            return !existingBooks.some((existing) => {
+              if(book.canonical_key && existing.canonical_key && book.canonical_key === existing.canonical_key) return true;
+              if(book.work_key && existing.work_key && book.work_key === existing.work_key) return true;
+              return normalizedTitle
+                && normalizedTitle === normalizeComparisonText(existing.title || "")
+                && normalizedCreator === normalizeComparisonText(existing.creator || "");
+            });
+          });
+          return availableBooks.slice(0, limit);
+        }
+
+        if(localResults.length > 0){
+          return dedupeSearchResults(localResults).slice(0, limit);
         }
 
         const searchQueries = await buildSearchQueries(queryMeta);
