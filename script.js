@@ -3143,7 +3143,7 @@ const normalized = candidates
 
       const { data, error } = await retryReadQuery(() => supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, description_ru, description_en, description_original, title_ru, title_en, title_original, creator, work_key, canonical_key, folder_name, category")
+        .select("id, title, status, cover_url, description, creator, work_key, canonical_key, folder_name, category")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false }), 2, 220);
