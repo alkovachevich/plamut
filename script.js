@@ -1,4 +1,4 @@
-   import {
+  import {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   GOOGLE_BOOKS_API_KEY,
@@ -1891,6 +1891,11 @@ const normalized = candidates
   }
 
   const grouped = groupRelationsByType(payload.relations);
+  const localItemsByCanonicalKey = new Map(
+    getLoadedLibraryItems()
+      .filter((candidate) => candidate?.canonical_key)
+      .map((candidate) => [candidate.canonical_key, candidate])
+  );
   console.log("RELATIONS: grouped relations", grouped);
 
   grouped.forEach((relations, type) => {
@@ -1906,9 +1911,8 @@ const normalized = candidates
     list.className = "details-relations-list";
 
     relations.forEach((relationEntry) => {
-      const localItem = getLoadedLibraryItems().find(
-        (candidate) => candidate.canonical_key === relationEntry.item.canonical_key
-      );
+      const relationCanonicalKey = relationEntry?.item?.canonical_key;
+      const localItem = relationCanonicalKey ? localItemsByCanonicalKey.get(relationCanonicalKey) : null;
 
       const itemForCard = localItem
         ? { ...localItem, relation_type: type }
@@ -5627,6 +5631,7 @@ async function openLibraryScreen(options = {}){
 const libraryLoadedCategories = new Set();
 let librarySearchDebounceTimer = null;
 let libraryDataLoadingPromise = null;
+const libraryCategoryLoadingPromises = new Map();
 
 function handleLibrarySearchInput(){
   if(librarySearchDebounceTimer){
@@ -5645,16 +5650,31 @@ async function ensureLibraryDataLoaded(){
   libraryDataLoadingPromise = (async () => {
     let hasAnyLoadAttempt = false;
     const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
-    for(const category of categories){
+    const loadTasks = categories.map(async (category) => {
       if(libraryLoadedCategories.has(category)){
-        continue;
+        return;
       }
-      if(!(state.demoData[category] || []).length){
-        hasAnyLoadAttempt = true;
-        await loadCategoryFromSupabase(category);
+      if((state.demoData[category] || []).length){
+        libraryLoadedCategories.add(category);
+        return;
       }
+      hasAnyLoadAttempt = true;
+      let categoryLoadPromise = libraryCategoryLoadingPromises.get(category);
+      if(!categoryLoadPromise){
+        categoryLoadPromise = loadCategoryFromSupabase(category).finally(() => {
+          libraryCategoryLoadingPromises.delete(category);
+        });
+        libraryCategoryLoadingPromises.set(category, categoryLoadPromise);
+      }
+      await categoryLoadPromise;
       libraryLoadedCategories.add(category);
-    }
+    });
+    const loadResults = await Promise.allSettled(loadTasks);
+    loadResults.forEach((result, index) => {
+      if(result.status === "rejected"){
+        console.error("Library category preload error:", categories[index], result.reason);
+      }
+    });
     return hasAnyLoadAttempt;
   })();
 
@@ -6180,7 +6200,7 @@ async function renderFolderRail(){
     return;
   }
   rail.dataset.renderKey = renderKey;
-   
+
   rail.classList.remove("hidden");
   rail.innerHTML = "";
 
@@ -6212,6 +6232,16 @@ async function renderFolderManagerList(){
   if(!list) return;
   const folders = await getAvailableFolders();
   const usage = await getFolderUsageMap();
+  const folderSnapshot = folders.map((folder) => `${folder}:${usage.get(folder) || 0}`).join("|");
+  const renderKey = [
+    state.currentCategory,
+    state.currentLanguage,
+    folderSnapshot || "__empty__"
+  ].join("::");
+  if(list.dataset.renderKey === renderKey){
+    return;
+  }
+  list.dataset.renderKey = renderKey;
   list.innerHTML = "";
   if(!folders.length){
     list.innerHTML = `<div class="small">${escapeHtml(t().labels.foldersEmpty)}</div>`;
