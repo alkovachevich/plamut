@@ -2797,15 +2797,22 @@ body.header-compact .header-actions {
 }
 
 .media-cover {
-  aspect-ratio: 3 / 4;
+  width: 100%;
+  aspect-ratio: 2 / 3;
   border-radius: 12px;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-muted) 92%, #fff 8%) 0%, color-mix(in srgb, var(--surface) 85%, transparent 15%) 100%);
 }
 
 .media-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
+  display: block;
 }
 
 .media-meta-chips {
