@@ -2073,9 +2073,10 @@ const normalized = candidates
     function getBookSourcePriority(source, queryMeta = {}){
       const normalizedSource = String(source || "").toLowerCase();
       const isIsbnSearch = Boolean(queryMeta?.isbn);
+      const isCyrillicQuery = Boolean(queryMeta?.hasCyrillic && !queryMeta?.isbn);
+      if(normalizedSource === "fantlab") return isCyrillicQuery ? 24 : 6;
       if(normalizedSource === "openlibrary") return isIsbnSearch ? 24 : 20;
       if(normalizedSource === "google") return isIsbnSearch ? 16 : 14;
-      if(normalizedSource === "fantlab") return 4;
       return 0;
     }
 
@@ -2120,6 +2121,11 @@ const normalized = candidates
       if(queryKey && titleMain === queryKey) score += 110;
       else if(queryKey && titleMain.startsWith(queryKey)) score += 70;
       else if(queryKey && titlePool.includes(queryKey)) score += 36;
+
+      if(queryMeta?.hasCyrillic && String(item.source || "").toLowerCase() === "fantlab"){
+        const cyrillicTitleProbe = [item.title || "", item.title_ru || "", item.title_original || ""].join(" ");
+        if(hasCyrillic(cyrillicTitleProbe)) score += 18;
+      }
 
       if(creatorKey) score += 4;
       if(item.cover) score += 3;
@@ -2592,48 +2598,51 @@ const normalized = candidates
       }
     }
 
-    async function searchFantLab(queryMeta, limit = 10, queriesOverride = null){
-  if(!queryMeta?.text && !queryMeta?.isbn) return [];
+    async function searchFantLabProxy(queryMeta, limit = 10, queriesOverride = null){
+      if(!queryMeta?.text || queryMeta?.isbn) return [];
 
-  const queries = queryMeta.isbn
-    ? [queryMeta.isbn]
-    : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
+      const queries = Array.isArray(queriesOverride) && queriesOverride.length
+        ? queriesOverride
+        : await buildSearchQueries(queryMeta);
 
-  const endpointBuilders = [
-    (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
-    (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`
-  ];
-
-  for(const query of queries){
-    for(const buildUrl of endpointBuilders){
-      const url = buildUrl(query);
-      try {
-        const data = await fetchJson(url);
-        const collections = [
-          Array.isArray(data) ? data : null,
-          data?.works,
-          data?.items,
-          data?.data?.works,
-          data?.data?.items,
-          data?.result?.works
-        ].filter(Array.isArray);
-
-        const flatItems = collections.flat();
-        const results = flatItems
-          .map((item) => mapFantLabWorkToBookResult(item, queryMeta))
-          .filter((item) => item && item.title);
-
-        if(results.length){
-          return results.slice(0, limit);
+      for(const query of queries){
+        if(!query) continue;
+        try {
+          const url = "/api/books/fantlab?q=" + encodeURIComponent(query);
+          const data = await fetchJson(url);
+          const items = Array.isArray(data) ? data : [];
+          const results = items
+            .map((item) => createBookResult({
+              title: item?.title || "",
+              title_ru: item?.title_ru || "",
+              title_en: item?.title_en || "",
+              title_original: item?.title_original || item?.title || "",
+              creator: item?.creator || "",
+              cover: item?.cover || "",
+              description: item?.description || "",
+              description_ru: item?.description_ru || "",
+              description_original: item?.description_original || item?.description_en || "",
+              description_en: item?.description_en || "",
+              work_key: item?.work_key || "",
+              canonical_key: item?.canonical_key || "",
+              source: "fantlab",
+              queryMeta
+            }))
+            .filter((item) => item && item.title);
+          if(results.length){
+            return results.slice(0, limit);
+          }
+        } catch (error) {
+          console.error("FantLab proxy search error:", error);
         }
-      } catch (error) {
-        console.error("FantLab search error:", error);
       }
-    }
-  }
 
-  return [];
-}
+      return [];
+    }
+
+    async function searchFantLab(queryMeta, limit = 10, queriesOverride = null){
+      return await searchFantLabProxy(queryMeta, limit, queriesOverride);
+    }
 
     async function searchGoogleBooks(queryMeta, limit = 10, queriesOverride = null){
       try {
@@ -2881,6 +2890,14 @@ const normalized = candidates
           await runStage(searchOpenLibrary, [queryMeta.isbn]);
           if(collected.length < Math.min(4, limit)){
             await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
+          }
+        } else if(queryMeta.hasCyrillic){
+          await runStage(searchFantLabProxy, fallbackQueries);
+          if(collected.length < Math.min(5, limit)){
+            await runStage(searchOpenLibrary, fallbackQueries);
+          }
+          if(collected.length < Math.min(6, limit)){
+            await runStage(searchGoogleBooks, fallbackQueries);
           }
         } else {
           await runStage(searchOpenLibrary, fallbackQueries);
