@@ -706,7 +706,6 @@ import { state } from "./js/state.js";
     const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
-    const bookDisplayTitleFallbackCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -3544,36 +3543,6 @@ const normalized = candidates
       });
     }
 
-    async function resolveBookTopDisplayTitle(item, index){
-      const fallbackTitle = getBookDisplayTitle(item);
-      if(!item) return fallbackTitle;
-      if(state.currentCategory !== "Books") return fallbackTitle;
-      if(getBookUiLanguage() !== "ru") return fallbackTitle;
-      if(index >= 3) return fallbackTitle;
-
-      const hasRuTitle = normalizeSpaces(item.title_ru || "");
-      const baseTitle = normalizeSpaces(item.title || "");
-      if(hasRuTitle || !baseTitle || !looksLikeEnglish(baseTitle)) return fallbackTitle;
-
-      const cacheKey = `ru::${normalizeComparisonText(baseTitle)}`;
-      if(bookDisplayTitleFallbackCache.has(cacheKey)){
-        return bookDisplayTitleFallbackCache.get(cacheKey) || fallbackTitle;
-      }
-
-      try {
-        const translated = normalizeSpaces(await translateTextToRussian(baseTitle));
-        if(translated && looksLikeRussian(translated)){
-          bookDisplayTitleFallbackCache.set(cacheKey, translated);
-          return translated;
-        }
-      } catch (error) {
-        console.error("Top display title fallback error:", error);
-      }
-
-      bookDisplayTitleFallbackCache.set(cacheKey, "");
-      return fallbackTitle;
-    }
-
     async function renderCategorySearchResults() {
       clearTimeout(state.searchTimer);
       const searchToken = ++state.activeCategorySearchToken;
@@ -3611,13 +3580,12 @@ const normalized = candidates
 
           container.innerHTML = "";
 
-          for(let index = 0; index < results.length; index += 1){
-            const item = results[index];
+          results.forEach((item, index) => {
             const row = document.createElement("div");
             row.className = "search-item";
             const isBooksCategory = state.currentCategory === "Books";
             const displayTitle = isBooksCategory
-              ? await resolveBookTopDisplayTitle(item, index)
+              ? getBookDisplayTitle(item)
               : (item.title || "");
             const secondaryTitle = isBooksCategory ? getBookSecondaryTitle(item) : "";
             row.innerHTML = `
@@ -3634,7 +3602,7 @@ const normalized = candidates
               <button class="button" onclick="addCategorySearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
             `;
             container.appendChild(row);
-          }
+          });
         } catch (error) {
           console.error("Category search error:", error);
           if(searchToken !== state.activeCategorySearchToken) return;
