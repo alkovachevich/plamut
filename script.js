@@ -3386,7 +3386,7 @@ const normalized = candidates
       return true;
     }
 
-    async function updateDescriptionsInSupabase(itemId, description, description_ru, description_en){
+    async function updateDescriptionsInSupabase(itemId, description, description_ru, description_en, description_original = ""){
       const user = await getCurrentUser();
       if(!user || !itemId) return false;
 
@@ -3395,7 +3395,8 @@ const normalized = candidates
         .update({
           description: description || "",
           description_ru: description_ru || "",
-          description_en: description_en || ""
+          description_en: description_en || "",
+          description_original: description_original || description_en || ""
         })
         .eq("user_id", user.id)
         .eq("id", itemId);
@@ -3983,7 +3984,8 @@ const normalized = candidates
           item.id,
           item.description || "",
           item.description_ru || "",
-          item.description_en || ""
+          item.description_en || "",
+          item.description_original || ""
         );
       }
 
@@ -6801,7 +6803,7 @@ function renderShelf(){
     const menuHtml = state.isPublicView ? "" : `<div class="media-menu-wrap" onclick="event.stopPropagation()">
       <button class="media-menu-btn" type="button" aria-label="${escapeHtml(t().buttons.moreActions)}" aria-haspopup="true" aria-expanded="false" onclick="toggleCardMenu(event, ${item.id})">⋮</button>
       <div class="media-menu" role="menu">
-        <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderPickerById(${item.id})">${escapeHtml(item.folder ? t().buttons.moveToFolder : t().buttons.addToFolder)}</button>
+        <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); openFolderModalById(${item.id})">${escapeHtml(item.folder ? t().buttons.moveToFolder : t().buttons.addToFolder)}</button>
         ${item.folder ? `<button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); removeItemFromFolderById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.removeFromFolder)}</button>` : ""}
         <button class="media-menu-item" type="button" role="menuitem" onclick="event.stopPropagation(); changeStatusById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.changeStatus)}</button>
         <button class="media-menu-item media-menu-item-danger" type="button" role="menuitem" onclick="event.stopPropagation(); deleteItemById(${item.id}); closeCardMenu()">${escapeHtml(t().buttons.delete)}</button>
@@ -7049,7 +7051,7 @@ Object.assign(window, {
   addCategorySearchResult,
   changeStatusById,
   toggleCardMenu,
-  openFolderPickerById,
+  openFolderModalById,
   removeItemFromFolderById,
   deleteItemById
 });
