@@ -2577,9 +2577,13 @@ const normalized = candidates
       ];
 
       for(const query of queries){
+        console.log("FANTLAB QUERY:", query);
         for(const buildUrl of endpointBuilders){
+          const url = buildUrl(query);
+           console.log("FANTLAB URL:", url);
           try {
-            const data = await fetchJson(buildUrl(query));
+            const data = await fetchJson(url);
+            console.log("FANTLAB RAW RESPONSE:", data);
             const collections = [
               data?.works,
               data?.items,
@@ -2587,12 +2591,14 @@ const normalized = candidates
               data?.data?.items,
               data?.result?.works
             ].filter(Array.isArray);
+            console.log("FANTLAB COLLECTIONS:", collections);
             const results = collections.flat().map((item) => mapFantLabWorkToBookResult(item, queryMeta));
+            console.log("FANTLAB MAPPED RESULTS:", results);
             if(results.length){
               return results.slice(0, limit);
             }
           } catch (error) {
-            console.error("FantLab search fallback:", error);
+            console.error("FANTLAB ERROR:", url, error);
           }
         }
       }
