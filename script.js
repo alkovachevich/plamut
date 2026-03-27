@@ -1134,6 +1134,31 @@ import { state } from "./js/state.js";
       return (latin.length / letters.length) >= 0.6;
     }
 
+function getBookDisplayTitle(item, queryMeta = {}){
+  if(!item) return "";
+
+  const title = String(item.title || "").trim();
+  const titleRu = String(item.title_ru || "").trim();
+  const titleEn = String(item.title_en || "").trim();
+  const titleOriginal = String(item.title_original || "").trim();
+
+  if(queryMeta.hasCyrillic){
+    if(titleRu) return titleRu;
+    if(looksLikeRussian(title)) return title;
+    if(looksLikeRussian(titleOriginal)) return titleOriginal;
+    return title;
+  }
+
+  if(queryMeta.hasLatin){
+    if(titleEn) return titleEn;
+    if(looksLikeEnglish(title)) return title;
+    if(looksLikeEnglish(titleOriginal)) return titleOriginal;
+    return title;
+  }
+
+  return titleRu || titleEn || titleOriginal || title;
+}
+
     function splitDescriptionFields(description){
       return {
         description_ru: looksLikeRussian(description) ? description : "",
