@@ -3554,13 +3554,17 @@ const normalized = candidates
           results.forEach((item, index) => {
             const row = document.createElement("div");
             row.className = "search-item";
+            const queryMeta = normalizeQuery(query);
+            const displayTitle = state.currentCategory === "Books"
+            ? getBookDisplayTitle(item, queryMeta)
+            : (item.title || "");
             row.innerHTML = `
               <div class="search-item-left">
                 <div class="search-thumb">
-                  ${item.cover ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">` : escapeHtml(t().labels.cover)}
+                 ${item.cover ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(displayTitle)}">` : escapeHtml(t().labels.cover)}
                 </div>
                 <div class="search-item-text">
-                  <div class="search-item-title">${escapeHtml(item.title)}</div>
+                   <div class="search-item-title">${escapeHtml(displayTitle)}</div>
                   <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
                 </div>
               </div>
