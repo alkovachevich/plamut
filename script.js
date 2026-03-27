@@ -2566,45 +2566,59 @@ const normalized = candidates
     }
 
     async function searchFantLab(queryMeta, limit = 10, queriesOverride = null){
-      if(!queryMeta?.text && !queryMeta?.isbn) return [];
-      const queries = queryMeta.isbn
-        ? [queryMeta.isbn]
-        : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
-      const endpointBuilders = [
-        (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
-        (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`,
-        (query) => `https://api.fantlab.ru/search/${encodeURIComponent(query)}`
-      ];
+  if(!queryMeta?.text && !queryMeta?.isbn) return [];
 
-      for(const query of queries){
-        console.log("FANTLAB QUERY:", query);
-        for(const buildUrl of endpointBuilders){
-          const url = buildUrl(query);
-           console.log("FANTLAB URL:", url);
-          try {
-            const data = await fetchJson(url);
-            console.log("FANTLAB RAW RESPONSE:", data);
-            const collections = [
-              data?.works,
-              data?.items,
-              data?.data?.works,
-              data?.data?.items,
-              data?.result?.works
-            ].filter(Array.isArray);
-            console.log("FANTLAB COLLECTIONS:", collections);
-            const results = collections.flat().map((item) => mapFantLabWorkToBookResult(item, queryMeta));
-            console.log("FANTLAB MAPPED RESULTS:", results);
-            if(results.length){
-              return results.slice(0, limit);
-            }
-          } catch (error) {
-            console.error("FANTLAB ERROR:", url, error);
-          }
+  const queries = queryMeta.isbn
+    ? [queryMeta.isbn]
+    : (Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : await buildSearchQueries(queryMeta));
+
+  const endpointBuilders = [
+    (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
+    (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`
+  ];
+
+  for(const query of queries){
+    console.log("FANTLAB QUERY:", query);
+
+    for(const buildUrl of endpointBuilders){
+      const url = buildUrl(query);
+      console.log("FANTLAB URL:", url);
+
+      try {
+        const data = await fetchJson(url);
+        console.log("FANTLAB RAW RESPONSE:", data);
+
+        const collections = [
+          Array.isArray(data) ? data : null,
+          data?.works,
+          data?.items,
+          data?.data?.works,
+          data?.data?.items,
+          data?.result?.works
+        ].filter(Array.isArray);
+
+        console.log("FANTLAB COLLECTIONS:", collections);
+
+        const flatItems = collections.flat();
+        console.log("FANTLAB FIRST ITEM SHAPE:", flatItems[0]);
+
+        const results = flatItems
+          .map((item) => mapFantLabWorkToBookResult(item, queryMeta))
+          .filter((item) => item && item.title);
+
+        console.log("FANTLAB MAPPED RESULTS:", results);
+
+        if(results.length){
+          return results.slice(0, limit);
         }
+      } catch (error) {
+        console.error("FANTLAB ERROR:", url, error);
       }
-
-      return [];
     }
+  }
+
+  return [];
+}
 
     async function searchGoogleBooks(queryMeta, limit = 10, queriesOverride = null){
       try {
