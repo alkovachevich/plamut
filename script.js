@@ -706,6 +706,7 @@ import { state } from "./js/state.js";
     const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
+    const bookDisplayTitleFallbackCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -1101,18 +1102,7 @@ import { state } from "./js/state.js";
       }
 
       pushQuery(clean);
-
-      try {
-        if(meta.hasCyrillic){
-          const en = await translateTextToEnglish(clean);
-          pushQuery(en);
-        } else if(meta.hasLatin){
-          const ru = await translateTextToRussian(clean);
-          pushQuery(ru);
-        }
-      } catch (e) {
-        console.error("Search translation error:", e);
-      }
+      pushQuery(String(clean || "").trim());
 
       return list;
     }
@@ -2056,24 +2046,10 @@ const normalized = candidates
 
     function getBookSourcePriority(source, queryMeta = {}){
       const normalizedSource = String(source || "").toLowerCase();
-      if(queryMeta.isbn){
-        if(normalizedSource === "openlibrary") return 34;
-        if(normalizedSource === "google") return 28;
-        if(normalizedSource === "fantlab") return 10;
-      }
-      if(queryMeta.hasCyrillic){
-        if(normalizedSource === "fantlab") return 36;
-        if(normalizedSource === "openlibrary") return 24;
-        if(normalizedSource === "google") return 12;
-      }
-      if(queryMeta.hasLatin){
-        if(normalizedSource === "openlibrary") return 34;
-        if(normalizedSource === "google") return 22;
-        if(normalizedSource === "fantlab") return 8;
-      }
-      if(normalizedSource === "openlibrary") return 26;
-      if(normalizedSource === "google") return 18;
-      if(normalizedSource === "fantlab") return 8;
+      const isIsbnSearch = Boolean(queryMeta?.isbn);
+      if(normalizedSource === "openlibrary") return isIsbnSearch ? 24 : 20;
+      if(normalizedSource === "google") return isIsbnSearch ? 16 : 14;
+      if(normalizedSource === "fantlab") return 4;
       return 0;
     }
 
@@ -2105,100 +2081,41 @@ const normalized = candidates
     }
 
     function buildBookResultScore(item = {}, queryMeta = {}){
-      const titleKey = normalizeComparisonText(item.title || "");
-      const authorKey = normalizeComparisonText(item.creator || "");
-      const queryKey = queryMeta.comparison || "";
-      const queryText = normalizeComparisonText(queryMeta.text || "");
-      const isBroadQuery = isBroadBookQuery(queryMeta) && !queryMeta.isbn;
+      const queryKey = normalizeComparisonText(queryMeta?.text || "");
+      const titleMain = normalizeComparisonText(item.title || "");
+      const titleAlt = normalizeComparisonText([item.title_ru || "", item.title_en || "", item.title_original || ""].join(" "));
+      const creatorKey = normalizeComparisonText(item.creator || "");
+      const titlePool = [titleMain, titleAlt].filter(Boolean).join(" ");
+
       let score = getBookSourcePriority(item.source, queryMeta);
+
+      if(queryMeta?.isbn && item?.isbn && item.isbn === queryMeta.isbn) score += 120;
+
+      if(queryKey && titleMain === queryKey) score += 70;
+      else if(queryKey && titleMain.startsWith(queryKey)) score += 45;
+      else if(queryKey && titlePool.includes(queryKey)) score += 24;
+
+      if(creatorKey) score += 8;
+      if(item.cover) score += 6;
+      if(item.description || item.description_ru || item.description_original || item.description_en) score += 4;
+      if(item.isbn) score += 8;
+
       const titleProbe = normalizeComparisonText([item.title || "", item.title_original || "", item.title_en || "", item.title_ru || ""].join(" "));
-
-      const secondaryPatterns = [
-        { marker: "series", re: /\bseries\b/iu },
-        { marker: "1-7", re: /\b1\s*[-–]\s*7\b/iu },
-        { marker: "collection", re: /\bcollection\b/iu },
-        { marker: "boxed set", re: /\bboxed set\b/iu },
-        { marker: "complete", re: /\bcomplete\b/iu },
-        { marker: "annual", re: /\bannual\b/iu },
-        { marker: "poster", re: /\bposter\b/iu },
-        { marker: "screenplay", re: /\bscreenplay\b/iu },
-        { marker: "play", re: /\bplay\b/iu },
-        { marker: "script", re: /\bscript\b/iu },
-        { marker: "cursed child", re: /\bcursed child\b/iu },
-        { marker: "illustrated by", re: /\billustrated by\b/iu },
-        { marker: "calendar", re: /\bcalendar\b/iu },
-        { marker: "companion", re: /\bcompanion\b/iu },
-        { marker: "guide", re: /\bguide\b/iu },
-        { marker: "world of", re: /\bworld of\b/iu },
-        { marker: "facts", re: /\bfacts?\b/iu },
-        { marker: "encyclopedia", re: /\bencyclopedia\b/iu },
-        { marker: "unofficial", re: /\bunofficial\b/iu },
-        { marker: "все о", re: /\bвсе о\b/iu },
-        { marker: "о ", re: /\bо\s+[а-яёa-z0-9]/iu },
-        { marker: "мир", re: /\bмир\b/iu },
-        { marker: "факты", re: /\bфакт(ы|ов)?\b/iu },
-        { marker: "энциклопедия", re: /\bэнциклопед(ия|и[яи])\b/iu },
-        { marker: "биография", re: /\bбиограф(ия|ии|ический)\b/iu },
-        { marker: "исследование", re: /\bисследован(ие|ия|ий)\b/iu },
-        { marker: "переводческ", re: /\bпереводческ/iu },
-        { marker: "неофициальн", re: /\bнеофициальн/iu },
-        { marker: "по мотивам", re: /\bпо мотивам\b/iu },
-        { marker: "справочник", re: /\bсправочник\b/iu },
-        { marker: "about", re: /\babout\b/iu },
-        { marker: "biography", re: /\bbiograph(y|ies|ical)\b/iu },
-        { marker: "study", re: /\bstud(y|ies)\b/iu },
-        { marker: "essays", re: /\bessays?\b/iu }
+      const softSecondaryPenaltyPatterns = [
+        /collection/iu,
+        /guide/iu,
+        /encyclopedia/iu,
+        /screenplay/iu,
+        /unofficial/iu,
+        /справочник/iu,
+        /энциклопед/iu,
+        /неофициальн/iu
       ];
+      if(softSecondaryPenaltyPatterns.some((re) => re.test(titleProbe))){
+        score -= 10;
+      }
 
-      if(item.isbn && queryMeta.isbn && item.isbn === queryMeta.isbn) score += 240;
-      if(queryKey && titleKey === queryKey) score += 160;
-      else if(queryKey && titleKey.startsWith(queryKey)) score += 90;
-      else if(queryKey && titleKey.includes(queryKey)) score += 50;
-
-      if(queryKey && authorKey === queryKey) score += 120;
-      else if(queryKey && authorKey.includes(queryKey)) score += 70;
-
-      if(item.cover) score += 20;
-      if(item.description_ru) score += 18;
-      if(item.description_original || item.description_en) score += 14;
-      if(item.isbn) score += 12;
-      if((item.source || "") === "fantlab" && queryMeta.hasCyrillic) score += 12;
-
-      let hasSecondaryMarker = false;
-      secondaryPatterns.forEach((entry) => {
-        if(entry.re.test(titleProbe)){
-          hasSecondaryMarker = true;
-          const queryTargetsThis = queryText && queryText.includes(normalizeComparisonText(entry.marker));
-          if(isBroadQuery && !queryTargetsThis){
-            score -= 95;
-          } else {
-            score -= 30;
-          }
-        }
-      });
-
-      const titleWordCount = titleKey.split(/\s+/).filter(Boolean).length;
-      if(titleWordCount > 0 && titleWordCount <= 6) score += 18;
-      if(queryKey && titleKey === queryKey) score += 16;
-      if(queryKey && titleKey.startsWith(queryKey) && titleWordCount <= 8) score += 12;
-      if(authorKey && authorKey.length <= 45) score += 8;
-      if(item.wikidata_relevance === "main") score += 44;
-      if(item.wikidata_relevance === "secondary") score -= 44;
-      if(isBroadQuery && isCompanyLikeBookCreator(item.creator || "")) score -= 85;
-
-      const creatorLooksAuthorLike = Boolean(authorKey) && !isCompanyLikeBookCreator(item.creator || "");
-      const titleHasQuery = Boolean(queryKey && titleKey.includes(queryKey));
-      const cleanMainVolumeCandidate = isBroadQuery
-        && titleHasQuery
-        && !hasSecondaryMarker
-        && creatorLooksAuthorLike
-        && titleWordCount <= 10;
-      if(cleanMainVolumeCandidate) score += 72;
-
-      const filledFields = ["title", "creator", "cover", "description_ru", "description_original", "isbn"].filter((field) => Boolean(item[field])).length;
-      score += filledFields * 4;
-
-      if(!isBookResultUsable(item)) score -= 120;
+      if(!isBookResultUsable(item)) score -= 40;
       return score;
     }
 
@@ -2946,16 +2863,7 @@ const normalized = candidates
           }
         }
 
-        let ranked = rankBookResults(mergeBookResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
-        if(isBroadBookQuery(queryMeta) && !queryMeta.isbn){
-          const topCount = Math.min(4, ranked.length);
-          for(let i = 0; i < topCount; i += 1){
-            const resolved = await resolveBookCandidateWithWikidata(ranked[i], queryMeta);
-            ranked[i].wikidata_relevance = resolved.relevance || "";
-            ranked[i].wikidata_score_delta = resolved.scoreDelta || 0;
-          }
-          ranked = ranked.sort((a, b) => (buildBookResultScore(b, queryMeta) + (b.wikidata_score_delta || 0)) - (buildBookResultScore(a, queryMeta) + (a.wikidata_score_delta || 0)));
-        }
+        const ranked = rankBookResults(mergeBookResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
 
         const finalResults = ranked.slice(0, limit);
         bookSearchResponseCache.set(cacheKey, { at: Date.now(), results: finalResults.slice() });
@@ -3636,10 +3544,34 @@ const normalized = candidates
       });
     }
 
-    async function openFolderPickerById(id){
-      if(!isOwnerControlAllowed()) return;
-      closeCardMenu();
-      await openFolderModalById(id);
+    async function resolveBookTopDisplayTitle(item, index){
+      const fallbackTitle = getBookDisplayTitle(item);
+      if(!item) return fallbackTitle;
+      if(state.currentCategory !== "Books") return fallbackTitle;
+      if(getBookUiLanguage() !== "ru") return fallbackTitle;
+      if(index >= 3) return fallbackTitle;
+
+      const hasRuTitle = normalizeSpaces(item.title_ru || "");
+      const baseTitle = normalizeSpaces(item.title || "");
+      if(hasRuTitle || !baseTitle || !looksLikeEnglish(baseTitle)) return fallbackTitle;
+
+      const cacheKey = `ru::${normalizeComparisonText(baseTitle)}`;
+      if(bookDisplayTitleFallbackCache.has(cacheKey)){
+        return bookDisplayTitleFallbackCache.get(cacheKey) || fallbackTitle;
+      }
+
+      try {
+        const translated = normalizeSpaces(await translateTextToRussian(baseTitle));
+        if(translated && looksLikeRussian(translated)){
+          bookDisplayTitleFallbackCache.set(cacheKey, translated);
+          return translated;
+        }
+      } catch (error) {
+        console.error("Top display title fallback error:", error);
+      }
+
+      bookDisplayTitleFallbackCache.set(cacheKey, "");
+      return fallbackTitle;
     }
 
     async function renderCategorySearchResults() {
@@ -3679,12 +3611,13 @@ const normalized = candidates
 
           container.innerHTML = "";
 
-          results.forEach((item, index) => {
+          for(let index = 0; index < results.length; index += 1){
+            const item = results[index];
             const row = document.createElement("div");
             row.className = "search-item";
             const isBooksCategory = state.currentCategory === "Books";
             const displayTitle = isBooksCategory
-              ? getBookDisplayTitle(item)
+              ? await resolveBookTopDisplayTitle(item, index)
               : (item.title || "");
             const secondaryTitle = isBooksCategory ? getBookSecondaryTitle(item) : "";
             row.innerHTML = `
@@ -3701,7 +3634,7 @@ const normalized = candidates
               <button class="button" onclick="addCategorySearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
             `;
             container.appendChild(row);
-          });
+          }
         } catch (error) {
           console.error("Category search error:", error);
           if(searchToken !== state.activeCategorySearchToken) return;
