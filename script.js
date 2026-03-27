@@ -12,6 +12,14 @@ import {
   getCategoryLabel,
   getStatusLabel
 } from "./js/labels.js";
+import { normalizeSearchQuery, hasCyrillic, hasLatin } from "./js/search.js";
+import {
+  normalizeAuthorName,
+  normalizeTitleForMatch,
+  areLikelySameBook,
+  normalizeBookAuthorData,
+  normalizeBookLanguageData
+} from "./js/books.js";
 import {
   escapeHtml,
   normalizeSpaces,
@@ -164,21 +172,6 @@ import { state } from "./js/state.js";
       const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
       const initials = parts.map((part) => part.charAt(0).toUpperCase()).join("");
       return initials || "P";
-    }
-
-    function normalizeSearchQuery(query){
-      const text = normalizeSpaces(query);
-      return {
-        text,
-        comparison: normalizeComparisonText(text),
-        isbn: detectISBN(text),
-        hasCyrillic: hasCyrillic(text),
-        hasLatin: hasLatin(text)
-      };
-    }
-
-    function normalizeQuery(query){
-      return normalizeSearchQuery(query);
     }
 
  function getSystemBrowserLanguage(){
@@ -417,14 +410,11 @@ import { state } from "./js/state.js";
       return await getAvailableFolders();
     }
 
-    async function renderCustomCollections(){
-      return;
-    }
-
     function refreshAccountCollectionsUI(){
       renderStatusOptions();
       renderFolderFilterOptions();
-      renderCustomCollections();
+      renderFolderRail();
+      renderFolderManagerList();
     }
 
     function applyTranslations() {
@@ -639,6 +629,33 @@ import { state } from "./js/state.js";
         });
       }
 
+      setTextIfPresent("home-open-library-btn", state.currentLanguage === "ru" ? "Библиотека" : "Library");
+      setTextIfPresent("library-screen-title", t().home.libraryTitle);
+      setTextIfPresent("back-library-home-btn", t().buttons.backHome);
+      setTextIfPresent("filter-toggle-btn", state.currentLanguage === "ru" ? "Фильтр" : "Filter");
+      setTextIfPresent("details-menu-folder-btn", t().buttons.addToFolder);
+      setTextIfPresent("details-menu-status-btn", t().buttons.changeStatus);
+      setTextIfPresent("details-menu-delete-btn", t().buttons.delete);
+      const librarySearchInput = document.getElementById("library-search-input");
+      if(librarySearchInput) librarySearchInput.placeholder = t().modals.searchPlaceholder;
+      setTextIfPresent("share-sheet-title", t().topbar.shareLibrary);
+      setTextIfPresent("share-sheet-subtitle", t().share.libraryHint);
+      setTextIfPresent("share-sheet-copy-btn", t().share.copyLink);
+      setTextIfPresent("share-sheet-qr-btn", t().share.showQr);
+      setTextIfPresent("share-sheet-open-btn", t().share.openPublicCard);
+      setTextIfPresent("share-sheet-cancel-btn", t().buttons.cancel);
+      setTextIfPresent("folder-manager-title", t().profile.folderManagerTitle);
+      setTextIfPresent("folder-manager-subtitle", t().profile.folderManagerHint);
+      const folderInput = document.getElementById("folder-manager-input");
+      if(folderInput) folderInput.placeholder = t().profile.customFolderLabel;
+      setTextIfPresent("folder-manager-create-btn", t().profile.createFolder);
+      setTextIfPresent("folder-manager-cancel-btn", t().buttons.cancel);
+      setTextIfPresent("item-actions-cancel-btn", t().buttons.cancel);
+      const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
+      if(libraryVisible){
+        renderLibraryCategories();
+      }
+
       refreshAccountCollectionsUI();
       updatePreferenceControls();
     }
@@ -655,7 +672,7 @@ import { state } from "./js/state.js";
       }
 
       if(!document.getElementById("public-share-screen").classList.contains("hidden") && state.currentPublicProfile){
-        renderPublicShareProfile(state.currentPublicProfile);
+        renderPublicCard(state.currentPublicProfile);
       }
 
       if (!document.getElementById("details-screen").classList.contains("hidden") && state.currentOpenItemId) {
@@ -1014,14 +1031,6 @@ import { state } from "./js/state.js";
       return (state.demoData[category] || []).find(item => item.id === id) || null;
     }
 
-    function hasCyrillic(text){
-      return /[А-Яа-яЁё]/.test(text || "");
-    }
-
-    function hasLatin(text){
-      return /[A-Za-z]/.test(text || "");
-    }
-
     async function getCurrentUser(options = {}){
       const now = Date.now();
       const useCache = !options.force && now - (currentUserCache.fetchedAt || 0) < 1200;
@@ -1089,7 +1098,7 @@ import { state } from "./js/state.js";
     }
 
     async function buildSearchQueries(query){
-      const meta = typeof query === "string" ? normalizeQuery(query) : (query || normalizeQuery(""));
+      const meta = typeof query === "string" ? normalizeSearchQuery(query) : (query || normalizeSearchQuery(""));
       const clean = meta.text || normalizeSpaces(query);
       const list = [];
       const seen = new Set();
@@ -1135,41 +1144,6 @@ function getBookUiLanguage(){
   const appLanguage = normalizeLanguageCode(state.currentLanguage || "");
   const systemLanguage = normalizeLanguageCode(getSystemBrowserLanguage() || "");
   return appLanguage || systemLanguage || "ru";
-}
-
-function normalizeAuthorName(author = ""){
-  return normalizeComparisonText(String(author || ""))
-    .replace(/\b(dr|mr|mrs|ms|prof)\.?\b/giu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeTitleForMatch(title = ""){
-  return normalizeComparisonText(String(title || ""))
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/\b(book|книга|том|часть|vol|volume|edition|издание)\b/giu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function areLikelySameBook(left = {}, right = {}){
-  if(!left || !right) return false;
-  if(left.isbn && right.isbn && detectISBN(left.isbn) === detectISBN(right.isbn)) return true;
-  if(left.work_key && right.work_key && left.work_key === right.work_key) return true;
-  if(left.canonical_key && right.canonical_key && left.canonical_key === right.canonical_key) return true;
-
-  const leftTitle = normalizeTitleForMatch(left.title || left.title_original || "");
-  const rightTitle = normalizeTitleForMatch(right.title || right.title_original || "");
-  if(!leftTitle || !rightTitle || leftTitle !== rightTitle) return false;
-
-  const leftAuthor = normalizeAuthorName(left.creator || "");
-  const rightAuthor = normalizeAuthorName(right.creator || "");
-  if(leftAuthor && rightAuthor) return leftAuthor === rightAuthor;
-
-  const leftYear = Number(left.release_year || left.year || 0);
-  const rightYear = Number(right.release_year || right.year || 0);
-  if(leftYear && rightYear) return Math.abs(leftYear - rightYear) <= 1;
-  return true;
 }
 
 function getBookDisplayTitle(item){
@@ -2117,23 +2091,6 @@ const normalized = candidates
       return buildCanonicalKey("Books", source || "book", rawId || normalizeTitleForMatch(title), title || "Untitled");
     }
 
-    function normalizeBookAuthorData(book = {}){
-      const authors = Array.isArray(book.author_name) ? book.author_name : Array.isArray(book.authors) ? book.authors : [];
-      return normalizeSpaces(
-        authors
-          .map((author) => normalizeSpaces(typeof author === "string" ? author : author?.name || ""))
-          .filter(Boolean)
-          .join(", ")
-      );
-    }
-
-    function normalizeBookLanguageData(book = {}){
-      const raw = Array.isArray(book.language) ? book.language : [];
-      return raw
-        .map((lang) => normalizeLanguageCode(lang))
-        .filter(Boolean);
-    }
-
     function extractBestBookDescription(book = {}, preferredLang = state.currentLanguage){
       const description = sanitizeBookDescriptionText(book.description || "");
       const lang = normalizeLanguageCode(preferredLang || "");
@@ -2904,7 +2861,7 @@ const normalized = candidates
     }
 
     async function searchBooksApi(query, limit = 10){
-      const queryMeta = normalizeQuery(query);
+      const queryMeta = normalizeSearchQuery(query);
       if(!queryMeta.text && !queryMeta.isbn){
         return [];
       }
@@ -3133,7 +3090,7 @@ const normalized = candidates
     }
 
     async function searchByCategory(category, query, limit = 10){
-      const queryMeta = normalizeQuery(query);
+      const queryMeta = normalizeSearchQuery(query);
       if(!queryMeta.text && !queryMeta.isbn){
         return [];
       }
@@ -3428,10 +3385,6 @@ const normalized = candidates
       }
 
       alert(t().labels.folderSaved);
-    }
-
-    async function saveItemFolder(){
-      await saveItemFolderFromModal();
     }
 
     async function updateStatusInSupabase(itemId, status){
@@ -4091,7 +4044,7 @@ const normalized = candidates
       return item;
     }
 
-       async function deleteItemById(id){
+       async function deleteItemById(id, options = {}){
       if(state.isPublicView) return;
 
       const item = getItemById(state.currentCategory, id);
@@ -4124,6 +4077,10 @@ const normalized = candidates
         state.currentOpenItemId = null;
       }
 
+      if(options.fromDetails){
+        backToCategory();
+      }
+
       await loadCategoryFromSupabase(state.currentCategory);
     }
 
@@ -4140,37 +4097,11 @@ const normalized = candidates
     });
 
     async function deleteCurrentItem(){
-      if(state.isPublicView) return;
-      if(!state.currentOpenItemId) return;
-
-      const item = getItemById(state.currentCategory, state.currentOpenItemId);
-      if(!item){
+      if(!state.currentOpenItemId){
         alert(t().labels.itemNotFound);
         return;
       }
-
-      const confirmed = confirm(t().labels.confirmDelete);
-      if(!confirmed) return;
-
-      const index = (state.demoData[state.currentCategory] || []).findIndex(x => x.id === item.id);
-      if(index !== -1){
-        state.demoData[state.currentCategory].splice(index, 1);
-        clearRelationCache();
-      }
-
-      const deleted = await deleteItemFromSupabase(item, state.currentCategory);
-
-      if(!deleted){
-        if(index !== -1){
-          state.demoData[state.currentCategory].splice(index, 0, item);
-        }
-        alert(t().labels.deleteError);
-        return;
-      }
-
-      state.currentOpenItemId = null;
-      backToCategory();
-     await loadCategoryFromSupabase(state.currentCategory);
+      await deleteItemById(state.currentOpenItemId, { fromDetails: true });
     }
 
     async function register(){
@@ -4777,7 +4708,7 @@ async function savePublicShareSettingsFromInputs(prefix = "share-modal"){
   applyShareSettingsToOwnerPanels(profile);
   if(state.currentPublicProfile && state.currentPublicProfile.id === profile.id){
     state.currentPublicProfile = { ...state.currentPublicProfile, ...profile };
-    renderPublicShareProfile(state.currentPublicProfile);
+    renderPublicCard(state.currentPublicProfile);
   }
   alert(t().share.settingsSaved);
   return profile;
@@ -4812,7 +4743,7 @@ async function regeneratePublicShareToken(){
     applyShareSettingsToOwnerPanels(profile);
     if(state.currentPublicProfile && state.currentPublicProfile.id === profile.id){
       state.currentPublicProfile = { ...state.currentPublicProfile, ...profile };
-      renderPublicShareProfile(state.currentPublicProfile);
+      renderPublicCard(state.currentPublicProfile);
     }
     alert(t().share.tokenRegenerated);
   } catch (error) {
@@ -5125,13 +5056,10 @@ function renderPublicCard(profile = {}){
   renderOwnerPanel(profile);
 }
 
-function renderPublicShareProfile(profile = {}){
-  renderPublicCard(profile);
-}
 
 async function showPublicShareScreen(profile){
   state.isPublicView = true;
-  renderPublicShareProfile(profile);
+  renderPublicCard(profile);
   hideAllScreens();
   document.getElementById("public-share-screen").classList.remove("hidden");
   saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: state.activeShareToken || "" });
@@ -5161,7 +5089,7 @@ async function loadPublicShareRoute(token){
     const user = await getCurrentUser();
     const isOwner = Boolean(user && user.id === profile.id);
     state.currentPublicProfile = { ...profile, isOwner, public_share_token: token };
-    renderPublicShareProfile(state.currentPublicProfile);
+    renderPublicCard(state.currentPublicProfile);
 
     const items = await fetchPublicShareLibraryItems(profile.id);
     if(!isOwner){
@@ -5250,7 +5178,7 @@ async function loadNfcRoute(token){
     const items = await fetchPublicShareLibraryItems(profile.id);
     applyPublicLibraryItems(items);
     await getSavedLibraryState(profile.id, tag.token);
-    renderPublicShareProfile(state.currentPublicProfile);
+    renderPublicCard(state.currentPublicProfile);
     renderShareLibrary(items);
     saveRouteState({ screen: "public-share", isPublicShareRoute: true, shareToken: token || "", sharePath: "nfc", openItemId: null });
     return true;
@@ -5738,7 +5666,7 @@ async function uploadAvatar(){
   }
   if(state.currentPublicProfile?.isOwner){
     state.currentPublicProfile.avatar_url = avatarUrl;
-    renderPublicShareProfile(state.currentPublicProfile);
+    renderPublicCard(state.currentPublicProfile);
   }
   if(fileInput) fileInput.value = "";
   alert(t().profile.avatarUpdated);
@@ -5771,7 +5699,7 @@ async function removeAvatar(){
   }
   if(state.currentPublicProfile?.isOwner){
     state.currentPublicProfile.avatar_url = "";
-    renderPublicShareProfile(state.currentPublicProfile);
+    renderPublicCard(state.currentPublicProfile);
   }
   const fileInput = document.getElementById("avatar-file");
   if(fileInput) fileInput.value = "";
@@ -6930,46 +6858,6 @@ function renderShelf(){
   const sortedItems = [...items].sort((a, b) => (b.id || 0) - (a.id || 0));
   sortedItems.forEach((item) => shelf.appendChild(createCard(item)));
 }
-
-const mobileRefineApplyTranslations = applyTranslations;
-applyTranslations = function applyTranslationsMobileRefine(){
-  mobileRefineApplyTranslations();
-  setTextIfPresent("home-open-library-btn", state.currentLanguage === "ru" ? "Библиотека" : "Library");
-  setTextIfPresent("library-screen-title", t().home.libraryTitle);
-  setTextIfPresent("back-library-home-btn", t().buttons.backHome);
-  setTextIfPresent("filter-toggle-btn", state.currentLanguage === "ru" ? "Фильтр" : "Filter");
-  setTextIfPresent("details-menu-folder-btn", t().buttons.addToFolder);
-  setTextIfPresent("details-menu-status-btn", t().buttons.changeStatus);
-  setTextIfPresent("details-menu-delete-btn", t().buttons.delete);
-  const librarySearchInput = document.getElementById("library-search-input");
-  if(librarySearchInput) librarySearchInput.placeholder = t().modals.searchPlaceholder;
-  setTextIfPresent("share-sheet-title", t().topbar.shareLibrary);
-  setTextIfPresent("share-sheet-subtitle", t().share.libraryHint);
-  setTextIfPresent("share-sheet-copy-btn", t().share.copyLink);
-  setTextIfPresent("share-sheet-qr-btn", t().share.showQr);
-  setTextIfPresent("share-sheet-open-btn", t().share.openPublicCard);
-  setTextIfPresent("share-sheet-cancel-btn", t().buttons.cancel);
-  setTextIfPresent("folder-manager-title", t().profile.folderManagerTitle);
-  setTextIfPresent("folder-manager-subtitle", t().profile.folderManagerHint);
-  const folderInput = document.getElementById("folder-manager-input");
-  if(folderInput) folderInput.placeholder = t().profile.customFolderLabel;
-  setTextIfPresent("folder-manager-create-btn", t().profile.createFolder);
-  setTextIfPresent("folder-manager-cancel-btn", t().buttons.cancel);
-  setTextIfPresent("item-actions-cancel-btn", t().buttons.cancel);
-  const libraryVisible = !document.getElementById("library-screen")?.classList.contains("hidden");
-  if(libraryVisible){
-    renderLibraryCategories();
-  }
-  renderFolderRail();
-  renderFolderManagerList();
-};
-
-const previousRefreshAccountCollectionsUI = refreshAccountCollectionsUI;
-refreshAccountCollectionsUI = function refreshAccountCollectionsUIWithFolders(){
-  previousRefreshAccountCollectionsUI();
-  renderFolderRail();
-  renderFolderManagerList();
-};
 
 function closePreferencesPanel(){
   closeProfileMenu();
