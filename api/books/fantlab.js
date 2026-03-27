@@ -68,13 +68,21 @@ function extractFantlabNodes(payload){
       continue;
     }
 
-    const titleCandidate = current.title || current.name || current.work_title || current.work_name || current.rusname || current.orgname;
+    const titleCandidate =
+      current.title ||
+      current.name ||
+      current.work_title ||
+      current.work_name ||
+      current.rusname ||
+      current.orgname;
+
     if(typeof titleCandidate === "string" && normalizeSpaces(titleCandidate)){
       out.push(current);
     }
 
     const nestedKeys = [
-      "works", "items", "data", "result", "search", "matches", "books", "list", "entities", "payload", "response"
+      "works", "items", "data", "result", "search", "matches",
+      "books", "list", "entities", "payload", "response"
     ];
 
     for(const key of nestedKeys){
@@ -93,56 +101,86 @@ function extractFantlabNodes(payload){
 }
 
 function pickCreator(item){
-  const direct = normalizeSpaces(item.author_name || item.author || item.autor || item.writer || "");
+  const direct = normalizeSpaces(
+    item.author_name ||
+    item.author ||
+    item.autor ||
+    item.writer ||
+    ""
+  );
   if(direct) return direct;
-  const authors = Array.isArray(item.authors) ? item.authors : Array.isArray(item.authorlist) ? item.authorlist : [];
-  return normalizeSpaces(authors
-    .map((author) => normalizeSpaces(author?.name || author?.title || author?.fio || ""))
-    .filter(Boolean)
-    .join(", "));
+
+  const authors = Array.isArray(item.authors)
+    ? item.authors
+    : Array.isArray(item.authorlist)
+      ? item.authorlist
+      : [];
+
+  return normalizeSpaces(
+    authors
+      .map((author) => normalizeSpaces(author?.name || author?.title || author?.fio || ""))
+      .filter(Boolean)
+      .join(", ")
+  );
 }
 
 function pickCover(item){
   return normalizeSpaces(
-    item.cover
-    || item.cover_url
-    || item.image
-    || item.image_url
-    || item.poster
-    || item.pic
-    || item.img
-    || ""
+    item.cover ||
+    item.cover_url ||
+    item.image ||
+    item.image_url ||
+    item.poster ||
+    item.pic ||
+    item.img ||
+    ""
   );
 }
 
 function normalizeFantlabItem(item){
   if(!item || typeof item !== "object") return null;
 
-  const titleRaw = normalizeSpaces(item.title || item.name || item.work_title || item.work_name || item.rusname || item.orgname || "");
+  const titleRaw = normalizeSpaces(
+    item.title ||
+    item.name ||
+    item.work_title ||
+    item.work_name ||
+    item.rusname ||
+    item.orgname ||
+    ""
+  );
+
   if(!titleRaw || titleRaw.length < 2) return null;
   if(/^[\W_\d-]+$/u.test(titleRaw)) return null;
 
   const titleRuRaw = normalizeSpaces(item.title_ru || item.rusname || "");
   const titleEnRaw = normalizeSpaces(item.title_en || item.orgname || "");
-  const titleOriginalRaw = normalizeSpaces(item.title_original || item.original_title || item.name_original || titleRaw);
+  const titleOriginalRaw = normalizeSpaces(
+    item.title_original ||
+    item.original_title ||
+    item.name_original ||
+    titleRaw
+  );
 
-  const descriptionRaw = normalizeSpaces(item.description || item.annotation || item.work_description || item.anons || "");
+  const descriptionRaw = normalizeSpaces(
+    item.description ||
+    item.annotation ||
+    item.work_description ||
+    item.anons ||
+    ""
+  );
+
   const creator = pickCreator(item);
   const cover = pickCover(item);
 
   const workId = normalizeSpaces(
-    item.work_id
-    || item.workid
-    || item.workId
-    || item.id
-    || item.work?.id
-    || ""
+    item.work_id ||
+    item.workid ||
+    item.workId ||
+    item.id ||
+    item.work?.id ||
+    ""
   );
-  const hasValidCreator = creator.length >= 2;
-  const hasWorkId = Boolean(workId);
-  if(!hasValidCreator && !hasWorkId){
-    return null;
-  }
 
   const title_ru = titleRuRaw || (looksLikeRussian(titleRaw) ? titleRaw : "");
   const title_en = titleEnRaw || (looksLikeEnglish(titleRaw) ? titleRaw : "");
@@ -162,7 +200,6 @@ function normalizeFantlabItem(item){
       description_ru = descriptionRaw;
     } else {
       description_original = descriptionRaw;
-      if(looksLikeEnglish(descriptionRaw)) description_en = descriptionRaw;
     }
   }
 
@@ -210,7 +247,8 @@ function getFantlabEndpointBuilders(){
 
 async function fetchFantlabWithTimeout(url, timeoutMs = FANTLAB_TIMEOUT_MS){
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(url, {
       method: "GET",
@@ -227,12 +265,15 @@ async function fetchFantlabWithTimeout(url, timeoutMs = FANTLAB_TIMEOUT_MS){
 
 async function fetchFantlabPayload(query){
   const endpointBuilders = getFantlabEndpointBuilders();
+
   for(const buildUrl of endpointBuilders){
     const url = buildUrl(query);
     console.log(`[fantlab-proxy] try url=${url}`);
+
     try {
       const response = await fetchFantlabWithTimeout(url);
       console.log(`[fantlab-proxy] status=${response.status} url=${url}`);
+
       if(!response.ok) continue;
 
       const text = await response.text();
@@ -240,6 +281,8 @@ async function fetchFantlabPayload(query){
         console.log(`[fantlab-proxy] empty payload url=${url}`);
         continue;
       }
+
+      console.log(`[fantlab-proxy] raw preview=${text.slice(0, 500)}`);
 
       const payload = safeJson(text);
       if(!payload){
@@ -258,6 +301,7 @@ async function fetchFantlabPayload(query){
       }
     }
   }
+
   return { payload: null, url: "" };
 }
 
@@ -267,6 +311,7 @@ module.exports = async function handler(req, res){
 
   const query = normalizeSpaces(req?.query?.q || "");
   console.log(`[fantlab-proxy] query="${query}"`);
+
   if(!query){
     console.log("[fantlab-proxy] empty query -> []");
     return res.status(200).json([]);
@@ -274,6 +319,7 @@ module.exports = async function handler(req, res){
 
   try {
     const { payload, url } = await fetchFantlabPayload(query);
+
     if(!payload){
       console.log("[fantlab-proxy] no valid payload from all endpoints -> []");
       return res.status(200).json([]);
@@ -284,9 +330,20 @@ module.exports = async function handler(req, res){
 
     const normalized = dedupeBooks(
       nodes
-        .map((item) => normalizeFantlabItem(item))
+        .map((item) => {
+          const normalizedItem = normalizeFantlabItem(item);
+          if(!normalizedItem){
+            try {
+              console.log("[fantlab-proxy] dropped raw node", JSON.stringify(item).slice(0, 400));
+            } catch (_error) {
+              console.log("[fantlab-proxy] dropped raw node [unserializable]");
+            }
+          }
+          return normalizedItem;
+        })
         .filter(Boolean)
     ).slice(0, FANTLAB_RESULT_LIMIT);
+
     console.log(`[fantlab-proxy] normalized=${normalized.length} limit=${FANTLAB_RESULT_LIMIT}`);
 
     if(!normalized.length){
