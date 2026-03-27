@@ -706,7 +706,6 @@ import { state } from "./js/state.js";
     const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
-    const bookTitleLocalizationCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -1175,38 +1174,6 @@ function getBookSecondaryTitle(item){
   return "";
 }
 
-async function resolveLocalizedBookTitle(item, targetLang = getBookUiLanguage()){
-  if(targetLang !== "ru") return "";
-  if(!item) return "";
-
-  const existingRuTitle = normalizeSpaces(item.title_ru || "");
-  if(existingRuTitle) return existingRuTitle;
-
-  const baseTitle = normalizeSpaces(item.title || "");
-  if(!baseTitle) return "";
-  if(looksLikeRussian(baseTitle)) return baseTitle;
-  if(!looksLikeEnglish(baseTitle)) return "";
-
-  const safeTitle = baseTitle.slice(0, 120).trim();
-  if(!safeTitle) return "";
-
-  const cacheKey = `${normalizeComparisonText(safeTitle)}::${targetLang}`;
-  if(bookTitleLocalizationCache.has(cacheKey)){
-    return bookTitleLocalizationCache.get(cacheKey) || "";
-  }
-
-  try {
-    const translated = normalizeSpaces(await translateTextToRussian(safeTitle));
-    const localized = translated && looksLikeRussian(translated) ? translated : "";
-    bookTitleLocalizationCache.set(cacheKey, localized);
-    return localized;
-  } catch (error) {
-    console.error("Book title localization error:", error);
-    bookTitleLocalizationCache.set(cacheKey, "");
-    return "";
-  }
-}
-
 function deriveBookTitleFields(baseTitle = "", titleRu = "", titleEn = "", titleOriginal = ""){
   const resolvedTitle = normalizeSpaces(baseTitle || "");
   const resolvedRu = normalizeSpaces(titleRu || "");
@@ -1218,6 +1185,33 @@ function deriveBookTitleFields(baseTitle = "", titleRu = "", titleEn = "", title
     title_ru: resolvedRu || (looksLikeRussian(resolvedTitle) ? resolvedTitle : ""),
     title_en: resolvedEn || (looksLikeEnglish(resolvedTitle) ? resolvedTitle : ""),
     title_original: resolvedOriginal || resolvedTitle
+  };
+}
+
+function enrichBookTitleFieldsForSave(item = {}){
+  const baseTitle = normalizeSpaces(item.title || "");
+  const sourceTitleRu = normalizeSpaces(item.title_ru || "");
+  const sourceTitleEn = normalizeSpaces(item.title_en || "");
+  const sourceTitleOriginal = normalizeSpaces(item.title_original || baseTitle || "");
+
+  let resolvedTitleRu = sourceTitleRu;
+  if(!resolvedTitleRu){
+    if(looksLikeRussian(baseTitle)){
+      resolvedTitleRu = baseTitle;
+    } else if(looksLikeRussian(sourceTitleOriginal)){
+      resolvedTitleRu = sourceTitleOriginal;
+    }
+  }
+
+  const resolvedTitleEn = sourceTitleEn || (looksLikeEnglish(baseTitle) ? baseTitle : "");
+  const fields = deriveBookTitleFields(baseTitle, resolvedTitleRu, resolvedTitleEn, sourceTitleOriginal || baseTitle);
+
+  return {
+    ...item,
+    title: fields.title || baseTitle,
+    title_ru: fields.title_ru || "",
+    title_en: fields.title_en || "",
+    title_original: fields.title_original || sourceTitleOriginal || baseTitle
   };
 }
 
@@ -3111,22 +3105,6 @@ const normalized = candidates
             return { ...book, already_added: alreadyAdded };
           });
 
-          if(getBookUiLanguage() === "ru"){
-            const topCount = Math.min(3, normalizedBooks.length);
-            for(let i = 0; i < topCount; i += 1){
-              const book = normalizedBooks[i];
-              if(!book) continue;
-              if(normalizeSpaces(book.title_ru || "")) continue;
-              if(!looksLikeEnglish(book.title || "")) continue;
-              if(book.already_added) continue;
-
-              const localizedTitle = await resolveLocalizedBookTitle(book, "ru");
-              if(localizedTitle){
-                book.title_ru = localizedTitle;
-              }
-            }
-          }
-
           return normalizedBooks.slice(0, limit);
         }
 
@@ -3708,15 +3686,17 @@ const normalized = candidates
         return;
       }
 
-      let finalDescription = item.description || "";
-      let finalDescriptionRu = item.description_ru || "";
-      let finalDescriptionOriginal = item.description_original || item.description_en || "";
-      let finalDescriptionEn = item.description_en || item.description_original || "";
+      const itemForSave = targetCategory === "Books" ? enrichBookTitleFieldsForSave(item) : item;
+
+      let finalDescription = itemForSave.description || "";
+      let finalDescriptionRu = itemForSave.description_ru || "";
+      let finalDescriptionOriginal = itemForSave.description_original || itemForSave.description_en || "";
+      let finalDescriptionEn = itemForSave.description_en || itemForSave.description_original || "";
 
       if(targetCategory === "Books"){
         const hasLocalized = Boolean(finalDescriptionRu && (finalDescriptionOriginal || finalDescriptionEn) && finalDescription);
         if(!hasLocalized){
-          const built = await buildBookDescriptions(item.title, item.creator || "", item.work_key || "", item.isbn || "");
+          const built = await buildBookDescriptions(itemForSave.title, itemForSave.creator || "", itemForSave.work_key || "", itemForSave.isbn || "");
           finalDescription = finalDescription || built.description || "";
           finalDescriptionRu = finalDescriptionRu || built.description_ru || "";
           finalDescriptionOriginal = finalDescriptionOriginal || built.description_original || built.description_en || "";
@@ -3731,38 +3711,38 @@ const normalized = candidates
       }
 
       const saved = await saveItemToSupabase(
-        item.title,
+        itemForSave.title,
         targetCategory,
         "Planned",
-        item.cover || "",
+        itemForSave.cover || "",
         finalDescription || "",
-        item.creator || "",
-        item.work_key || "",
-        item.canonical_key || "",
+        itemForSave.creator || "",
+        itemForSave.work_key || "",
+        itemForSave.canonical_key || "",
         finalDescriptionRu || "",
         finalDescriptionEn || "",
-        item.title_ru || "",
-        item.title_en || "",
-        item.title_original || "",
+        itemForSave.title_ru || "",
+        itemForSave.title_en || "",
+        itemForSave.title_original || "",
         finalDescriptionOriginal || "",
-        item.folder || ""
+        itemForSave.folder || ""
       );
 
       if(!saved) return;
 
       insertLocalShelfItem(targetCategory, buildLocalShelfItem({
-        title: item.title,
-        title_ru: item.title_ru || "",
-        title_en: item.title_en || "",
-        title_original: item.title_original || "",
+        title: itemForSave.title,
+        title_ru: itemForSave.title_ru || "",
+        title_en: itemForSave.title_en || "",
+        title_original: itemForSave.title_original || "",
         category: targetCategory,
         status: "Planned",
-        cover: item.cover || "",
+        cover: itemForSave.cover || "",
         description: finalDescription || "",
-        creator: item.creator || "",
-        isbn: item.isbn || "",
-        work_key: item.work_key || "",
-        canonical_key: item.canonical_key || "",
+        creator: itemForSave.creator || "",
+        isbn: itemForSave.isbn || "",
+        work_key: itemForSave.work_key || "",
+        canonical_key: itemForSave.canonical_key || "",
         description_ru: finalDescriptionRu || "",
         description_original: finalDescriptionOriginal || finalDescriptionEn || "",
         description_en: finalDescriptionEn || ""
