@@ -307,7 +307,10 @@ async function fetchFantlabPayload(query){
 
 module.exports = async function handler(req, res){
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
 
   const query = normalizeSpaces(req?.query?.q || "");
   console.log(`[fantlab-proxy] query="${query}"`);
