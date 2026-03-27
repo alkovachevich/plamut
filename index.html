@@ -221,7 +221,7 @@
           <div class="details-menu-wrap">
             <button class="button button-secondary details-menu-btn" type="button" onclick="toggleDetailsMenu(event)" id="details-menu-btn">⋯</button>
             <div id="details-menu" class="header-popover hidden" role="menu">
-              <button id="details-menu-folder-btn" class="button button-secondary header-popover-button" type="button" onclick="openFolderModalByCurrentItem()">Add to folder</button>
+              <button id="details-menu-folder-btn" class="button button-secondary header-popover-button" type="button" onclick="openFolderModalById(state.currentOpenItemId)">Add to folder</button>
               <button id="details-menu-status-btn" class="button button-secondary header-popover-button" type="button" onclick="changeStatusFromDetails()">Change status</button>
               <button id="details-menu-delete-btn" class="button button-danger header-popover-button" type="button" onclick="deleteCurrentItem()">Delete</button>
             </div>
@@ -262,7 +262,7 @@
           <div class="section" id="details-folder-section">
             <h3 id="details-folder-title">Folder</h3>
             <div class="folder-assignment-row">
-              <button class="button button-secondary hidden" type="button" onclick="openFolderModalByCurrentItem()" id="open-folder-modal-btn">Add to folder</button>
+              <button class="button button-secondary hidden" type="button" onclick="openFolderModalById(state.currentOpenItemId)" id="open-folder-modal-btn">Add to folder</button>
               <div class="small" id="details-folder-current">No folder</div>
             </div>
           </div>
