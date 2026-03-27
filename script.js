@@ -2090,13 +2090,13 @@ const normalized = candidates
 
       if(queryMeta?.isbn && item?.isbn && item.isbn === queryMeta.isbn) score += 120;
 
-      if(queryKey && titleMain === queryKey) score += 70;
-      else if(queryKey && titleMain.startsWith(queryKey)) score += 45;
-      else if(queryKey && titlePool.includes(queryKey)) score += 24;
+      if(queryKey && titleMain === queryKey) score += 110;
+      else if(queryKey && titleMain.startsWith(queryKey)) score += 70;
+      else if(queryKey && titlePool.includes(queryKey)) score += 36;
 
-      if(creatorKey) score += 8;
-      if(item.cover) score += 6;
-      if(item.description || item.description_ru || item.description_original || item.description_en) score += 4;
+      if(creatorKey) score += 4;
+      if(item.cover) score += 3;
+      if(item.description || item.description_ru || item.description_original || item.description_en) score += 2;
       if(item.isbn) score += 8;
 
       const titleProbe = normalizeComparisonText([item.title || "", item.title_original || "", item.title_en || "", item.title_ru || ""].join(" "));
@@ -3065,18 +3065,19 @@ const normalized = candidates
           const externalResults = await searchBooksApi(query, limit);
           const combinedBooks = dedupeSearchResults([...externalResults, ...localResults]);
           const existingBooks = state.demoData.Books || [];
-          const availableBooks = combinedBooks.filter((book) => {
+          const normalizedBooks = combinedBooks.map((book) => {
             const normalizedTitle = normalizeComparisonText(book.title || "");
             const normalizedCreator = normalizeComparisonText(book.creator || "");
-            return !existingBooks.some((existing) => {
+            const alreadyAdded = existingBooks.some((existing) => {
               if(book.canonical_key && existing.canonical_key && book.canonical_key === existing.canonical_key) return true;
               if(book.work_key && existing.work_key && book.work_key === existing.work_key) return true;
               return normalizedTitle
                 && normalizedTitle === normalizeComparisonText(existing.title || "")
                 && normalizedCreator === normalizeComparisonText(existing.creator || "");
             });
+            return { ...book, already_added: alreadyAdded };
           });
-          return availableBooks.slice(0, limit);
+          return normalizedBooks.slice(0, limit);
         }
 
         if(localResults.length > 0){
@@ -3600,7 +3601,7 @@ const normalized = candidates
                   <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
                 </div>
               </div>
-              <button class="button" onclick="addCategorySearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
+              <button class="button" ${item.already_added ? "disabled" : ""} onclick="addCategorySearchResult(${index})">${escapeHtml(item.already_added ? (state.currentLanguage === "ru" ? "Уже добавлено" : "Added") : t().buttons.add)}</button>
             `;
             container.appendChild(row);
           });
@@ -3621,6 +3622,10 @@ const normalized = candidates
       if(!isOwnerControlAllowed()) return;
       const item = state.currentSearchResults[index];
       if(!item) return;
+      if(item.already_added){
+        alert(t().labels.alreadyExists);
+        return;
+      }
       await addSearchResultToLibrary(item);
       closeAddModal();
       await loadCategoryFromSupabase(state.currentCategory);
@@ -3629,6 +3634,10 @@ const normalized = candidates
     async function addSearchResultToLibrary(item){
       if(!isOwnerControlAllowed()) return;
       if(!item) return;
+      if(item.already_added){
+        alert(t().labels.alreadyExists);
+        return;
+      }
 
       const targetCategory = item.category;
 
