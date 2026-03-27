@@ -2414,7 +2414,7 @@ const normalized = candidates
         cover: row.cover_url || "",
         description: row.description || "",
         description_ru: row.description_ru || "",
-        description_original: row.description_en || "",
+        description_original: row.description_original || row.description_en || "",
         description_en: row.description_en || "",
         work_key: row.work_key || "",
         canonical_key: row.canonical_key || "",
@@ -2453,7 +2453,7 @@ const normalized = candidates
 
       const { data, error } = await supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, description_ru, description_en, creator, work_key, canonical_key, category")
+        .select("id, title, title_ru, title_en, title_original, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, category, folder_name")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false })
@@ -3251,7 +3251,11 @@ const normalized = candidates
       canonicalKey = "",
       description_ru = "",
       description_en = "",
-      description_original = ""
+      title_ru = "",
+      title_en = "",
+      title_original = "",
+      description_original = "",
+      folder_name = ""
     ){
       const user = await getCurrentUser();
 
@@ -3260,26 +3264,32 @@ const normalized = candidates
         return false;
       }
 
+      const titleFields = deriveBookTitleFields(title, title_ru, title_en, title_original || title);
       const finalCanonicalKey =
         canonicalKey ||
         workKey ||
-        title.trim().toLowerCase();
+        (titleFields.title || "").trim().toLowerCase();
 
       const autoLang = splitDescriptionFields(description);
       const originalDescription = description_original || description_en || autoLang.description_original || "";
 
       const insertData = {
         user_id: user.id,
-        title: title,
+        title: titleFields.title,
+        title_ru: titleFields.title_ru,
+        title_en: titleFields.title_en,
+        title_original: titleFields.title_original,
         category: category,
         status: status || "Planned",
         cover_url: cover,
         description: description || "",
+        description_ru: description_ru || autoLang.description_ru || "",
+        description_en: description_en || originalDescription || autoLang.description_en || "",
+        description_original: originalDescription || "",
         creator: creator || "",
         work_key: workKey || "",
         canonical_key: finalCanonicalKey,
-        description_ru: description_ru || autoLang.description_ru || "",
-        description_en: originalDescription || autoLang.description_en || ""
+        folder_name: folder_name || ""
       };
 
       const { error } = await supabaseClient
@@ -3558,7 +3568,7 @@ const normalized = candidates
 
       const { data, error } = await retryReadQuery(() => supabaseClient
         .from("user_media")
-        .select("id, title, status, cover_url, description, description_ru, description_en, creator, work_key, canonical_key, category")
+        .select("id, title, title_ru, title_en, title_original, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, category, folder_name")
         .eq("user_id", user.id)
         .eq("category", category)
         .order("id", { ascending: false }), 2, 220);
@@ -3597,7 +3607,7 @@ const normalized = candidates
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
-          description_original: item.description_en || "",
+          description_original: item.description_original || item.description_en || "",
           description_en: item.description_en || "",
           title_ru: titleFields.title_ru,
           title_en: titleFields.title_en,
@@ -3605,7 +3615,7 @@ const normalized = candidates
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
-          folder: ""
+          folder: item.folder_name || ""
         });
       });
 
@@ -3770,7 +3780,11 @@ const normalized = candidates
         item.canonical_key || "",
         finalDescriptionRu || "",
         finalDescriptionEn || "",
-        finalDescriptionOriginal || ""
+        item.title_ru || "",
+        item.title_en || "",
+        item.title_original || "",
+        finalDescriptionOriginal || "",
+        item.folder || ""
       );
 
       if(!saved) return;
@@ -3824,6 +3838,8 @@ const normalized = candidates
 
       const translated = await translateDescriptionFields(description);
 
+      const manualTitleFields = deriveBookTitleFields(title, looksLikeRussian(title) ? title : "", looksLikeEnglish(title) ? title : "", title);
+
       const saved = await saveItemToSupabase(
         title,
         state.currentCategory,
@@ -3835,13 +3851,20 @@ const normalized = candidates
         canonicalKey,
         translated.description_ru,
         translated.description_en,
-        translated.description_original
+        manualTitleFields.title_ru,
+        manualTitleFields.title_en,
+        manualTitleFields.title_original,
+        translated.description_original || translated.description_en,
+        ""
       );
 
       if(!saved) return;
 
       insertLocalShelfItem(state.currentCategory, buildLocalShelfItem({
         title: title,
+        title_ru: manualTitleFields.title_ru,
+        title_en: manualTitleFields.title_en,
+        title_original: manualTitleFields.title_original,
         category: state.currentCategory,
         status: "Planned",
         cover: cover,
