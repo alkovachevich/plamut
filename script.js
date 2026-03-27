@@ -706,6 +706,7 @@ import { state } from "./js/state.js";
     const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
+    const bookTitleLocalizationCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -1172,6 +1173,38 @@ function getBookSecondaryTitle(item){
   }
 
   return "";
+}
+
+async function resolveLocalizedBookTitle(item, targetLang = getBookUiLanguage()){
+  if(targetLang !== "ru") return "";
+  if(!item) return "";
+
+  const existingRuTitle = normalizeSpaces(item.title_ru || "");
+  if(existingRuTitle) return existingRuTitle;
+
+  const baseTitle = normalizeSpaces(item.title || "");
+  if(!baseTitle) return "";
+  if(looksLikeRussian(baseTitle)) return baseTitle;
+  if(!looksLikeEnglish(baseTitle)) return "";
+
+  const safeTitle = baseTitle.slice(0, 120).trim();
+  if(!safeTitle) return "";
+
+  const cacheKey = `${normalizeComparisonText(safeTitle)}::${targetLang}`;
+  if(bookTitleLocalizationCache.has(cacheKey)){
+    return bookTitleLocalizationCache.get(cacheKey) || "";
+  }
+
+  try {
+    const translated = normalizeSpaces(await translateTextToRussian(safeTitle));
+    const localized = translated && looksLikeRussian(translated) ? translated : "";
+    bookTitleLocalizationCache.set(cacheKey, localized);
+    return localized;
+  } catch (error) {
+    console.error("Book title localization error:", error);
+    bookTitleLocalizationCache.set(cacheKey, "");
+    return "";
+  }
 }
 
 function deriveBookTitleFields(baseTitle = "", titleRu = "", titleEn = "", titleOriginal = ""){
@@ -3077,6 +3110,23 @@ const normalized = candidates
             });
             return { ...book, already_added: alreadyAdded };
           });
+
+          if(getBookUiLanguage() === "ru"){
+            const topCount = Math.min(3, normalizedBooks.length);
+            for(let i = 0; i < topCount; i += 1){
+              const book = normalizedBooks[i];
+              if(!book) continue;
+              if(normalizeSpaces(book.title_ru || "")) continue;
+              if(!looksLikeEnglish(book.title || "")) continue;
+              if(book.already_added) continue;
+
+              const localizedTitle = await resolveLocalizedBookTitle(book, "ru");
+              if(localizedTitle){
+                book.title_ru = localizedTitle;
+              }
+            }
+          }
+
           return normalizedBooks.slice(0, limit);
         }
 
