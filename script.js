@@ -2204,6 +2204,9 @@ const normalized = candidates
 
     function createBookResult({
       title = "",
+      title_ru = "",
+      title_en = "",
+      title_original = "",
       creator = "",
       cover = "",
       isbn = "",
@@ -2215,28 +2218,34 @@ const normalized = candidates
       canonical_key = "",
       source = "",
       queryMeta = {}
-    } = {}){
+      } = {}) {
       const safeTitle = normalizeSpaces(title);
       const safeCreator = normalizeSpaces(creator);
       const safeIsbn = detectISBN(isbn);
+      const safeTitleRu = normalizeSpaces(title_ru);
+      const safeTitleEn = normalizeSpaces(title_en);
+      const safeTitleOriginal = normalizeSpaces(title_original);
       const original = normalizeSpaces(description_original || description_en || (description_ru ? "" : description));
       const russian = normalizeSpaces(description_ru || (looksLikeRussian(description) ? description : ""));
       const displayDescription = russian || original || normalizeSpaces(description);
 
-      return {
-        title: safeTitle,
-        category: "Books",
-        creator: safeCreator,
-        cover: cover || "",
-        isbn: safeIsbn,
-        description: displayDescription || "",
-        description_ru: russian || "",
-        description_original: original || "",
-        description_en: description_en || original || "",
-        work_key: work_key || "",
-        source: source || "",
-        source_priority: getBookSourcePriority(source, queryMeta),
-        canonical_key: canonical_key || buildCanonicalKey("Books", source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
+     return {
+      title: safeTitle,
+      title_ru: safeTitleRu || "",
+      title_en: safeTitleEn || "",
+      title_original: safeTitleOriginal || "",
+      category: "Books",
+      creator: safeCreator,
+      cover: cover || "",
+      isbn: safeIsbn,
+      description: displayDescription || "",
+      description_ru: russian || "",
+      description_original: original || "",
+      description_en: description_en || original || "",
+      work_key: work_key || "",
+      source: source || "",
+      source_priority: getBookSourcePriority(source, queryMeta),
+       canonical_key: canonical_key || buildCanonicalKey("Books", source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
       };
     }
 
@@ -2252,6 +2261,9 @@ const normalized = candidates
       const language = String(info.language || "").toLowerCase();
       return createBookResult({
         title: info.title || "",
+        title_ru: queryMeta.hasCyrillic && looksLikeRussian(info.title || "") ? (info.title || "") : "",
+        title_en: info.title || "",
+        title_original: info.title || "",
         creator: Array.isArray(info.authors) ? info.authors.join(", ") : "",
         cover: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "",
         isbn,
@@ -2269,6 +2281,9 @@ const normalized = candidates
       const isbn = detectISBN((Array.isArray(book.isbn) ? book.isbn[0] : book.isbn) || "");
       return createBookResult({
         title: book.title || "",
+        title_ru: queryMeta.hasCyrillic && looksLikeRussian(book.title || "") ? (book.title || "") : "",
+        title_en: looksLikeEnglish(book.title || "") ? (book.title || "") : "",
+        title_original: book.title || "",
         creator: Array.isArray(book.author_name) ? book.author_name.join(", ") : "",
         cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
         isbn,
@@ -2280,23 +2295,29 @@ const normalized = candidates
 
     function mapFantLabWorkToBookResult(item, queryMeta = {}){
       const title = item?.title || item?.name || item?.work_name || item?.work_title || "";
+      const titleRu = looksLikeRussian(title) ? title : "";
+      const titleEn = looksLikeEnglish(title) ? title : "";
+      const titleOriginal = title;
       const creator = item?.author_name || item?.authors?.map?.((author) => author?.name).filter(Boolean).join(", ") || "";
       const description = item?.description || item?.annotation || item?.work_description || "";
       const cover = item?.cover || item?.cover_url || item?.image || "";
       const workId = item?.work_id || item?.id || item?.workid || "";
       const isbn = detectISBN(item?.isbn || item?.isbn13 || item?.edition_isbn || "");
       return createBookResult({
-        title,
-        creator,
-        cover,
-        isbn,
-        description,
-        description_ru: looksLikeRussian(description) ? description : "",
-        description_original: looksLikeRussian(description) ? "" : description,
-        description_en: looksLikeEnglish(description) ? description : "",
-        work_key: workId ? `fantlab:${workId}` : "",
-        source: "fantlab",
-        queryMeta
+       title,
+       title_ru: titleRu,
+       title_en: titleEn,
+       title_original: titleOriginal,
+       creator,
+       cover,
+       isbn,
+       description,
+       description_ru: looksLikeRussian(description) ? description : "",
+       description_original: looksLikeRussian(description) ? "" : description,
+       description_en: looksLikeEnglish(description) ? description : "",
+       work_key: workId ? `fantlab:${workId}` : "",
+       source: "fantlab",
+       queryMeta
       });
     }
 
