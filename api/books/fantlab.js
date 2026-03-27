@@ -2,6 +2,9 @@ function normalizeSpaces(value){
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+const FANTLAB_TIMEOUT_MS = 7000;
+const FANTLAB_RESULT_LIMIT = 10;
+
 function normalizeComparisonText(value){
   return normalizeSpaces(value)
     .toLowerCase()
@@ -116,7 +119,8 @@ function normalizeFantlabItem(item){
   if(!item || typeof item !== "object") return null;
 
   const titleRaw = normalizeSpaces(item.title || item.name || item.work_title || item.work_name || item.rusname || item.orgname || "");
-  if(!titleRaw) return null;
+  if(!titleRaw || titleRaw.length < 2) return null;
+  if(/^[\W_\d-]+$/u.test(titleRaw)) return null;
 
   const titleRuRaw = normalizeSpaces(item.title_ru || item.rusname || "");
   const titleEnRaw = normalizeSpaces(item.title_en || item.orgname || "");
@@ -134,6 +138,11 @@ function normalizeFantlabItem(item){
     || item.work?.id
     || ""
   );
+  const hasValidCreator = creator.length >= 2;
+  const hasWorkId = Boolean(workId);
+  if(!hasValidCreator && !hasWorkId){
+    return null;
+  }
 
   const title_ru = titleRuRaw || (looksLikeRussian(titleRaw) ? titleRaw : "");
   const title_en = titleEnRaw || (looksLikeEnglish(titleRaw) ? titleRaw : "");
@@ -192,20 +201,64 @@ function dedupeBooks(items){
   return result;
 }
 
-async function fetchFantlab(query){
-  const endpoint = `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`;
-  const response = await fetch(endpoint, {
-    method: "GET",
-    headers: {
-      "Accept": "application/json, text/plain;q=0.9, */*;q=0.8"
+function getFantlabEndpointBuilders(){
+  return [
+    (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
+    (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`
+  ];
+}
+
+async function fetchFantlabWithTimeout(url, timeoutMs = FANTLAB_TIMEOUT_MS){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json, text/plain;q=0.9, */*;q=0.8"
+      },
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchFantlabPayload(query){
+  const endpointBuilders = getFantlabEndpointBuilders();
+  for(const buildUrl of endpointBuilders){
+    const url = buildUrl(query);
+    console.log(`[fantlab-proxy] try url=${url}`);
+    try {
+      const response = await fetchFantlabWithTimeout(url);
+      console.log(`[fantlab-proxy] status=${response.status} url=${url}`);
+      if(!response.ok) continue;
+
+      const text = await response.text();
+      if(!text){
+        console.log(`[fantlab-proxy] empty payload url=${url}`);
+        continue;
+      }
+
+      const payload = safeJson(text);
+      if(!payload){
+        console.log(`[fantlab-proxy] non-json payload url=${url}`);
+        continue;
+      }
+
+      console.log(`[fantlab-proxy] payload ok url=${url}`);
+      return { payload, url };
+    } catch (error) {
+      const isAbort = error?.name === "AbortError";
+      if(isAbort){
+        console.error(`[fantlab-proxy] timeout url=${url} timeout_ms=${FANTLAB_TIMEOUT_MS}`);
+      } else {
+        console.error(`[fantlab-proxy] fetch failed url=${url} error=${String(error?.message || error)}`);
+      }
     }
-  });
-
-  if(!response.ok) return null;
-
-  const text = await response.text();
-  if(!text) return null;
-  return safeJson(text);
+  }
+  return { payload: null, url: "" };
 }
 
 module.exports = async function handler(req, res){
@@ -213,24 +266,36 @@ module.exports = async function handler(req, res){
   res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300");
 
   const query = normalizeSpaces(req?.query?.q || "");
+  console.log(`[fantlab-proxy] query="${query}"`);
   if(!query){
+    console.log("[fantlab-proxy] empty query -> []");
     return res.status(200).json([]);
   }
 
   try {
-    const payload = await fetchFantlab(query);
+    const { payload, url } = await fetchFantlabPayload(query);
     if(!payload){
+      console.log("[fantlab-proxy] no valid payload from all endpoints -> []");
       return res.status(200).json([]);
     }
 
+    const nodes = extractFantlabNodes(payload);
+    console.log(`[fantlab-proxy] nodes=${nodes.length} source_url=${url || "n/a"}`);
+
     const normalized = dedupeBooks(
-      extractFantlabNodes(payload)
+      nodes
         .map((item) => normalizeFantlabItem(item))
         .filter(Boolean)
-    );
+    ).slice(0, FANTLAB_RESULT_LIMIT);
+    console.log(`[fantlab-proxy] normalized=${normalized.length} limit=${FANTLAB_RESULT_LIMIT}`);
+
+    if(!normalized.length){
+      console.log("[fantlab-proxy] payload present but parser/filters produced 0 results");
+    }
 
     return res.status(200).json(normalized);
-  } catch {
+  } catch (error) {
+    console.error(`[fantlab-proxy] handler error=${String(error?.message || error)}`);
     return res.status(200).json([]);
   }
 };
