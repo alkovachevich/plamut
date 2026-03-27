@@ -1185,7 +1185,57 @@ function getBookSecondaryTitle(item){
   return "";
 }
 
-    function splitDescriptionFields(description){
+function deriveBookTitleFields(baseTitle = "", titleRu = "", titleEn = "", titleOriginal = ""){
+  const resolvedTitle = normalizeSpaces(baseTitle || "");
+  const resolvedRu = normalizeSpaces(titleRu || "");
+  const resolvedEn = normalizeSpaces(titleEn || "");
+  const resolvedOriginal = normalizeSpaces(titleOriginal || resolvedTitle || "");
+
+  return {
+    title: resolvedTitle,
+    title_ru: resolvedRu || (looksLikeRussian(resolvedTitle) ? resolvedTitle : ""),
+    title_en: resolvedEn || (looksLikeEnglish(resolvedTitle) ? resolvedTitle : ""),
+    title_original: resolvedOriginal || resolvedTitle
+  };
+}
+
+function sanitizeGoogleBooksQueryPart(value, maxLen = 180){
+  const clean = normalizeSpaces(String(value || "").replace(/[\n\r\t]+/g, " "));
+  if(!clean) return "";
+  const base = clean
+    .split(/[|;]+/)[0]
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if(base.length <= maxLen) return base;
+  return base.slice(0, maxLen).replace(/[\s,.;:!?-]+$/g, "").trim();
+}
+
+function isApiErrorLikeText(text){
+  const sample = normalizeSpaces(String(text || ""));
+  if(!sample) return true;
+  const normalized = sample.toLowerCase();
+  if(normalized.length < 24) return false;
+  return normalized.includes("query length limit exceeded")
+    || /\bhttp\s*[45]\d\d\b/i.test(sample)
+    || normalized.includes("bad request")
+    || normalized.includes("internal server error")
+    || normalized.includes("service unavailable")
+    || normalized.includes("failed to fetch")
+    || normalized.includes("network request failed")
+    || normalized.includes("invalid api key")
+    || normalized.includes("api error")
+    || normalized.startsWith("error:")
+    || normalized.startsWith("{");
+}
+
+function sanitizeBookDescriptionText(text){
+  const clean = normalizeSpaces(text || "");
+  if(!clean) return "";
+  if(isApiErrorLikeText(clean)) return "";
+  return clean;
+}
+
+function splitDescriptionFields(description){
       return {
         description_ru: looksLikeRussian(description) ? description : "",
         description_en: looksLikeEnglish(description) ? description : "",
@@ -2269,11 +2319,12 @@ const normalized = candidates
       );
       const description = info.description || "";
       const language = String(info.language || "").toLowerCase();
+      const titleFields = deriveBookTitleFields(info.title || "", "", info.title || "", info.title || "");
       return createBookResult({
-        title: info.title || "",
-        title_ru: queryMeta.hasCyrillic && looksLikeRussian(info.title || "") ? (info.title || "") : "",
-        title_en: info.title || "",
-        title_original: info.title || "",
+        title: titleFields.title,
+        title_ru: titleFields.title_ru,
+        title_en: titleFields.title_en,
+        title_original: titleFields.title_original,
         creator: Array.isArray(info.authors) ? info.authors.join(", ") : "",
         cover: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "",
         isbn,
@@ -2289,11 +2340,12 @@ const normalized = candidates
 
     function mapOpenLibraryDocToBookResult(book, queryMeta = {}){
       const isbn = detectISBN((Array.isArray(book.isbn) ? book.isbn[0] : book.isbn) || "");
+      const titleFields = deriveBookTitleFields(book.title || "", "", "", book.title || "");
       return createBookResult({
-        title: book.title || "",
-        title_ru: queryMeta.hasCyrillic && looksLikeRussian(book.title || "") ? (book.title || "") : "",
-        title_en: looksLikeEnglish(book.title || "") ? (book.title || "") : "",
-        title_original: book.title || "",
+        title: titleFields.title,
+        title_ru: titleFields.title_ru,
+        title_en: titleFields.title_en,
+        title_original: titleFields.title_original,
         creator: Array.isArray(book.author_name) ? book.author_name.join(", ") : "",
         cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
         isbn,
@@ -2305,19 +2357,17 @@ const normalized = candidates
 
     function mapFantLabWorkToBookResult(item, queryMeta = {}){
       const title = item?.title || item?.name || item?.work_name || item?.work_title || "";
-      const titleRu = looksLikeRussian(title) ? title : "";
-      const titleEn = looksLikeEnglish(title) ? title : "";
-      const titleOriginal = title;
+      const titleFields = deriveBookTitleFields(title, looksLikeRussian(title) ? title : "", looksLikeEnglish(title) ? title : "", title);
       const creator = item?.author_name || item?.authors?.map?.((author) => author?.name).filter(Boolean).join(", ") || "";
       const description = item?.description || item?.annotation || item?.work_description || "";
       const cover = item?.cover || item?.cover_url || item?.image || "";
       const workId = item?.work_id || item?.id || item?.workid || "";
       const isbn = detectISBN(item?.isbn || item?.isbn13 || item?.edition_isbn || "");
       return createBookResult({
-       title,
-       title_ru: titleRu,
-       title_en: titleEn,
-       title_original: titleOriginal,
+       title: titleFields.title,
+       title_ru: titleFields.title_ru,
+       title_en: titleFields.title_en,
+       title_original: titleFields.title_original,
        creator,
        cover,
        isbn,
@@ -2355,9 +2405,10 @@ const normalized = candidates
     }
 
     function mapUserMediaRowToSearchResult(row, category){
+      const titleFields = deriveBookTitleFields(row.title || "", row.title_ru || "", row.title_en || "", row.title_original || row.original_title || row.title || "");
       return {
         id: row.id,
-        title: row.title || "",
+        title: titleFields.title,
         category: category,
         creator: row.creator || "",
         cover: row.cover_url || "",
@@ -2367,9 +2418,9 @@ const normalized = candidates
         description_en: row.description_en || "",
         work_key: row.work_key || "",
         canonical_key: row.canonical_key || "",
-        title_ru: "",
-        title_en: "",
-        title_original: ""
+        title_ru: titleFields.title_ru,
+        title_en: titleFields.title_en,
+        title_original: titleFields.title_original
       };
     }
 
@@ -2503,19 +2554,32 @@ const normalized = candidates
     async function fetchGoogleBooksDescription(title, author = "", preferredLang = state.currentLanguage){
       try {
         const targetLang = preferredLang === "ru" ? "ru" : "en";
-        const isbn = detectISBN(title);
+        const safeTitle = sanitizeGoogleBooksQueryPart(title, 220);
+        const safeAuthor = sanitizeGoogleBooksQueryPart(author, 120);
+        const isbn = detectISBN(safeTitle);
 
         let query = "";
         if(isbn){
           query = `isbn:${isbn}`;
-        } else if(title && author){
-          query = `intitle:${title} inauthor:${author}`;
-        } else if(title){
-          query = `intitle:${title}`;
-        } else if(author){
-          query = `inauthor:${author}`;
         } else {
+          const queryParts = [];
+          if(safeTitle) queryParts.push(`intitle:${safeTitle}`);
+          if(safeAuthor) queryParts.push(`inauthor:${safeAuthor}`);
+          query = queryParts.join(" ").trim();
+        }
+
+        if(!query){
           return { text: "", language: "", matchedLanguage: false };
+        }
+
+        const QUERY_LIMIT = 460;
+        if(query.length > QUERY_LIMIT){
+          if(query.startsWith("intitle:")){
+            query = `intitle:${sanitizeGoogleBooksQueryPart(safeTitle, 120)}`;
+          }
+          if(query.length > QUERY_LIMIT){
+            return { text: "", language: "", matchedLanguage: false };
+          }
         }
 
         function detectLang(text){
@@ -2525,12 +2589,22 @@ const normalized = candidates
         }
 
         async function tryRequest(url){
-          const data = await fetchJson(url);
-          const items = data.items || [];
+          let data;
+          try {
+            data = await fetchJson(url);
+          } catch (requestError) {
+            const message = String(requestError?.message || requestError || "");
+            if(/query\s+length\s+limit\s+exceeded/i.test(message)){
+              return { text: "", language: "", matchedLanguage: false };
+            }
+            throw requestError;
+          }
+
+          const items = Array.isArray(data?.items) ? data.items : [];
 
           for(const book of items){
             const info = book.volumeInfo || {};
-            const description = info.description || "";
+            const description = sanitizeBookDescriptionText(info.description || "");
             if(!description) continue;
 
             const lang = detectLang(description);
@@ -2541,7 +2615,7 @@ const normalized = candidates
 
           for(const book of items){
             const info = book.volumeInfo || {};
-            const description = info.description || "";
+            const description = sanitizeBookDescriptionText(info.description || "");
             if(description){
               const lang = detectLang(description);
               return { text: description, language: lang, matchedLanguage: false };
@@ -2741,53 +2815,61 @@ const normalized = candidates
 
       const olCurrent = await fetchOpenLibraryDescription(workKey, state.currentLanguage);
       if(olCurrent.text){
-        description = olCurrent.text;
-        if(olCurrent.language === "ru") description_ru = olCurrent.text;
-        if(olCurrent.language === "en") {
-          description_original = olCurrent.text;
-          description_en = olCurrent.text;
+        const cleanCurrent = sanitizeBookDescriptionText(olCurrent.text);
+        if(cleanCurrent){
+          description = cleanCurrent;
+          if(olCurrent.language === "ru") description_ru = cleanCurrent;
+          if(olCurrent.language === "en") {
+            description_original = cleanCurrent;
+            description_en = cleanCurrent;
+          }
         }
       }
 
       if(!description_ru){
         const olRu = await fetchOpenLibraryDescription(workKey, "ru");
-        if(olRu.text && looksLikeRussian(olRu.text)){
-          description_ru = olRu.text;
-          if(!description) description = olRu.text;
+        const cleanOlRu = sanitizeBookDescriptionText(olRu.text);
+        if(cleanOlRu && looksLikeRussian(cleanOlRu)){
+          description_ru = cleanOlRu;
+          if(!description) description = cleanOlRu;
         }
       }
 
       if(!description_en){
         const olEn = await fetchOpenLibraryDescription(workKey, "en");
-        if(olEn.text && looksLikeEnglish(olEn.text)){
-          description_original = description_original || olEn.text;
-          description_en = olEn.text;
-          if(!description) description = olEn.text;
+        const cleanOlEn = sanitizeBookDescriptionText(olEn.text);
+        if(cleanOlEn && looksLikeEnglish(cleanOlEn)){
+          description_original = description_original || cleanOlEn;
+          description_en = cleanOlEn;
+          if(!description) description = cleanOlEn;
         }
       }
 
       if(!description_ru){
         const googleRu = await fetchGoogleBooksDescription(normalizedIsbn || title, author, "ru");
-        if(googleRu.text && looksLikeRussian(googleRu.text)){
-          description_ru = googleRu.text;
-          if(!description) description = googleRu.text;
+        const cleanGoogleRu = sanitizeBookDescriptionText(googleRu.text);
+        if(cleanGoogleRu && looksLikeRussian(cleanGoogleRu)){
+          description_ru = cleanGoogleRu;
+          if(!description) description = cleanGoogleRu;
         }
       }
 
       if(!description_en){
         const googleEn = await fetchGoogleBooksDescription(normalizedIsbn || title, author, "en");
-        if(googleEn.text && looksLikeEnglish(googleEn.text)){
-          description_original = description_original || googleEn.text;
-          description_en = googleEn.text;
-          if(!description) description = googleEn.text;
+        const cleanGoogleEn = sanitizeBookDescriptionText(googleEn.text);
+        if(cleanGoogleEn && looksLikeEnglish(cleanGoogleEn)){
+          description_original = description_original || cleanGoogleEn;
+          description_en = cleanGoogleEn;
+          if(!description) description = cleanGoogleEn;
         }
       }
 
       if(!description_ru && (description_original || description_en)){
         const translatedRu = await translateTextToRussian(description_original || description_en);
-        if(translatedRu){
-          description_ru = translatedRu;
-          if(!description) description = translatedRu;
+        const cleanTranslatedRu = sanitizeBookDescriptionText(translatedRu);
+        if(cleanTranslatedRu){
+          description_ru = cleanTranslatedRu;
+          if(!description) description = cleanTranslatedRu;
         }
       }
 
@@ -2796,10 +2878,10 @@ const normalized = candidates
       }
 
       const payload = {
-        description: description || "",
-        description_ru: description_ru || "",
-        description_original: description_original || description_en || "",
-        description_en: description_en || description_original || ""
+        description: sanitizeBookDescriptionText(description) || "",
+        description_ru: sanitizeBookDescriptionText(description_ru) || "",
+        description_original: sanitizeBookDescriptionText(description_original || description_en) || "",
+        description_en: sanitizeBookDescriptionText(description_en || description_original) || ""
       };
       state.bookDescriptionCache.set(cacheKey, payload);
       return { ...payload };
@@ -3215,6 +3297,9 @@ const normalized = candidates
 
     function buildLocalShelfItem({
       title,
+      title_ru = "",
+      title_en = "",
+      title_original = "",
       category,
       status = "Planned",
       cover = "",
@@ -3228,9 +3313,13 @@ const normalized = candidates
       description_en = "",
       description_original = ""
     }){
+      const titleFields = deriveBookTitleFields(title || "", title_ru || "", title_en || "", title_original || title || "");
       return {
         id: -Date.now() - Math.floor(Math.random() * 1000),
-        title: title || "",
+        title: titleFields.title,
+        title_ru: titleFields.title_ru,
+        title_en: titleFields.title_en,
+        title_original: titleFields.title_original,
         category: category || "",
         status: status || "Planned",
         cover: cover || "",
@@ -3241,7 +3330,7 @@ const normalized = candidates
         creator: creator || "",
         isbn: isbn || "",
         work_key: work_key || "",
-        canonical_key: canonical_key || work_key || (title || "").trim().toLowerCase(),
+        canonical_key: canonical_key || work_key || (titleFields.title || "").trim().toLowerCase(),
         folder: folder || ""
       };
     }
@@ -3500,18 +3589,19 @@ const normalized = candidates
 
         seen.add(dedupeKey);
 
+        const titleFields = deriveBookTitleFields(item.title || "", item.title_ru || "", item.title_en || "", item.title_original || item.original_title || item.title || "");
         state.demoData[category].push({
           id: item.id,
-          title: item.title,
+          title: titleFields.title,
           status: item.status || "Planned",
           cover: item.cover_url || "",
           description: item.description || "",
           description_ru: item.description_ru || "",
           description_original: item.description_en || "",
           description_en: item.description_en || "",
-          title_ru: "",
-          title_en: "",
-          title_original: "",
+          title_ru: titleFields.title_ru,
+          title_en: titleFields.title_en,
+          title_original: titleFields.title_original,
           creator: item.creator || "",
           work_key: item.work_key || "",
           canonical_key: item.canonical_key || "",
@@ -3687,6 +3777,9 @@ const normalized = candidates
 
       insertLocalShelfItem(targetCategory, buildLocalShelfItem({
         title: item.title,
+        title_ru: item.title_ru || "",
+        title_en: item.title_en || "",
+        title_original: item.title_original || "",
         category: targetCategory,
         status: "Planned",
         cover: item.cover || "",
@@ -6768,8 +6861,11 @@ function renderShelf(){
   const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
   const isUserCreatedItem = (item) => String(item?.canonical_key || "").includes("-manual-");
   const createCard = (item) => {
+    const isBookItem = state.currentCategory === "Books";
+    const displayTitle = isBookItem ? getBookDisplayTitle(item) : (item.title || "");
+    const secondaryTitle = isBookItem ? getBookSecondaryTitle(item) : "";
     const coverHtml = item.cover
-      ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`
+      ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(displayTitle)}">`
       : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
     const creatorLine = item.creator ? `<div class="media-meta">${escapeHtml(item.creator)}</div>` : "";
     const chips = [
@@ -6792,14 +6888,15 @@ function renderShelf(){
     card.dataset.itemId = item.id;
     card.innerHTML = `
       <div class="media-card-top">
-        <button class="media-cover-button" type="button" aria-label="${escapeHtml(item.title || t().buttons.open)}" onclick="event.stopPropagation(); openCardById(${item.id})">
+        <button class="media-cover-button" type="button" aria-label="${escapeHtml(displayTitle || t().buttons.open)}" onclick="event.stopPropagation(); openCardById(${item.id})">
           <div class="media-cover">${coverHtml}</div>
         </button>
         ${menuHtml}
       </div>
       <div class="media-info">
         <div class="media-meta-chips">${chips}</div>
-        <h3 class="media-title">${escapeHtml(item.title)}</h3>
+        <h3 class="media-title">${escapeHtml(displayTitle)}</h3>
+        ${secondaryTitle ? `<div class="media-subtitle">${escapeHtml(secondaryTitle)}</div>` : ""}
         ${creatorLine}
       </div>`;
     return card;
