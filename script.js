@@ -12,7 +12,7 @@ import {
   getCategoryLabel,
   getStatusLabel
 } from "./js/labels.js";
-import { normalizeSearchQuery, hasCyrillic, hasLatin } from "./js/search.js";
+import { normalizeSearchQuery, hasCyrillic, hasLatin, itemMatchesQuery, searchMediaWithFallback } from "./js/search.js";
 import {
   normalizeAuthorName,
   normalizeTitleForMatch,
@@ -36,16 +36,6 @@ import {
 import { state } from "./js/state.js";
 
     const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
-
-    function getLanguageLabel(lang = state.currentLanguage){
-      return String(lang || "ru").toUpperCase();
-    }
-
-    function getThemeModeLabel(mode = state.currentThemeMode){
-      if(mode === "light") return t().topbar.themeLight;
-      if(mode === "dark") return t().topbar.themeDark;
-      return t().topbar.themeSystem;
-    }
 
     function resolveThemeMode(mode = state.currentThemeMode){
       if(mode === "system"){
@@ -113,24 +103,9 @@ import { state } from "./js/state.js";
     }
 
     function updatePreferenceControls(){
-      const preferencesBtn = document.getElementById("preferences-btn");
-      const preferencesLabel = document.getElementById("preferences-btn-label");
-      const preferencesTitle = document.getElementById("preferences-title");
       const languageTitle = document.getElementById("preferences-language-title");
       const themeTitle = document.getElementById("preferences-theme-title");
       const profileBtn = document.getElementById("profile-btn");
-
-      if(preferencesLabel){
-        preferencesLabel.textContent = getLanguageLabel();
-      }
-
-      if(preferencesBtn){
-        const titleText = `${t().topbar.interface}: ${getLanguageLabel()} · ${getThemeModeLabel()}`;
-        preferencesBtn.title = titleText;
-        preferencesBtn.setAttribute("aria-label", titleText);
-      }
-
-      if(preferencesTitle) preferencesTitle.textContent = t().topbar.interface;
       if(languageTitle) languageTitle.textContent = t().topbar.language;
       if(themeTitle) themeTitle.textContent = t().topbar.theme;
 
@@ -155,16 +130,6 @@ import { state } from "./js/state.js";
         profileBtn.title = t().topbar.profile;
         profileBtn.setAttribute("aria-label", t().topbar.profile);
       }
-    }
-
-    function togglePreferencesPanel(force){
-      const panel = document.getElementById("preferences-panel");
-      const button = document.getElementById("preferences-btn");
-      if(!panel || !button) return;
-
-      const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("hidden");
-      panel.classList.toggle("hidden", !shouldOpen);
-      button.setAttribute("aria-expanded", String(shouldOpen));
     }
 
     function getProfileInitials(displayName = "", username = ""){
@@ -1268,11 +1233,29 @@ function sanitizeBookDescriptionText(text){
   return clean;
 }
 
-function splitDescriptionFields(description){
+async function normalizeDescriptionFields(description, { translateMissing = false } = {}){
+      const clean = String(description || "");
+      const isRu = looksLikeRussian(clean);
+      const isEn = looksLikeEnglish(clean);
+
+      let description_ru = isRu ? clean : "";
+      let description_en = isEn ? clean : "";
+      let description_original = isRu ? "" : clean;
+
+      if(translateMissing && clean){
+        if(isRu && !description_en){
+          description_en = await translateTextToEnglish(clean);
+          description_original = description_original || description_en || "";
+        } else if(isEn && !description_ru){
+          description_ru = await translateTextToRussian(clean);
+        }
+      }
+
       return {
-        description_ru: looksLikeRussian(description) ? description : "",
-        description_en: looksLikeEnglish(description) ? description : "",
-        description_original: !looksLikeRussian(description) ? description : ""
+        description: clean,
+        description_ru: description_ru || "",
+        description_original: description_original || description_en || "",
+        description_en: description_en || description_original || ""
       };
     }
 
@@ -2377,26 +2360,6 @@ const normalized = candidates
       };
     }
 
-    function itemMatchesQuery(item, queryMeta){
-      if(!queryMeta?.comparison && !queryMeta?.isbn) return false;
-      if(queryMeta?.isbn){
-        const itemIsbn = detectISBN(item.isbn || item.work_key || "");
-        if(itemIsbn && itemIsbn === queryMeta.isbn) return true;
-      }
-      const haystack = normalizeComparisonText([
-        item.title,
-        item.title_ru,
-        item.title_en,
-        item.title_original,
-        item.original_title,
-        item.creator,
-        item.description_ru,
-        item.description_original,
-        item.description_en
-      ].filter(Boolean).join(" "));
-      return haystack.includes(queryMeta.comparison || "");
-    }
-
     async function searchLocalSupabaseCached(category, queryMeta, limit = 10){
       const localItems = (state.demoData[category] || []).filter((item) => itemMatchesQuery(item, queryMeta));
       const user = await getCurrentUser();
@@ -2839,27 +2802,6 @@ const normalized = candidates
       return { ...payload };
     }
 
-    async function translateDescriptionFields(description){
-      let description_ru = "";
-      let description_en = "";
-      let description_original = "";
-      if(looksLikeRussian(description)){
-        description_ru = description;
-        description_en = await translateTextToEnglish(description);
-        description_original = description_en || "";
-      } else if(looksLikeEnglish(description)){
-        description_en = description;
-        description_original = description;
-        description_ru = await translateTextToRussian(description);
-      }
-      return {
-        description: description || "",
-        description_ru: description_ru || "",
-        description_original: description_original || description_en || "",
-        description_en: description_en || description_original || ""
-      };
-    }
-
     async function searchBooksApi(query, limit = 10){
       const queryMeta = normalizeSearchQuery(query);
       if(!queryMeta.text && !queryMeta.isbn){
@@ -3077,16 +3019,11 @@ const normalized = candidates
       }
     }
 
-    async function searchAnimeApi(query, limit = 10){
-      const jikan = await searchJikanApi(query, "anime", limit);
-      if(jikan.length > 0) return jikan;
-      return await searchAniListApi(query, "ANIME", limit);
-    }
-
-    async function searchMangaApi(query, limit = 10){
-      const jikan = await searchJikanApi(query, "manga", limit);
-      if(jikan.length > 0) return jikan;
-      return await searchAniListApi(query, "MANGA", limit);
+    async function searchAnimeMangaApi(query, kind, limit = 10){
+      return await searchMediaWithFallback(query, kind, limit, {
+        searchJikanApi,
+        searchAniListApi
+      });
     }
 
     async function searchByCategory(category, query, limit = 10){
@@ -3136,8 +3073,8 @@ const normalized = candidates
           let results = [];
           if(category === "Movies") results = await searchTMDbApi(q, "movie", limit);
           if(category === "Series") results = await searchTMDbApi(q, "tv", limit);
-          if(category === "Anime") results = await searchAnimeApi(q, limit);
-          if(category === "Manga") results = await searchMangaApi(q, limit);
+          if(category === "Anime") results = await searchAnimeMangaApi(q, "anime", limit);
+          if(category === "Manga") results = await searchAnimeMangaApi(q, "manga", limit);
 
           combined = dedupeSearchResults([...combined, ...results]);
           if(combined.length >= limit) break;
@@ -3223,7 +3160,7 @@ const normalized = candidates
         workKey ||
         (titleFields.title || "").trim().toLowerCase();
 
-      const autoLang = splitDescriptionFields(description);
+      const autoLang = await normalizeDescriptionFields(description);
       const originalDescription = description_original || description_en || autoLang.description_original || "";
 
       const insertData = {
@@ -3345,11 +3282,6 @@ const normalized = candidates
       } catch (error) {
         console.error("Category sync error:", error);
       }
-    }
-
-       async function openFolderModalByCurrentItem(){
-      if(!state.currentOpenItemId) return;
-      await openFolderModalById(state.currentOpenItemId);
     }
 
     async function saveItemFolderFromModal(){
@@ -3716,7 +3648,7 @@ const normalized = candidates
           finalDescriptionEn = finalDescriptionEn || built.description_en || built.description_original || "";
         }
       } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
-        const translated = await translateDescriptionFields(finalDescription);
+        const translated = await normalizeDescriptionFields(finalDescription, { translateMissing: true });
         finalDescription = translated.description || finalDescription;
         finalDescriptionRu = finalDescriptionRu || translated.description_ru || "";
         finalDescriptionOriginal = finalDescriptionOriginal || translated.description_original || translated.description_en || "";
@@ -3790,7 +3722,7 @@ const normalized = candidates
         return;
       }
 
-      const translated = await translateDescriptionFields(description);
+      const translated = await normalizeDescriptionFields(description, { translateMissing: true });
 
       const manualTitleFields = deriveBookTitleFields(title, looksLikeRussian(title) ? title : "", looksLikeEnglish(title) ? title : "", title);
 
@@ -6981,7 +6913,6 @@ Object.assign(window, {
   setStatusFilter,
   backToCategory,
   toggleDetailsMenu,
-  openFolderModalByCurrentItem,
   changeStatusFromDetails,
   deleteCurrentItem,
   openRelationsScreen,
