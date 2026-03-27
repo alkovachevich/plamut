@@ -1,4 +1,4 @@
-  import {
+import {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   GOOGLE_BOOKS_API_KEY,
@@ -1134,29 +1134,55 @@ import { state } from "./js/state.js";
       return (latin.length / letters.length) >= 0.6;
     }
 
-function getBookDisplayTitle(item, queryMeta = {}){
+function getBookUiLanguage(){
+  const appLanguage = normalizeLanguageCode(state.currentLanguage || "");
+  const systemLanguage = normalizeLanguageCode(getSystemBrowserLanguage() || "");
+  return appLanguage || systemLanguage || "ru";
+}
+
+function getBookDisplayTitle(item){
   if(!item) return "";
 
   const title = String(item.title || "").trim();
   const titleRu = String(item.title_ru || "").trim();
   const titleEn = String(item.title_en || "").trim();
   const titleOriginal = String(item.title_original || "").trim();
+  const interfaceLanguage = getBookUiLanguage();
 
-  if(queryMeta.hasCyrillic){
+  if(interfaceLanguage === "ru"){
     if(titleRu) return titleRu;
     if(looksLikeRussian(title)) return title;
     if(looksLikeRussian(titleOriginal)) return titleOriginal;
     return title;
   }
 
-  if(queryMeta.hasLatin){
-    if(titleEn) return titleEn;
-    if(looksLikeEnglish(title)) return title;
-    if(looksLikeEnglish(titleOriginal)) return titleOriginal;
-    return title;
+  if(titleEn) return titleEn;
+  if(looksLikeEnglish(title)) return title;
+  if(looksLikeEnglish(titleOriginal)) return titleOriginal;
+  return title;
+}
+
+function getBookSecondaryTitle(item){
+  if(!item) return "";
+  const interfaceLanguage = getBookUiLanguage();
+  const primaryTitle = normalizeSpaces(getBookDisplayTitle(item));
+  if(!primaryTitle) return "";
+
+  const titleOriginal = normalizeSpaces(item.title_original || "");
+  const titleRu = normalizeSpaces(item.title_ru || "");
+  const titleEn = normalizeSpaces(item.title_en || "");
+
+  const candidates = interfaceLanguage === "ru"
+    ? [titleOriginal, titleEn]
+    : [titleOriginal, titleRu];
+
+  for(const candidate of candidates){
+    if(!candidate) continue;
+    if(normalizeComparisonText(candidate) === normalizeComparisonText(primaryTitle)) continue;
+    return candidate;
   }
 
-  return titleRu || titleEn || titleOriginal || title;
+  return "";
 }
 
     function splitDescriptionFields(description){
@@ -2180,26 +2206,10 @@ const normalized = candidates
       return grouped;
     }
 
-    function mergeResults(results = [], queryMeta = {}){
-      return mergeBookResults(results, queryMeta);
-    }
-
-    function dedupeBookResults(results = [], queryMeta = {}){
-      return mergeBookResults(results, queryMeta);
-    }
-
-    function dedupeResults(results = [], queryMeta = {}){
-      return dedupeBookResults(results, queryMeta);
-    }
-
     function rankBookResults(results = [], queryMeta = {}){
       return results
         .filter((item) => isBookResultUsable(item))
         .sort((a, b) => buildBookResultScore(b, queryMeta) - buildBookResultScore(a, queryMeta));
-    }
-
-    function rankResults(results = [], queryMeta = {}){
-      return rankBookResults(results, queryMeta);
     }
 
     function createBookResult({
@@ -2578,16 +2588,10 @@ const normalized = candidates
   ];
 
   for(const query of queries){
-    console.log("FANTLAB QUERY:", query);
-
     for(const buildUrl of endpointBuilders){
       const url = buildUrl(query);
-      console.log("FANTLAB URL:", url);
-
       try {
         const data = await fetchJson(url);
-        console.log("FANTLAB RAW RESPONSE:", data);
-
         const collections = [
           Array.isArray(data) ? data : null,
           data?.works,
@@ -2597,22 +2601,16 @@ const normalized = candidates
           data?.result?.works
         ].filter(Array.isArray);
 
-        console.log("FANTLAB COLLECTIONS:", collections);
-
         const flatItems = collections.flat();
-        console.log("FANTLAB FIRST ITEM SHAPE:", flatItems[0]);
-
         const results = flatItems
           .map((item) => mapFantLabWorkToBookResult(item, queryMeta))
           .filter((item) => item && item.title);
-
-        console.log("FANTLAB MAPPED RESULTS:", results);
 
         if(results.length){
           return results.slice(0, limit);
         }
       } catch (error) {
-        console.error("FANTLAB ERROR:", url, error);
+        console.error("FantLab search error:", error);
       }
     }
   }
@@ -2849,9 +2847,9 @@ const normalized = candidates
         async function runStage(searchFn, stageQueries){
           const results = await searchFn(queryMeta, stageLimit, stageQueries);
           if(results?.length){
-            collected = dedupeResults([...collected, ...results], queryMeta);
+            collected = mergeBookResults([...collected, ...results], queryMeta);
           }
-          return rankResults(collected, queryMeta);
+          return rankBookResults(collected, queryMeta);
         }
 
         if(queryMeta.isbn){
@@ -2859,25 +2857,14 @@ const normalized = candidates
           if(collected.length < Math.min(4, limit)){
             await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
           }
-        } else if(queryMeta.hasCyrillic){
-          await runStage(searchFantLab, primaryQueries);
-          if(collected.length < Math.min(5, limit)){
-            await runStage(searchOpenLibrary, fallbackQueries);
-          }
-          if(collected.length < Math.min(4, limit)){
-            await runStage(searchGoogleBooks, fallbackQueries);
-          }
         } else {
           await runStage(searchOpenLibrary, fallbackQueries);
           if(collected.length < Math.min(5, limit)){
             await runStage(searchGoogleBooks, fallbackQueries);
           }
-          if(collected.length === 0){
-            await runStage(searchFantLab, fallbackQueries);
-          }
         }
 
-        let ranked = rankResults(dedupeResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
+        let ranked = rankBookResults(mergeBookResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
         if(isBroadBookQuery(queryMeta) && !queryMeta.isbn){
           const topCount = Math.min(4, ranked.length);
           for(let i = 0; i < topCount; i += 1){
@@ -3595,10 +3582,11 @@ const normalized = candidates
           results.forEach((item, index) => {
             const row = document.createElement("div");
             row.className = "search-item";
-            const queryMeta = normalizeQuery(query);
-            const displayTitle = state.currentCategory === "Books"
-            ? getBookDisplayTitle(item, queryMeta)
-            : (item.title || "");
+            const isBooksCategory = state.currentCategory === "Books";
+            const displayTitle = isBooksCategory
+              ? getBookDisplayTitle(item)
+              : (item.title || "");
+            const secondaryTitle = isBooksCategory ? getBookSecondaryTitle(item) : "";
             row.innerHTML = `
               <div class="search-item-left">
                 <div class="search-thumb">
@@ -3606,6 +3594,7 @@ const normalized = candidates
                 </div>
                 <div class="search-item-text">
                    <div class="search-item-title">${escapeHtml(displayTitle)}</div>
+                   ${secondaryTitle ? `<div class="search-item-subtitle">${escapeHtml(secondaryTitle)}</div>` : ""}
                   <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
                 </div>
               </div>
@@ -6110,15 +6099,36 @@ async function openCardById(id, options = {}){
   hideAllScreens();
   document.getElementById("details-screen").classList.remove("hidden");
 
-  document.getElementById("details-title").textContent = item?.title || "";
-  document.getElementById("details-creator").textContent = item?.creator || "";
+  const detailsTitleEl = document.getElementById("details-title");
+  const detailsCreatorEl = document.getElementById("details-creator");
+  const detailsSubtitleId = "details-book-subtitle";
+  const detailsSubtitleExisting = document.getElementById(detailsSubtitleId);
+
+  const isBookItem = state.currentCategory === "Books";
+  const detailsDisplayTitle = isBookItem ? getBookDisplayTitle(item) : (item?.title || "");
+  const detailsSecondaryTitle = isBookItem ? getBookSecondaryTitle(item) : "";
+
+  if(detailsTitleEl) detailsTitleEl.textContent = detailsDisplayTitle;
+  if(detailsCreatorEl) detailsCreatorEl.textContent = item?.creator || "";
+
+  if(detailsSubtitleExisting){
+    detailsSubtitleExisting.remove();
+  }
+  if(isBookItem && detailsSecondaryTitle && detailsCreatorEl){
+    const subtitleEl = document.createElement("div");
+    subtitleEl.id = detailsSubtitleId;
+    subtitleEl.className = "muted details-subtitle";
+    subtitleEl.textContent = detailsSecondaryTitle;
+    detailsCreatorEl.parentNode?.insertBefore(subtitleEl, detailsCreatorEl);
+  }
+
   document.getElementById("details-category").textContent = translateCategory(state.currentCategory);
   document.getElementById("details-status").textContent = item ? translateStatus(item.status) : t().labels.unknownStatus;
   document.getElementById("details-folder-badge").textContent = item?.folder || t().labels.noFolder;
 
   const coverBox = document.getElementById("details-cover-box");
   if(item && item.cover){
-    coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(item.title)}">`;
+    coverBox.innerHTML = `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(detailsDisplayTitle)}">`;
   } else {
     coverBox.textContent = t().labels.cover;
   }
