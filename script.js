@@ -6,8 +6,12 @@ import {
   supabaseClient
 } from "./js/config.js";
 
-import { translations } from "./js/translations.js";
 import { t } from "./js/i18n.js";
+import {
+  BASE_CATEGORIES,
+  getCategoryLabel,
+  getStatusLabel
+} from "./js/labels.js";
 import {
   escapeHtml,
   normalizeSpaces,
@@ -162,7 +166,7 @@ import { state } from "./js/state.js";
       return initials || "P";
     }
 
-    function normalizeQuery(query){
+    function normalizeSearchQuery(query){
       const text = normalizeSpaces(query);
       return {
         text,
@@ -171,6 +175,10 @@ import { state } from "./js/state.js";
         hasCyrillic: hasCyrillic(text),
         hasLatin: hasLatin(text)
       };
+    }
+
+    function normalizeQuery(query){
+      return normalizeSearchQuery(query);
     }
 
  function getSystemBrowserLanguage(){
@@ -665,11 +673,11 @@ import { state } from "./js/state.js";
     }
 
     function translateStatus(status) {
-      return t().statuses[status] || status;
+      return getStatusLabel(status, state.currentLanguage);
     }
 
     function translateCategory(category) {
-      return t().categoryNames[category] || category;
+      return getCategoryLabel(category, state.currentLanguage);
     }
 
     function getItemFolder(item){
@@ -788,7 +796,7 @@ import { state } from "./js/state.js";
           return false;
         }
 
-        const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+        const categories = BASE_CATEGORIES;
         const hasCategory = categories.includes(routeState.category);
         const screen = routeState.screen || "home";
 
@@ -864,7 +872,7 @@ import { state } from "./js/state.js";
       const container = document.getElementById("public-share-library-meta");
       if(!container) return;
 
-      const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+      const orderedCategories = BASE_CATEGORIES;
       const categoryValues = orderedCategories.filter((category) => (state.demoData[category] || []).length).map((category) => translateCategory(category));
       const folderValues = [];
       const statusValues = [];
@@ -1129,6 +1137,41 @@ function getBookUiLanguage(){
   return appLanguage || systemLanguage || "ru";
 }
 
+function normalizeAuthorName(author = ""){
+  return normalizeComparisonText(String(author || ""))
+    .replace(/\b(dr|mr|mrs|ms|prof)\.?\b/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeTitleForMatch(title = ""){
+  return normalizeComparisonText(String(title || ""))
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(book|книга|том|часть|vol|volume|edition|издание)\b/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function areLikelySameBook(left = {}, right = {}){
+  if(!left || !right) return false;
+  if(left.isbn && right.isbn && detectISBN(left.isbn) === detectISBN(right.isbn)) return true;
+  if(left.work_key && right.work_key && left.work_key === right.work_key) return true;
+  if(left.canonical_key && right.canonical_key && left.canonical_key === right.canonical_key) return true;
+
+  const leftTitle = normalizeTitleForMatch(left.title || left.title_original || "");
+  const rightTitle = normalizeTitleForMatch(right.title || right.title_original || "");
+  if(!leftTitle || !rightTitle || leftTitle !== rightTitle) return false;
+
+  const leftAuthor = normalizeAuthorName(left.creator || "");
+  const rightAuthor = normalizeAuthorName(right.creator || "");
+  if(leftAuthor && rightAuthor) return leftAuthor === rightAuthor;
+
+  const leftYear = Number(left.release_year || left.year || 0);
+  const rightYear = Number(right.release_year || right.year || 0);
+  if(leftYear && rightYear) return Math.abs(leftYear - rightYear) <= 1;
+  return true;
+}
+
 function getBookDisplayTitle(item){
   if(!item) return "";
 
@@ -1328,7 +1371,7 @@ function splitDescriptionFields(description){
     }
 
     function getLoadedLibraryItems(){
-      const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+      const categories = BASE_CATEGORIES;
       return categories.flatMap((category) => (state.demoData[category] || []).map((item) => ({ ...item, category })));
     }
 
@@ -2070,6 +2113,40 @@ const normalized = candidates
       return "https://covers.openlibrary.org/b/id/" + coverId + "-L.jpg";
     }
 
+    function buildBookCanonicalKey(source = "book", rawId = "", title = ""){
+      return buildCanonicalKey("Books", source || "book", rawId || normalizeTitleForMatch(title), title || "Untitled");
+    }
+
+    function normalizeBookAuthorData(book = {}){
+      const authors = Array.isArray(book.author_name) ? book.author_name : Array.isArray(book.authors) ? book.authors : [];
+      return normalizeSpaces(
+        authors
+          .map((author) => normalizeSpaces(typeof author === "string" ? author : author?.name || ""))
+          .filter(Boolean)
+          .join(", ")
+      );
+    }
+
+    function normalizeBookLanguageData(book = {}){
+      const raw = Array.isArray(book.language) ? book.language : [];
+      return raw
+        .map((lang) => normalizeLanguageCode(lang))
+        .filter(Boolean);
+    }
+
+    function extractBestBookDescription(book = {}, preferredLang = state.currentLanguage){
+      const description = sanitizeBookDescriptionText(book.description || "");
+      const lang = normalizeLanguageCode(preferredLang || "");
+      if(!description) return { description_ru: "", description_en: "", description_original: "" };
+      if(lang === "ru" || looksLikeRussian(description)){
+        return { description_ru: description, description_en: "", description_original: "" };
+      }
+      if(looksLikeEnglish(description)){
+        return { description_ru: "", description_en: description, description_original: description };
+      }
+      return { description_ru: "", description_en: "", description_original: description };
+    }
+
     function getBookSourcePriority(source, queryMeta = {}){
       const normalizedSource = String(source || "").toLowerCase();
       const isIsbnSearch = Boolean(queryMeta?.isbn);
@@ -2082,12 +2159,8 @@ const normalized = candidates
 
     function buildBookIdentityKey(item = {}){
       if(item.isbn) return `isbn:${item.isbn}`;
-      const titleKey = normalizeComparisonText(item.title || "")
-        .replace(/\b(book|книга|том|часть|vol|volume)\s*[\divxlc]+\b/giu, " ")
-        .replace(/\([^)]*\)/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      const authorKey = normalizeComparisonText(item.creator || "");
+      const titleKey = normalizeTitleForMatch(item.title || item.title_original || "");
+      const authorKey = normalizeAuthorName(item.creator || "");
       const workKey = normalizeComparisonText(String(item.work_key || "").replace(/^.*:/, ""));
       if(workKey) return `work:${workKey}`;
       return `meta:${titleKey}::${authorKey}`;
@@ -2152,19 +2225,7 @@ const normalized = candidates
     }
 
     function shouldMergeBookCandidates(left = {}, right = {}){
-      if(!left || !right) return false;
-      if(left.isbn && right.isbn && left.isbn === right.isbn) return true;
-      if(left.work_key && right.work_key && left.work_key === right.work_key) return true;
-      if(left.canonical_key && right.canonical_key && left.canonical_key === right.canonical_key) return true;
-
-      const leftTitle = normalizeComparisonText(left.title || "");
-      const rightTitle = normalizeComparisonText(right.title || "");
-      if(!leftTitle || !rightTitle || leftTitle !== rightTitle) return false;
-
-      const leftCreator = normalizeComparisonText(left.creator || "");
-      const rightCreator = normalizeComparisonText(right.creator || "");
-      if(leftCreator && rightCreator) return leftCreator === rightCreator;
-      return true;
+      return areLikelySameBook(left, right);
     }
 
     function mergeBookResultPair(left = {}, right = {}, queryMeta = {}){
@@ -2188,7 +2249,7 @@ const normalized = candidates
       };
 
       merged.description = merged.description_ru || merged.description_original || merged.description_en || primary.description || secondary?.description || "";
-      merged.canonical_key = merged.canonical_key || buildCanonicalKey("Books", merged.source || "merged", merged.isbn || merged.work_key || buildBookIdentityKey(merged), merged.title);
+      merged.canonical_key = merged.canonical_key || buildBookCanonicalKey(merged.source || "merged", merged.isbn || merged.work_key || buildBookIdentityKey(merged), merged.title);
       return merged;
     }
 
@@ -2254,7 +2315,7 @@ const normalized = candidates
       work_key: work_key || "",
       source: source || "",
       source_priority: getBookSourcePriority(source, queryMeta),
-       canonical_key: canonical_key || buildCanonicalKey("Books", source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
+       canonical_key: canonical_key || buildBookCanonicalKey(source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
       };
     }
 
@@ -2287,46 +2348,32 @@ const normalized = candidates
       });
     }
 
-    function mapOpenLibraryDocToBookResult(book, queryMeta = {}){
+    function normalizeOpenLibraryBook(book, queryMeta = {}){
       const isbn = detectISBN((Array.isArray(book.isbn) ? book.isbn[0] : book.isbn) || "");
       const titleFields = deriveBookTitleFields(book.title || "", "", "", book.title || "");
+      const languages = normalizeBookLanguageData(book);
+      const preferredLang = languages.includes("ru") ? "ru" : state.currentLanguage;
+      const descriptions = extractBestBookDescription(book, preferredLang);
+      const workKey = String(book.key || "").startsWith("/works/")
+        ? String(book.key)
+        : book?.edition_key?.[0]
+          ? `/books/${book.edition_key[0]}`
+          : "";
       return createBookResult({
         title: titleFields.title,
         title_ru: titleFields.title_ru,
         title_en: titleFields.title_en,
         title_original: titleFields.title_original,
-        creator: Array.isArray(book.author_name) ? book.author_name.join(", ") : "",
+        creator: normalizeBookAuthorData(book),
         cover: book.cover_i ? getOpenLibraryCoverUrl(book.cover_i) : "",
         isbn,
-        work_key: book.key || "",
+        description_ru: descriptions.description_ru,
+        description_original: descriptions.description_original,
+        description_en: descriptions.description_en,
+        work_key: workKey,
+        canonical_key: buildBookCanonicalKey("openlibrary", workKey || isbn || `${normalizeTitleForMatch(titleFields.title)}:${normalizeAuthorName(normalizeBookAuthorData(book))}`, titleFields.title),
         source: "openlibrary",
         queryMeta
-      });
-    }
-
-    function mapFantLabWorkToBookResult(item, queryMeta = {}){
-      const title = item?.title || item?.name || item?.work_name || item?.work_title || "";
-      const titleFields = deriveBookTitleFields(title, looksLikeRussian(title) ? title : "", looksLikeEnglish(title) ? title : "", title);
-      const creator = item?.author_name || item?.authors?.map?.((author) => author?.name).filter(Boolean).join(", ") || "";
-      const description = item?.description || item?.annotation || item?.work_description || "";
-      const cover = item?.cover || item?.cover_url || item?.image || "";
-      const workId = item?.work_id || item?.id || item?.workid || "";
-      const isbn = detectISBN(item?.isbn || item?.isbn13 || item?.edition_isbn || "");
-      return createBookResult({
-       title: titleFields.title,
-       title_ru: titleFields.title_ru,
-       title_en: titleFields.title_en,
-       title_original: titleFields.title_original,
-       creator,
-       cover,
-       isbn,
-       description,
-       description_ru: looksLikeRussian(description) ? description : "",
-       description_original: looksLikeRussian(description) ? "" : description,
-       description_en: looksLikeEnglish(description) ? description : "",
-       work_key: workId ? `fantlab:${workId}` : "",
-       source: "fantlab",
-       queryMeta
       });
     }
 
@@ -2640,10 +2687,6 @@ const normalized = candidates
       return [];
     }
 
-    async function searchFantLab(queryMeta, limit = 10, queriesOverride = null){
-      return await searchFantLabProxy(queryMeta, limit, queriesOverride);
-    }
-
     async function searchGoogleBooks(queryMeta, limit = 10, queriesOverride = null){
       try {
         const queries = queryMeta.isbn
@@ -2668,7 +2711,7 @@ const normalized = candidates
       }
     }
 
-    async function searchOpenLibrary(queryMeta, limit = 10, queriesOverride = null){
+    async function searchOpenLibraryBooks(queryMeta, limit = 10, queriesOverride = null){
       try {
         const queries = queryMeta.isbn
           ? [queryMeta.isbn]
@@ -2680,9 +2723,9 @@ const normalized = candidates
             : "https://openlibrary.org/search.json?q=" + encodeURIComponent(query) + "&limit=" + limit;
           const data = await fetchJson(url);
           const docs = Array.isArray(data.docs) ? data.docs : [];
-          results.push(...docs.map((item) => mapOpenLibraryDocToBookResult(item, queryMeta)));
+          results.push(...docs.map((item) => normalizeOpenLibraryBook(item, queryMeta)));
         }
-        return results.slice(0, limit * Math.max(1, queries.length));
+        return dedupeSearchResults(results).slice(0, limit * Math.max(1, queries.length));
       } catch (error) {
         console.error("Open Library search error:", error);
         return [];
@@ -2887,20 +2930,20 @@ const normalized = candidates
         }
 
         if(queryMeta.isbn){
-          await runStage(searchOpenLibrary, [queryMeta.isbn]);
+          await runStage(searchOpenLibraryBooks, [queryMeta.isbn]);
           if(collected.length < Math.min(4, limit)){
             await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
           }
         } else if(queryMeta.hasCyrillic){
           await runStage(searchFantLabProxy, fallbackQueries);
           if(collected.length < Math.min(5, limit)){
-            await runStage(searchOpenLibrary, fallbackQueries);
+            await runStage(searchOpenLibraryBooks, fallbackQueries);
           }
           if(collected.length < Math.min(6, limit)){
             await runStage(searchGoogleBooks, fallbackQueries);
           }
         } else {
-          await runStage(searchOpenLibrary, fallbackQueries);
+          await runStage(searchOpenLibraryBooks, fallbackQueries);
           if(collected.length < Math.min(5, limit)){
             await runStage(searchGoogleBooks, fallbackQueries);
           }
@@ -4889,7 +4932,7 @@ function applyPublicLibraryItems(data = []){
 }
 
 function collectPublicPreviewItems(limit = 8){
-  const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  const orderedCategories = BASE_CATEGORIES;
   const items = [];
   orderedCategories.forEach((category) => {
     (state.demoData[category] || []).forEach((item) => {
@@ -4900,7 +4943,7 @@ function collectPublicPreviewItems(limit = 8){
 }
 
 function getDefaultPublicCategory(){
-  const orderedCategories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  const orderedCategories = BASE_CATEGORIES;
   return orderedCategories.find((category) => (state.demoData[category] || []).length > 0) || "Books";
 }
 
@@ -6057,7 +6100,7 @@ async function ensureLibraryDataLoaded(){
 
   libraryDataLoadingPromise = (async () => {
     let hasAnyLoadAttempt = false;
-    const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+    const categories = BASE_CATEGORIES;
     const loadTasks = categories.map(async (category) => {
       if(libraryLoadedCategories.has(category)){
         return;
@@ -6097,7 +6140,7 @@ async function renderLibraryCategories(){
   const grid = document.getElementById("library-categories-grid");
   if(!grid) return;
   const query = normalizeComparisonText(document.getElementById("library-search-input")?.value || "");
-  const categories = ["Books", "Movies", "Series", "Anime", "Manga", "Blacklist"];
+  const categories = BASE_CATEGORIES;
   grid.innerHTML = "";
 
   categories.forEach((category) => {
