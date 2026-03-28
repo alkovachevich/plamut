@@ -1069,45 +1069,15 @@ import { state } from "./state.js";
         const translatedChunks = [];
         for(const chunk of chunks){
           if(!chunk) continue;
-          let translated = "";
+          const url =
+            "https://api.mymemory.translated.net/get?q=" +
+            encodeURIComponent(chunk) +
+            "&langpair=" +
+            encodeURIComponent(fromLang + "|" + toLang);
 
-          try {
-            const primaryUrl =
-              "https://api.mymemory.translated.net/get?q=" +
-              encodeURIComponent(chunk) +
-              "&langpair=" +
-              encodeURIComponent(fromLang + "|" + toLang);
-
-            const primaryData = await fetchJson(primaryUrl);
-            translated = normalizeSpaces(primaryData?.responseData?.translatedText || "");
-          } catch (_primaryError) {
-            translated = "";
-          }
-
+          const data = await fetchJson(url);
+          const translated = normalizeSpaces(data?.responseData?.translatedText || "");
           if(!translated || isApiErrorLikeText(translated)){
-            try {
-              const fallbackUrl =
-                "https://translate.googleapis.com/translate_a/single?client=gtx" +
-                "&sl=" + encodeURIComponent(fromLang || "auto") +
-                "&tl=" + encodeURIComponent(toLang || "ru") +
-                "&dt=t&q=" + encodeURIComponent(chunk);
-
-              const fallbackData = await fetchJson(fallbackUrl);
-              const segments = Array.isArray(fallbackData?.[0]) ? fallbackData[0] : [];
-              translated = normalizeSpaces(segments.map((entry) => Array.isArray(entry) ? (entry[0] || "") : "").join(" "));
-            } catch (_fallbackError) {
-              translated = "";
-            }
-          }
-
-          if(!translated || isApiErrorLikeText(translated)){
-            translated = "";
-          }
-
-          if(!translated){
-            if(toLang === "ru" && hasCyrillic(chunk)){
-              translatedChunks.push(chunk);
-            }
             continue;
           }
           translatedChunks.push(translated);
@@ -3728,9 +3698,6 @@ const normalized = candidates
           if(state.currentCategory === "Books"){
             const queryMeta = normalizeSearchQuery(query);
             results = dedupeSearchResults(await enrichBookTitlesForLocale(results, queryMeta));
-            if(queryMeta.hasCyrillic && getBookUiLanguage() === "ru"){
-              results = results.filter((item) => hasCyrillic(getItemDisplayTitle(item, "Books")));
-            }
           }
           results = results.filter((item) => !item?.already_added);
           if(searchToken !== state.activeCategorySearchToken) return;
