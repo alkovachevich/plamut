@@ -3699,6 +3699,7 @@ const normalized = candidates
             const queryMeta = normalizeSearchQuery(query);
             results = dedupeSearchResults(await enrichBookTitlesForLocale(results, queryMeta));
           }
+          results = results.filter((item) => !item?.already_added);
           if(searchToken !== state.activeCategorySearchToken) return;
           state.currentSearchResults = results;
 
@@ -3730,7 +3731,7 @@ const normalized = candidates
                   <div class="search-item-meta">${escapeHtml(item.creator || "")}</div>
                 </div>
               </div>
-              <button class="button" ${item.already_added ? "disabled" : ""} onclick="addCategorySearchResult(${index})">${escapeHtml(item.already_added ? (state.currentLanguage === "ru" ? "Уже добавлено" : "Added") : t().buttons.add)}</button>
+              <button class="button" onclick="addCategorySearchResult(${index})">${escapeHtml(t().buttons.add)}</button>
             `;
             container.appendChild(row);
           });
@@ -4076,6 +4077,28 @@ const normalized = candidates
       if(!item) return item;
 
       let changed = false;
+
+      const sanitizedDescription = sanitizeBookDescriptionText(item.description || "");
+      const sanitizedDescriptionRu = sanitizeBookDescriptionText(item.description_ru || "");
+      const sanitizedDescriptionEn = sanitizeBookDescriptionText(item.description_en || "");
+      const sanitizedDescriptionOriginal = sanitizeBookDescriptionText(item.description_original || "");
+
+      if(sanitizedDescription !== (item.description || "")){
+        item.description = sanitizedDescription;
+        changed = true;
+      }
+      if(sanitizedDescriptionRu !== (item.description_ru || "")){
+        item.description_ru = sanitizedDescriptionRu;
+        changed = true;
+      }
+      if(sanitizedDescriptionEn !== (item.description_en || "")){
+        item.description_en = sanitizedDescriptionEn;
+        changed = true;
+      }
+      if(sanitizedDescriptionOriginal !== (item.description_original || "")){
+        item.description_original = sanitizedDescriptionOriginal;
+        changed = true;
+      }
 
       if(state.currentCategory === "Books"){
         if(!item.description_original && item.description_en){
