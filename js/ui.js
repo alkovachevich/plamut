@@ -2318,14 +2318,25 @@ const normalized = candidates
         return items;
       }
 
-      return await Promise.all(items.map(async (item) => {
-        if(!item) return item;
-        if(normalizeSpaces(item.title_ru || "")) return item;
+      const localizedItems = [];
+      for(const item of items){
+        if(!item){
+          localizedItems.push(item);
+          continue;
+        }
+        if(normalizeSpaces(item.title_ru || "")){
+          localizedItems.push(item);
+          continue;
+        }
 
         const fallbackTitle = normalizeSpaces(item.title_original || item.title_en || item.title || "");
-        if(!fallbackTitle) return item;
+        if(!fallbackTitle){
+          localizedItems.push(item);
+          continue;
+        }
         if(looksLikeRussian(fallbackTitle)){
-          return { ...item, title_ru: fallbackTitle };
+          localizedItems.push({ ...item, title_ru: fallbackTitle });
+          continue;
         }
 
         const cacheKey = `ru:${normalizeComparisonText(fallbackTitle)}`;
@@ -2338,15 +2349,18 @@ const normalized = candidates
         }
 
         if(!translatedTitle || (!hasCyrillic(translatedTitle) && !looksLikeRussian(translatedTitle))){
-          return item;
+          localizedItems.push(item);
+          continue;
         }
 
-        return {
+        localizedItems.push({
           ...item,
           title_ru: translatedTitle,
           title_original: normalizeSpaces(item.title_original || fallbackTitle)
-        };
-      }));
+        });
+      }
+
+      return localizedItems;
     }
 
     function mapGoogleBooksVolumeToBookResult(book, queryMeta = {}){
@@ -3755,6 +3769,19 @@ const normalized = candidates
           finalDescriptionOriginal = finalDescriptionOriginal || built.description_original || built.description_en || "";
           finalDescriptionEn = finalDescriptionEn || built.description_en || built.description_original || "";
         }
+        if(finalDescription && !finalDescriptionRu){
+          const translatedRu = await translateTextToRussian(finalDescriptionOriginal || finalDescriptionEn || finalDescription);
+          if(translatedRu){
+            finalDescriptionRu = translatedRu;
+          }
+        }
+        if(finalDescriptionRu && !finalDescriptionEn){
+          const translatedEn = await translateTextToEnglish(finalDescriptionOriginal || finalDescription || finalDescriptionRu);
+          if(translatedEn){
+            finalDescriptionEn = translatedEn;
+            finalDescriptionOriginal = finalDescriptionOriginal || translatedEn;
+          }
+        }
       } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
         const translated = await normalizeDescriptionFields(finalDescription, { translateMissing: true });
         finalDescription = translated.description || finalDescription;
@@ -4040,6 +4067,23 @@ const normalized = candidates
           }
           if(descriptions.description_en && descriptions.description_en !== item.description_en){
             item.description_en = descriptions.description_en;
+            changed = true;
+          }
+        }
+        if(!item.description_ru && (item.description_original || item.description_en || item.description)){
+          const translatedRu = await translateTextToRussian(item.description_original || item.description_en || item.description || "");
+          if(translatedRu && translatedRu !== item.description_ru){
+            item.description_ru = translatedRu;
+            changed = true;
+          }
+        }
+        if(!item.description_en && (item.description_original || item.description || item.description_ru)){
+          const translatedEn = await translateTextToEnglish(item.description_original || item.description || item.description_ru || "");
+          if(translatedEn && translatedEn !== item.description_en){
+            item.description_en = translatedEn;
+            if(!item.description_original){
+              item.description_original = translatedEn;
+            }
             changed = true;
           }
         }
