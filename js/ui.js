@@ -703,6 +703,7 @@ import { state } from "./state.js";
     const WIKIDATA_BOOK_RESOLVE_TTL_MS = 30 * 60 * 1000;
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
+    const bookTitleTranslationCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -2311,6 +2312,43 @@ const normalized = candidates
       };
     }
 
+    async function enrichBookTitlesForLocale(items = [], queryMeta = {}){
+      const shouldPreferRussianTitles = getBookUiLanguage() === "ru" || Boolean(queryMeta?.hasCyrillic);
+      if(!shouldPreferRussianTitles || !Array.isArray(items) || !items.length){
+        return items;
+      }
+
+      return await Promise.all(items.map(async (item) => {
+        if(!item) return item;
+        if(normalizeSpaces(item.title_ru || "")) return item;
+
+        const fallbackTitle = normalizeSpaces(item.title_original || item.title_en || item.title || "");
+        if(!fallbackTitle) return item;
+        if(looksLikeRussian(fallbackTitle)){
+          return { ...item, title_ru: fallbackTitle };
+        }
+
+        const cacheKey = `ru:${normalizeComparisonText(fallbackTitle)}`;
+        let translatedTitle = bookTitleTranslationCache.get(cacheKey) || "";
+        if(!translatedTitle){
+          translatedTitle = normalizeSpaces(await translateTextToRussian(fallbackTitle));
+          if(translatedTitle){
+            bookTitleTranslationCache.set(cacheKey, translatedTitle);
+          }
+        }
+
+        if(!translatedTitle || !looksLikeRussian(translatedTitle)){
+          return item;
+        }
+
+        return {
+          ...item,
+          title_ru: translatedTitle,
+          title_original: normalizeSpaces(item.title_original || fallbackTitle)
+        };
+      }));
+    }
+
     function mapGoogleBooksVolumeToBookResult(book, queryMeta = {}){
       const info = book?.volumeInfo || {};
       const identifiers = Array.isArray(info.industryIdentifiers) ? info.industryIdentifiers : [];
@@ -2695,7 +2733,8 @@ const normalized = candidates
           const items = Array.isArray(data.items) ? data.items : [];
           results.push(...items.map((item) => mapGoogleBooksVolumeToBookResult(item, queryMeta)));
         }
-        return results.slice(0, limit * Math.max(1, queries.length));
+        const localizedResults = await enrichBookTitlesForLocale(results, queryMeta);
+        return localizedResults.slice(0, limit * Math.max(1, queries.length));
       } catch (error) {
         console.error("Google Books search error:", error);
         return [];
@@ -2716,7 +2755,8 @@ const normalized = candidates
           const docs = Array.isArray(data.docs) ? data.docs : [];
           results.push(...docs.map((item) => normalizeOpenLibraryBook(item, queryMeta)));
         }
-        return dedupeSearchResults(results).slice(0, limit * Math.max(1, queries.length));
+        const localizedResults = await enrichBookTitlesForLocale(results, queryMeta);
+        return dedupeSearchResults(localizedResults).slice(0, limit * Math.max(1, queries.length));
       } catch (error) {
         console.error("Open Library search error:", error);
         return [];
