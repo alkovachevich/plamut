@@ -660,7 +660,13 @@ import { state } from "./state.js";
     }
 
     function translateCategory(category) {
-      return getCategoryLabel(category, state.currentLanguage);
+      const localized = getCategoryLabel(category, state.currentLanguage);
+      const original = getCategoryLabel(category, "en");
+      if(!localized) return original;
+      if(!original) return localized;
+      return normalizeComparisonText(localized) === normalizeComparisonText(original)
+        ? localized
+        : `${localized} / ${original}`;
     }
 
     function getItemFolder(item){
@@ -1154,6 +1160,51 @@ function getBookSecondaryTitle(item){
     return candidate;
   }
 
+  return "";
+}
+
+function getItemDisplayTitle(item, category = state.currentCategory){
+  if(!item) return "";
+  if(category === "Books") return getBookDisplayTitle(item);
+
+  const interfaceLanguage = getBookUiLanguage();
+  const title = normalizeSpaces(item.title || "");
+  const titleRu = normalizeSpaces(item.title_ru || "");
+  const titleEn = normalizeSpaces(item.title_en || "");
+  const titleOriginal = normalizeSpaces(item.title_original || item.original_title || "");
+
+  if(interfaceLanguage === "ru"){
+    if(titleRu) return titleRu;
+    if(looksLikeRussian(title)) return title;
+    if(looksLikeRussian(titleOriginal)) return titleOriginal;
+    return title || titleOriginal;
+  }
+
+  if(titleEn) return titleEn;
+  if(looksLikeEnglish(title)) return title;
+  if(looksLikeEnglish(titleOriginal)) return titleOriginal;
+  return title || titleOriginal;
+}
+
+function getItemSecondaryTitle(item, category = state.currentCategory){
+  if(!item) return "";
+  if(category === "Books") return getBookSecondaryTitle(item);
+
+  const primaryTitle = normalizeComparisonText(getItemDisplayTitle(item, category));
+  const titleOriginal = normalizeSpaces(item.title_original || item.original_title || "");
+  const titleRu = normalizeSpaces(item.title_ru || "");
+  const titleEn = normalizeSpaces(item.title_en || "");
+  const title = normalizeSpaces(item.title || "");
+  const interfaceLanguage = getBookUiLanguage();
+  const candidates = interfaceLanguage === "ru"
+    ? [titleOriginal, titleEn, title]
+    : [titleOriginal, titleRu, title];
+
+  for(const candidate of candidates){
+    if(!candidate) continue;
+    if(normalizeComparisonText(candidate) === primaryTitle) continue;
+    return candidate;
+  }
   return "";
 }
 
@@ -2926,8 +2977,8 @@ const normalized = candidates
             description_ru: looksLikeRussian(overview) ? overview : "",
             description_en: looksLikeEnglish(overview) ? overview : "",
             title_original: mediaType === "tv" ? (item.original_name || "") : (item.original_title || ""),
-            title_en: mediaType === "tv" ? (item.name || "") : (item.title || ""),
-            title_ru: "",
+            title_en: looksLikeEnglish(title) ? title : "",
+            title_ru: looksLikeRussian(title) ? title : "",
             work_key: `tmdb:${mediaType}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "tmdb", `${mediaType}:${externalId}`, title)
           };
@@ -2962,7 +3013,7 @@ const normalized = candidates
             description_ru: looksLikeRussian(synopsis) ? synopsis : "",
             description_en: looksLikeEnglish(synopsis) ? synopsis : "",
             title_original: item.title_japanese || "",
-            title_en: item.title_english || "",
+            title_en: item.title_english || (looksLikeEnglish(title) ? title : ""),
             title_ru: "",
             work_key: `jikan:${kind}:${externalId}`,
             canonical_key: buildCanonicalKey(category, "jikan", `${kind}:${externalId}`, title)
@@ -3027,7 +3078,7 @@ const normalized = candidates
             description_ru: looksLikeRussian(description) ? description : "",
             description_en: looksLikeEnglish(description) ? description : "",
             title_original: item.title?.native || "",
-            title_en: item.title?.english || "",
+            title_en: item.title?.english || (looksLikeEnglish(title) ? title : ""),
             title_ru: "",
             work_key: `anilist:${kind.toLowerCase()}:${item.id}`,
             canonical_key: buildCanonicalKey(category, "anilist", `${kind.toLowerCase()}:${item.id}`, title)
@@ -3578,11 +3629,8 @@ const normalized = candidates
           results.forEach((item, index) => {
             const row = document.createElement("div");
             row.className = "search-item";
-            const isBooksCategory = state.currentCategory === "Books";
-            const displayTitle = isBooksCategory
-              ? getBookDisplayTitle(item)
-              : (item.title || "");
-            const secondaryTitle = isBooksCategory ? getBookSecondaryTitle(item) : "";
+            const displayTitle = getItemDisplayTitle(item, state.currentCategory);
+            const secondaryTitle = getItemSecondaryTitle(item, state.currentCategory);
             row.innerHTML = `
               <div class="search-item-left">
                 <div class="search-thumb">
@@ -6103,8 +6151,8 @@ async function openCardById(id, options = {}){
   const detailsSubtitleExisting = document.getElementById(detailsSubtitleId);
 
   const isBookItem = state.currentCategory === "Books";
-  const detailsDisplayTitle = isBookItem ? getBookDisplayTitle(item) : (item?.title || "");
-  const detailsSecondaryTitle = isBookItem ? getBookSecondaryTitle(item) : "";
+  const detailsDisplayTitle = getItemDisplayTitle(item, state.currentCategory);
+  const detailsSecondaryTitle = getItemSecondaryTitle(item, state.currentCategory);
 
   if(detailsTitleEl) detailsTitleEl.textContent = detailsDisplayTitle;
   if(detailsCreatorEl) detailsCreatorEl.textContent = item?.creator || "";
@@ -6112,7 +6160,7 @@ async function openCardById(id, options = {}){
   if(detailsSubtitleExisting){
     detailsSubtitleExisting.remove();
   }
-  if(isBookItem && detailsSecondaryTitle && detailsCreatorEl){
+  if(detailsSecondaryTitle && detailsCreatorEl){
     const subtitleEl = document.createElement("div");
     subtitleEl.id = detailsSubtitleId;
     subtitleEl.className = "muted details-subtitle";
@@ -6766,9 +6814,8 @@ function renderShelf(){
   const buildChip = (label, type = "") => label ? `<span class="meta-chip ${type}">${escapeHtml(label)}</span>` : "";
   const isUserCreatedItem = (item) => String(item?.canonical_key || "").includes("-manual-");
   const createCard = (item) => {
-    const isBookItem = state.currentCategory === "Books";
-    const displayTitle = isBookItem ? getBookDisplayTitle(item) : (item.title || "");
-    const secondaryTitle = isBookItem ? getBookSecondaryTitle(item) : "";
+    const displayTitle = getItemDisplayTitle(item, state.currentCategory);
+    const secondaryTitle = getItemSecondaryTitle(item, state.currentCategory);
     const coverHtml = item.cover
       ? `<img src="${escapeHtml(item.cover)}" alt="${escapeHtml(displayTitle)}">`
       : `<span class="media-cover-fallback">${escapeHtml(t().labels.cover)}</span>`;
