@@ -2337,7 +2337,7 @@ const normalized = candidates
           }
         }
 
-        if(!translatedTitle || !looksLikeRussian(translatedTitle)){
+        if(!translatedTitle || (!hasCyrillic(translatedTitle) && !looksLikeRussian(translatedTitle))){
           return item;
         }
 
