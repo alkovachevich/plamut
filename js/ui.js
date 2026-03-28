@@ -705,6 +705,7 @@ import { state } from "./state.js";
     const bookSearchResponseCache = new Map();
     const wikidataBookResolveCache = new Map();
     const bookTitleTranslationCache = new Map();
+    const serverTranslationCache = new Map();
 
     function getVisibleScreenName(){
       if(!document.getElementById("details-screen")?.classList.contains("hidden")) return "details";
@@ -1044,11 +1045,71 @@ import { state } from "./state.js";
       return await response.json();
     }
 
+    function getServerTranslationCacheKey(text, fromLang, toLang){
+      return [fromLang || "", toLang || "", normalizeSpaces(text || "")].join("::");
+    }
+
+    function parseServerTranslationPayload(data){
+      if(!data) return "";
+      if(typeof data === "string") return normalizeSpaces(data);
+      const candidates = [
+        data.translation,
+        data.translatedText,
+        data.translated_text,
+        data.text,
+        data?.result?.translation,
+        data?.result?.translatedText,
+        data?.data?.translation,
+        data?.data?.translatedText
+      ];
+      for(const value of candidates){
+        const normalized = normalizeSpaces(value || "");
+        if(normalized) return normalized;
+      }
+      return "";
+    }
+
+    async function translateTextViaServer(text, fromLang, toLang){
+      const normalizedText = normalizeSpaces(text);
+      if(!normalizedText) return "";
+
+      const cacheKey = getServerTranslationCacheKey(normalizedText, fromLang, toLang);
+      if(serverTranslationCache.has(cacheKey)){
+        return serverTranslationCache.get(cacheKey) || "";
+      }
+
+      try {
+        const { data, error } = await supabaseClient.functions.invoke("translate-text", {
+          body: {
+            text: normalizedText,
+            from_lang: fromLang,
+            to_lang: toLang
+          }
+        });
+        if(error){
+          throw error;
+        }
+        const translated = parseServerTranslationPayload(data);
+        if(translated && !isApiErrorLikeText(translated)){
+          serverTranslationCache.set(cacheKey, translated);
+          return translated;
+        }
+      } catch (error) {
+        console.warn("Server translation unavailable, fallback to client provider.", error);
+      }
+      return "";
+    }
+
     async function translateText(text, fromLang, toLang){
       if(!text) return "";
       try {
         const normalizedText = normalizeSpaces(text);
         if(!normalizedText) return "";
+
+        const serverTranslation = await translateTextViaServer(normalizedText, fromLang, toLang);
+        if(serverTranslation){
+          return serverTranslation;
+        }
 
         const maxChunkLength = 420;
         const chunks = [];
@@ -2378,7 +2439,13 @@ const normalized = candidates
           }
         }
 
-        if(!translatedTitle || (!hasCyrillic(translatedTitle) && !looksLikeRussian(translatedTitle))){
+        const translatedComparison = normalizeComparisonText(translatedTitle);
+        const fallbackComparison = normalizeComparisonText(fallbackTitle);
+        const hasMeaningfulTranslation =
+          Boolean(translatedTitle)
+          && translatedComparison
+          && translatedComparison !== fallbackComparison;
+        if(!hasMeaningfulTranslation && (!hasCyrillic(translatedTitle) && !looksLikeRussian(translatedTitle))){
           localizedItems.push(item);
           continue;
         }
