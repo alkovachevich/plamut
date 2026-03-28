@@ -415,6 +415,7 @@ import { state } from "./state.js";
       document.getElementById("public-tab-blacklist").textContent = t().categoryNames.Blacklist;
 
       document.getElementById("back-home-btn").textContent = t().buttons.backHome;
+      document.getElementById("category-add-btn").textContent = t().buttons.addNew;
       document.getElementById("add-new-btn").textContent = t().buttons.addNew;
       document.getElementById("add-folder-btn").textContent = t().buttons.addFolder;
       document.getElementById("back-shelf-btn").textContent = t().buttons.backShelf;
@@ -1046,14 +1047,43 @@ import { state } from "./state.js";
     async function translateText(text, fromLang, toLang){
       if(!text) return "";
       try {
-        const url =
-          "https://api.mymemory.translated.net/get?q=" +
-          encodeURIComponent(text) +
-          "&langpair=" +
-          encodeURIComponent(fromLang + "|" + toLang);
+        const normalizedText = normalizeSpaces(text);
+        if(!normalizedText) return "";
 
-        const data = await fetchJson(url);
-        return (data?.responseData?.translatedText || "").trim();
+        const maxChunkLength = 420;
+        const chunks = [];
+        let cursor = normalizedText;
+
+        while(cursor.length > maxChunkLength){
+          let splitIndex = cursor.lastIndexOf(" ", maxChunkLength);
+          if(splitIndex < 120){
+            splitIndex = maxChunkLength;
+          }
+          chunks.push(cursor.slice(0, splitIndex).trim());
+          cursor = cursor.slice(splitIndex).trim();
+        }
+        if(cursor){
+          chunks.push(cursor);
+        }
+
+        const translatedChunks = [];
+        for(const chunk of chunks){
+          if(!chunk) continue;
+          const url =
+            "https://api.mymemory.translated.net/get?q=" +
+            encodeURIComponent(chunk) +
+            "&langpair=" +
+            encodeURIComponent(fromLang + "|" + toLang);
+
+          const data = await fetchJson(url);
+          const translated = normalizeSpaces(data?.responseData?.translatedText || "");
+          if(!translated || isApiErrorLikeText(translated)){
+            continue;
+          }
+          translatedChunks.push(translated);
+        }
+
+        return normalizeSpaces(translatedChunks.join(" "));
       } catch (error) {
         console.error("Translation error:", error);
         return "";
@@ -3664,7 +3694,11 @@ const normalized = candidates
         container.innerHTML = `<div class="small">${escapeHtml(t().labels.searching)}</div>`;
 
         try {
-          const results = dedupeSearchResults(await searchByCategory(state.currentCategory, query, 10));
+          let results = dedupeSearchResults(await searchByCategory(state.currentCategory, query, 10));
+          if(state.currentCategory === "Books"){
+            const queryMeta = normalizeSearchQuery(query);
+            results = dedupeSearchResults(await enrichBookTitlesForLocale(results, queryMeta));
+          }
           if(searchToken !== state.activeCategorySearchToken) return;
           state.currentSearchResults = results;
 
@@ -3771,15 +3805,17 @@ const normalized = candidates
         }
         if(finalDescription && !finalDescriptionRu){
           const translatedRu = await translateTextToRussian(finalDescriptionOriginal || finalDescriptionEn || finalDescription);
-          if(translatedRu){
-            finalDescriptionRu = translatedRu;
+          const cleanTranslatedRu = sanitizeBookDescriptionText(translatedRu);
+          if(cleanTranslatedRu){
+            finalDescriptionRu = cleanTranslatedRu;
           }
         }
         if(finalDescriptionRu && !finalDescriptionEn){
           const translatedEn = await translateTextToEnglish(finalDescriptionOriginal || finalDescription || finalDescriptionRu);
-          if(translatedEn){
-            finalDescriptionEn = translatedEn;
-            finalDescriptionOriginal = finalDescriptionOriginal || translatedEn;
+          const cleanTranslatedEn = sanitizeBookDescriptionText(translatedEn);
+          if(cleanTranslatedEn){
+            finalDescriptionEn = cleanTranslatedEn;
+            finalDescriptionOriginal = finalDescriptionOriginal || cleanTranslatedEn;
           }
         }
       } else if(finalDescription && (!finalDescriptionRu || !finalDescriptionEn)){
@@ -4072,17 +4108,19 @@ const normalized = candidates
         }
         if(!item.description_ru && (item.description_original || item.description_en || item.description)){
           const translatedRu = await translateTextToRussian(item.description_original || item.description_en || item.description || "");
-          if(translatedRu && translatedRu !== item.description_ru){
-            item.description_ru = translatedRu;
+          const cleanTranslatedRu = sanitizeBookDescriptionText(translatedRu);
+          if(cleanTranslatedRu && cleanTranslatedRu !== item.description_ru){
+            item.description_ru = cleanTranslatedRu;
             changed = true;
           }
         }
         if(!item.description_en && (item.description_original || item.description || item.description_ru)){
           const translatedEn = await translateTextToEnglish(item.description_original || item.description || item.description_ru || "");
-          if(translatedEn && translatedEn !== item.description_en){
-            item.description_en = translatedEn;
+          const cleanTranslatedEn = sanitizeBookDescriptionText(translatedEn);
+          if(cleanTranslatedEn && cleanTranslatedEn !== item.description_en){
+            item.description_en = cleanTranslatedEn;
             if(!item.description_original){
-              item.description_original = translatedEn;
+              item.description_original = cleanTranslatedEn;
             }
             changed = true;
           }
@@ -4973,10 +5011,15 @@ function getDefaultPublicCategory(){
   document.getElementById("category-screen").classList.remove("hidden");
 
   const addBtn = document.getElementById("add-new-btn");
+  const categoryAddBtn = document.getElementById("category-add-btn");
   const addFolderBtn = document.getElementById("add-folder-btn");
   if(addBtn){
     addBtn.classList.add("hidden");
     addBtn.style.display = "none";
+  }
+  if(categoryAddBtn){
+    categoryAddBtn.classList.add("hidden");
+    categoryAddBtn.style.display = "none";
   }
   if(addFolderBtn){
     addFolderBtn.classList.add("hidden");
@@ -5552,10 +5595,15 @@ async function changePassword(){
       document.getElementById("category-screen").classList.remove("hidden");
 
       const addBtn = document.getElementById("add-new-btn");
+      const categoryAddBtn = document.getElementById("category-add-btn");
       const addFolderBtn = document.getElementById("add-folder-btn");
       if(addBtn){
         addBtn.classList.add("hidden");
         addBtn.style.display = "none";
+      }
+      if(categoryAddBtn){
+        categoryAddBtn.classList.add("hidden");
+        categoryAddBtn.style.display = "none";
       }
       if(addFolderBtn){
         addFolderBtn.classList.add("hidden");
@@ -5608,10 +5656,15 @@ async function changePassword(){
       document.getElementById("category-screen").classList.remove("hidden");
 
       const addBtn = document.getElementById("add-new-btn");
+      const categoryAddBtn = document.getElementById("category-add-btn");
       const addFolderBtn = document.getElementById("add-folder-btn");
       if(addBtn){
         addBtn.classList.add("hidden");
         addBtn.style.display = "none";
+      }
+      if(categoryAddBtn){
+        categoryAddBtn.classList.add("hidden");
+        categoryAddBtn.style.display = "none";
       }
       if(addFolderBtn){
         addFolderBtn.classList.add("hidden");
@@ -6201,6 +6254,11 @@ async function openCategory(name, options = {}){
   toggleCategoryFilters(false);
 
   const addFolderBtn = document.getElementById("add-folder-btn");
+  const categoryAddBtn = document.getElementById("category-add-btn");
+  if(categoryAddBtn){
+    categoryAddBtn.classList.toggle("hidden", name === "Blacklist");
+    categoryAddBtn.style.display = name === "Blacklist" ? "none" : "";
+  }
   if(addFolderBtn){
     addFolderBtn.classList.toggle("hidden", name === "Blacklist");
     addFolderBtn.style.display = name === "Blacklist" ? "none" : "";
