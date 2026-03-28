@@ -56,6 +56,7 @@ import { state } from "./state.js";
     function clearSearchCaches(){
   state.categorySearchCache.clear();
   state.categorySearchInFlight.clear();
+  state.localCategorySearchCache.clear();
   bookSearchResponseCache.clear();
     }
 
@@ -2360,30 +2361,49 @@ const normalized = candidates
       };
     }
 
+     async function readLocalCategorySearchCache(category){
+      const CACHE_TTL_MS = 60 * 1000;
+      const now = Date.now();
+      const cached = state.localCategorySearchCache.get(category);
+      if(cached && (now - cached.fetchedAt) < CACHE_TTL_MS && Array.isArray(cached.items)){
+        return cached.items;
+      }
+      if(cached?.promise){
+        return await cached.promise;
+      }
+
+      const fetchPromise = (async () => {
+        const user = await getCurrentUser();
+        if(!user){
+          return [];
+        }
+
+        const { data, error } = await supabaseClient
+          .from("user_media")
+          .select("id, title, title_ru, title_en, title_original, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, category, folder_name")
+          .eq("user_id", user.id)
+          .eq("category", category)
+          .order("id", { ascending: false })
+          .limit(250);
+
+        if(error){
+          console.error("Supabase local search error:", error);
+          return [];
+        }
+
+        return (data || []).map((row) => mapUserMediaRowToSearchResult(row, category));
+      })();
+
+      state.localCategorySearchCache.set(category, { fetchedAt: now, items: [], promise: fetchPromise });
+      const items = await fetchPromise;
+      state.localCategorySearchCache.set(category, { fetchedAt: Date.now(), items, promise: null });
+      return items;
+    }
+
     async function searchLocalSupabaseCached(category, queryMeta, limit = 10){
       const localItems = (state.demoData[category] || []).filter((item) => itemMatchesQuery(item, queryMeta));
-      const user = await getCurrentUser();
-      if(!user){
-        return dedupeSearchResults(localItems).slice(0, limit);
-      }
-
-      const { data, error } = await supabaseClient
-        .from("user_media")
-        .select("id, title, title_ru, title_en, title_original, status, cover_url, description, description_ru, description_en, description_original, creator, work_key, canonical_key, category, folder_name")
-        .eq("user_id", user.id)
-        .eq("category", category)
-        .order("id", { ascending: false })
-        .limit(250);
-
-      if(error){
-        console.error("Supabase local search error:", error);
-        return dedupeSearchResults(localItems).slice(0, limit);
-      }
-
-      const fromDb = (data || [])
-        .map((row) => mapUserMediaRowToSearchResult(row, category))
-        .filter((item) => itemMatchesQuery(item, queryMeta));
-
+      const cachedDbItems = await readLocalCategorySearchCache(category);
+      const fromDb = cachedDbItems.filter((item) => itemMatchesQuery(item, queryMeta));
       return dedupeSearchResults([...localItems, ...fromDb]).slice(0, limit);
     }
 
