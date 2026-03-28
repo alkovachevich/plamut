@@ -1095,7 +1095,39 @@ import { state } from "./state.js";
           return translated;
         }
       } catch (error) {
-        console.warn("Server translation unavailable, fallback to client provider.", error);
+        console.warn("Server translation invoke() unavailable, trying direct function fetch.", error);
+      }
+
+      try {
+        const session = await supabaseClient.auth.getSession();
+        const accessToken = session?.data?.session?.access_token || "";
+        const response = await fetch(
+          String(SUPABASE_URL || "").replace(/\/+$/g, "") + "/functions/v1/translate-text",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: "Bearer " + (accessToken || SUPABASE_ANON_KEY)
+            },
+            body: JSON.stringify({
+              text: normalizedText,
+              from_lang: fromLang,
+              to_lang: toLang
+            })
+          }
+        );
+        if(!response.ok){
+          throw new Error("HTTP " + response.status);
+        }
+        const data = await response.json();
+        const translated = parseServerTranslationPayload(data);
+        if(translated && !isApiErrorLikeText(translated)){
+          serverTranslationCache.set(cacheKey, translated);
+          return translated;
+        }
+      } catch (error) {
+        console.warn("Server translation direct fetch unavailable, fallback to client provider.", error);
       }
       return "";
     }
