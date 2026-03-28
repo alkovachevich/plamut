@@ -27,17 +27,50 @@ function splitIntoChunks(text: string, maxChunkLength = 420): string[] {
 }
 
 async function translateChunk(chunk: string, fromLang: string, toLang: string): Promise<string> {
-  const url =
-    "https://api.mymemory.translated.net/get?q=" +
-    encodeURIComponent(chunk) +
-    "&langpair=" +
-    encodeURIComponent(`${fromLang}|${toLang}`);
-  const response = await fetch(url);
-  if(!response.ok){
-    throw new Error(`MyMemory HTTP ${response.status}`);
+  const providers: Array<() => Promise<string>> = [
+    async () => {
+      const url =
+        "https://api.mymemory.translated.net/get?q=" +
+        encodeURIComponent(chunk) +
+        "&langpair=" +
+        encodeURIComponent(`${fromLang}|${toLang}`);
+      const response = await fetch(url);
+      if(!response.ok){
+        throw new Error(`MyMemory HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      return normalizeSpaces(data?.responseData?.translatedText || "");
+    },
+    async () => {
+      const url =
+        "https://translate.googleapis.com/translate_a/single?client=gtx" +
+        "&sl=" + encodeURIComponent(fromLang) +
+        "&tl=" + encodeURIComponent(toLang) +
+        "&dt=t&q=" + encodeURIComponent(chunk);
+      const response = await fetch(url);
+      if(!response.ok){
+        throw new Error(`Google HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const translated = Array.isArray(data?.[0])
+        ? data[0].map((part: unknown) => Array.isArray(part) ? String(part[0] || "") : "").join(" ")
+        : "";
+      return normalizeSpaces(translated);
+    }
+  ];
+
+  for(const provider of providers){
+    try {
+      const translated = normalizeSpaces(await provider());
+      if(translated){
+        return translated;
+      }
+    } catch (_error) {
+      continue;
+    }
   }
-  const data = await response.json();
-  return normalizeSpaces(data?.responseData?.translatedText || "");
+
+  throw new Error("No translation provider returned a valid response");
 }
 
 serve(async (req) => {
