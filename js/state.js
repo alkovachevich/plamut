@@ -30,6 +30,7 @@
   relationBuildLocks: new Map(),
   categorySearchCache: new Map(),
   categorySearchInFlight: new Map(),
+  localCategorySearchCache: new Map(),
   bookDescriptionCache: new Map(),
   activeCategorySearchToken: 0,
   relatedLibraryItemsCache: { userId: "", items: [], loaded: false, promise: null },
