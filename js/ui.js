@@ -7138,6 +7138,7 @@ export const publicApi = {
   writePublicLinkToNfc,
   regeneratePublicShareToken,
   closeShareItemModal,
+  openAddModal,
   openManualModal,
   closeAddModal,
   closeManualModal,
