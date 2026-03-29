@@ -1,361 +1,268 @@
+const FANTLAB_SEARCH_URL = "https://fantlab.ru/searchmain";
+const FANTLAB_TIMEOUT_MS = 10000;
+const FANTLAB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const FANTLAB_THROTTLE_MS = 1300;
+const FANTLAB_RESULT_LIMIT = 12;
+
+const memoryCache = new Map();
+let lastFantlabRequestAt = 0;
+
 function normalizeSpaces(value){
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-const FANTLAB_TIMEOUT_MS = 9000;
-const FANTLAB_RESULT_LIMIT = 10;
-
-function normalizeComparisonText(value){
-  return normalizeSpaces(value).toLowerCase().replace(/ё/g, "е");
+function normalizeRuText(text){
+  return normalizeSpaces(String(text || "")
+    .toLowerCase()
+    .replace(/[ё]/g, "е")
+    .replace(/[«»“”„‟]/g, '"')
+    .replace(/[’']/g, "'")
+    .replace(/[^\p{L}\p{N}\s"'\-]+/gu, " "));
 }
 
-function hasCyrillic(text){
-  return /[А-Яа-яЁё]/.test(String(text || ""));
+function decodeHtmlEntities(input){
+  return String(input || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code) || 32))
+    .replace(/&#x([\da-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16) || 32));
 }
 
-function hasLatin(text){
-  return /[A-Za-z]/.test(String(text || ""));
+function stripHtml(html){
+  return normalizeSpaces(decodeHtmlEntities(String(html || "").replace(/<[^>]+>/g, " ")));
 }
 
-function looksLikeRussian(text){
-  const sample = String(text || "");
-  if(!sample || /[іїєґІЇЄҐ]/.test(sample)) return false;
-  const letters = sample.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-  if(letters.length < 4) return false;
-  const cyrillic = sample.match(/[А-Яа-яЁё]/g) || [];
-  return (cyrillic.length / letters.length) >= 0.5;
+function pickYear(text){
+  const match = String(text || "").match(/\b(18\d{2}|19\d{2}|20\d{2}|21\d{2})\b/);
+  return match ? Number(match[1]) : null;
 }
 
-function looksLikeEnglish(text){
-  const sample = String(text || "");
-  if(!sample) return false;
-  const letters = sample.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-  if(letters.length < 4) return false;
-  const latin = sample.match(/[A-Za-z]/g) || [];
-  return (latin.length / letters.length) >= 0.5;
+function extractFantlabWorkId(url){
+  const clean = String(url || "");
+  const idMatch = clean.match(/\/(work|edition|autor|cycle)(\d+)\b/i);
+  if(idMatch) return idMatch[2];
+  const queryMatch = clean.match(/[?&](?:work|id)=(\d+)/i);
+  return queryMatch ? queryMatch[1] : "";
 }
 
-function buildCanonicalKey(source, rawId, title){
-  if(rawId) return `Books:${source}:${rawId}`;
-  return `Books:${source}:${normalizeComparisonText(title || "untitled")}`;
-}
-
-function safeJson(value){
+function canonicalFantlabUrl(url){
+  const clean = String(url || "").trim();
+  if(!clean) return "";
   try {
-    return JSON.parse(value);
+    const parsed = new URL(clean, "https://fantlab.ru");
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString().replace(/\/$/, "");
   } catch {
+    return "";
+  }
+}
+
+function isLikelyBookUrl(url){
+  return /\/work\d+\b/i.test(url) || /\/edition\d+\b/i.test(url);
+}
+
+function isExcludedUrl(url){
+  return /\/(forum|blog|news|award|autor\d+\/responses|articles?)\b/i.test(url);
+}
+
+function parseFantlabSearchResults(html){
+  const body = String(html || "");
+  if(!body) return [];
+
+  const anchors = [];
+  const anchorRe = /<a\b([^>]*href\s*=\s*["'][^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while((match = anchorRe.exec(body))){
+    const attr = match[1] || "";
+    const hrefMatch = attr.match(/href\s*=\s*["']([^"']+)["']/i);
+    const href = hrefMatch ? hrefMatch[1] : "";
+    if(!href) continue;
+
+    const absoluteUrl = canonicalFantlabUrl(href.startsWith("http") ? href : `https://fantlab.ru${href.startsWith("/") ? "" : "/"}${href}`);
+    if(!absoluteUrl || !/fantlab\.ru/i.test(absoluteUrl)) continue;
+    if(isExcludedUrl(absoluteUrl)) continue;
+    if(!isLikelyBookUrl(absoluteUrl)) continue;
+
+    const title = stripHtml(match[2]);
+    if(!title || title.length < 2) continue;
+
+    const nearText = body.slice(Math.max(0, match.index - 220), Math.min(body.length, match.index + 520));
+    const metadata = stripHtml(nearText);
+    const authorMatch = metadata.match(/(?:автор|author)\s*[:\-]?\s*([^.;|]+)/i);
+    const cycleMatch = metadata.match(/(?:цикл|серия|cycle|series)\s*[:\-]?\s*([^.;|]+)/i);
+
+    anchors.push({
+      title,
+      fantlab_url: absoluteUrl,
+      fantlab_work_id: extractFantlabWorkId(absoluteUrl),
+      author_name: normalizeSpaces(authorMatch ? authorMatch[1] : ""),
+      release_year: pickYear(metadata),
+      series_name: normalizeSpaces(cycleMatch ? cycleMatch[1] : ""),
+      search_language: "ru",
+      source: "fantlab",
+      category: "Books",
+      short_source_note: "FantLab",
+      relevance_hint: metadata
+    });
+  }
+
+  return anchors;
+}
+
+function buildScore(item, query){
+  const q = normalizeRuText(query);
+  const title = normalizeRuText(item.title || "");
+  const author = normalizeRuText(item.author_name || "");
+  const hint = normalizeRuText(item.relevance_hint || "");
+
+  let score = 0;
+  if(title === q) score += 120;
+  else if(title.startsWith(q)) score += 80;
+  else if(title.includes(q)) score += 48;
+
+  if(q && hint.includes(q)) score += 16;
+  if(author && q && q.includes(author)) score += 32;
+  if(item.fantlab_url && /\/work\d+\b/i.test(item.fantlab_url)) score += 20;
+  if(item.release_year && q.includes(String(item.release_year))) score += 12;
+  if(item.series_name) score += 6;
+
+  return score;
+}
+
+function dedupeFantlabResults(items){
+  const byKey = new Map();
+  for(const item of items){
+    const key = item.fantlab_work_id
+      ? `work:${item.fantlab_work_id}`
+      : (item.fantlab_url || "")
+        || `${normalizeRuText(item.title)}::${normalizeRuText(item.author_name)}`;
+
+    const previous = byKey.get(key);
+    if(!previous || (item.score || 0) > (previous.score || 0)){
+      byKey.set(key, item);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function rankFantlabResults(items, query){
+  return items
+    .map((item) => ({ ...item, score: buildScore(item, query) }))
+    .filter((item) => item.score >= 20)
+    .sort((a, b) => b.score - a.score);
+}
+
+function getCache(queryNormalized){
+  const entry = memoryCache.get(queryNormalized);
+  if(!entry) return null;
+  if(Date.now() > entry.expiresAt){
+    memoryCache.delete(queryNormalized);
     return null;
   }
+  return entry.payload;
 }
 
-function pickCreator(item){
-  const direct = normalizeSpaces(
-    item.author_name ||
-    item.author ||
-    item.autor ||
-    item.writer ||
-    item.creator ||
-    ""
-  );
-  if(direct) return direct;
-
-  const authors = Array.isArray(item.authors)
-    ? item.authors
-    : Array.isArray(item.authorlist)
-      ? item.authorlist
-      : [];
-
-  return normalizeSpaces(
-    authors
-      .map((author) => normalizeSpaces(author?.name || author?.title || author?.fio || ""))
-      .filter(Boolean)
-      .join(", ")
-  );
+function setCache(queryNormalized, payload){
+  memoryCache.set(queryNormalized, {
+    payload,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + FANTLAB_CACHE_TTL_MS
+  });
 }
 
-function pickCover(item){
-  return normalizeSpaces(
-    item.cover ||
-    item.cover_url ||
-    item.image ||
-    item.image_url ||
-    item.poster ||
-    item.pic ||
-    item.img ||
-    ""
-  );
-}
-
-function normalizeFantlabItem(item){
-  if(!item || typeof item !== "object") return null;
-
-  const titleRaw = normalizeSpaces(
-    item.title ||
-    item.name ||
-    item.work_title ||
-    item.work_name ||
-    item.rusname ||
-    item.orgname ||
-    ""
-  );
-
-  if(!titleRaw || titleRaw.length < 2) return null;
-  if(/^[\W_\d-]+$/u.test(titleRaw)) return null;
-
-  const titleRuRaw = normalizeSpaces(item.title_ru || item.rusname || "");
-  const titleEnRaw = normalizeSpaces(item.title_en || item.orgname || "");
-  const titleOriginalRaw = normalizeSpaces(
-    item.title_original ||
-    item.original_title ||
-    item.name_original ||
-    titleRaw
-  );
-
-  const descriptionRaw = normalizeSpaces(
-    item.description ||
-    item.annotation ||
-    item.work_description ||
-    item.anons ||
-    ""
-  );
-
-  const creator = pickCreator(item);
-  const cover = pickCover(item);
-
-  const workId = normalizeSpaces(
-    item.work_id ||
-    item.workid ||
-    item.workId ||
-    item.id ||
-    item.work?.id ||
-    ""
-  );
-
-  const title_ru = titleRuRaw || (looksLikeRussian(titleRaw) ? titleRaw : "");
-  const title_en = titleEnRaw || (looksLikeEnglish(titleRaw) ? titleRaw : "");
-  const title_original = titleOriginalRaw || titleRaw;
-
-  let description_ru = "";
-  let description_en = "";
-  let description_original = "";
-
-  if(descriptionRaw){
-    if(looksLikeRussian(descriptionRaw)){
-      description_ru = descriptionRaw;
-    } else if(looksLikeEnglish(descriptionRaw)){
-      description_en = descriptionRaw;
-      description_original = descriptionRaw;
-    } else if(hasCyrillic(descriptionRaw) && !hasLatin(descriptionRaw)){
-      description_ru = descriptionRaw;
-    } else {
-      description_original = descriptionRaw;
-    }
+async function throttleFantlabRequests(){
+  const now = Date.now();
+  const waitMs = FANTLAB_THROTTLE_MS - (now - lastFantlabRequestAt);
+  if(waitMs > 0){
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
-
-  const workKeyBase = workId || normalizeComparisonText(`${titleRaw}:${creator || ""}`);
-  const work_key = `fantlab:${workKeyBase}`;
-
-  return {
-    title: titleRaw,
-    title_ru,
-    title_en,
-    title_original,
-    creator,
-    cover,
-    description: description_ru || description_original || description_en || descriptionRaw || "",
-    description_ru,
-    description_original: description_original || description_en || "",
-    description_en: description_en || description_original || "",
-    work_key,
-    canonical_key: buildCanonicalKey("fantlab", workId || workKeyBase, titleRaw),
-    source: "fantlab"
-  };
+  lastFantlabRequestAt = Date.now();
 }
 
-function dedupeBooks(items){
-  const seen = new Set();
-  const result = [];
-
-  for(const item of items){
-    if(!item || !item.title) continue;
-    const key = item.work_key || item.canonical_key || normalizeComparisonText(`${item.title}:${item.creator || ""}`);
-    if(seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
-  }
-
-  return result;
-}
-
-function extractFantlabNodes(payload){
-  const out = [];
-  const queue = [payload];
-  const seen = new Set();
-
-  while(queue.length){
-    const current = queue.shift();
-    if(!current || typeof current !== "object") continue;
-    if(seen.has(current)) continue;
-    seen.add(current);
-
-    if(Array.isArray(current)){
-      for(const item of current){
-        if(item && typeof item === "object") queue.push(item);
-      }
-      continue;
-    }
-
-    const titleCandidate =
-      current.title ||
-      current.name ||
-      current.work_title ||
-      current.work_name ||
-      current.rusname ||
-      current.orgname;
-
-    if(typeof titleCandidate === "string" && normalizeSpaces(titleCandidate)){
-      out.push(current);
-    }
-
-    for(const value of Object.values(current)){
-      if(value && typeof value === "object"){
-        queue.push(value);
-      }
-    }
-  }
-
-  return out;
-}
-
-function getFantlabEndpointBuilders(){
-  return [
-    (query) => `https://api.fantlab.ru/search?query=${encodeURIComponent(query)}`,
-    (query) => `https://api.fantlab.ru/search?term=${encodeURIComponent(query)}`,
-    (query) => `https://api.fantlab.ru/search?q=${encodeURIComponent(query)}`
-  ];
-}
-
-async function fetchFantlabWithTimeout(url, timeoutMs = FANTLAB_TIMEOUT_MS){
+async function fetchFantlabSearchPage(query){
+  await throttleFantlabRequests();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), FANTLAB_TIMEOUT_MS);
 
   try {
-    return await fetch(url, {
+    const response = await fetch(`${FANTLAB_SEARCH_URL}?searchstr=${encodeURIComponent(query)}`, {
       method: "GET",
       headers: {
-        "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
-        "User-Agent": "Mozilla/5.0 FantLabProxy/1.0"
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "PlamutBot/1.0 (+public search integration)"
       },
       signal: controller.signal
     });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
-async function tryFantlabEndpoints(query){
-  const debug = [];
-  const builders = getFantlabEndpointBuilders();
-
-  for(const buildUrl of builders){
-    const url = buildUrl(query);
-
-    try {
-      const response = await fetchFantlabWithTimeout(url);
-      const text = await response.text();
-
-      debug.push({
-        url,
-        ok: response.ok,
-        status: response.status,
-        contentType: response.headers.get("content-type") || "",
-        preview: String(text || "").slice(0, 500)
-      });
-
-      if(!response.ok) continue;
-
-      const payload = safeJson(text);
-      if(!payload) continue;
-
-      return { payload, debug, selectedUrl: url };
-    } catch (error) {
-      debug.push({
-        url,
-        ok: false,
-        status: "FETCH_ERROR",
-        error: String(error?.message || error)
-      });
+    if(!response.ok){
+      throw new Error(`HTTP ${response.status}`);
     }
-  }
 
-  return { payload: null, debug, selectedUrl: "" };
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 module.exports = async function handler(req, res){
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-  res.setHeader("Surrogate-Control", "no-store");
 
   const query = normalizeSpaces(req?.query?.q || "");
   const debugMode = String(req?.query?.debug || "") === "1";
+  const queryNormalized = normalizeRuText(query);
 
-  if(!query){
-    if(debugMode){
-      return res.status(200).json({
-        ok: true,
-        query,
-        results: [],
-        debug: ["empty query"]
-      });
-    }
-    return res.status(200).json([]);
+  if(!queryNormalized){
+    return res.status(200).json(debugMode ? { ok: true, results: [], debug: ["empty query"] } : []);
   }
 
   try {
-    const { payload, debug, selectedUrl } = await tryFantlabEndpoints(query);
-
-    if(!payload){
-      if(debugMode){
-        return res.status(200).json({
-          ok: false,
-          query,
-          selectedUrl,
-          results: [],
-          debug
-        });
-      }
-      return res.status(200).json([]);
+    const cached = getCache(queryNormalized);
+    if(cached){
+      return res.status(200).json(debugMode ? { ok: true, cached: true, results: cached } : cached);
     }
 
-    const nodes = extractFantlabNodes(payload);
-    const normalized = dedupeBooks(
-      nodes.map((item) => normalizeFantlabItem(item)).filter(Boolean)
-    ).slice(0, FANTLAB_RESULT_LIMIT);
+    const html = await fetchFantlabSearchPage(query);
+    const parsed = parseFantlabSearchResults(html);
+    const ranked = rankFantlabResults(parsed, query);
+    const deduped = dedupeFantlabResults(ranked)
+      .slice(0, FANTLAB_RESULT_LIMIT)
+      .map((item) => ({
+        source: "fantlab",
+        category: "Books",
+        title: item.title,
+        original_title: "",
+        author_name: item.author_name || "",
+        author_url: "",
+        release_year: item.release_year || null,
+        language: "ru",
+        series_name: item.series_name || "",
+        cycle_name: item.series_name || "",
+        fantlab_url: item.fantlab_url,
+        fantlab_work_id: item.fantlab_work_id || "",
+        cover_url: "",
+        short_source_note: "FantLab",
+        score: item.score || 0
+      }));
 
-    if(debugMode){
-      return res.status(200).json({
-        ok: true,
-        query,
-        selectedUrl,
-        nodesFound: nodes.length,
-        resultsCount: normalized.length,
-        debug,
-        results: normalized
-      });
-    }
+    setCache(queryNormalized, deduped);
 
-    return res.status(200).json(normalized);
+    return res.status(200).json(debugMode ? {
+      ok: true,
+      cached: false,
+      raw_results: parsed.length,
+      ranked_results: ranked.length,
+      deduped_results: deduped.length,
+      results: deduped
+    } : deduped);
   } catch (error) {
-    if(debugMode){
-      return res.status(200).json({
-        ok: false,
-        query,
-        results: [],
-        debug: [{ handlerError: String(error?.message || error) }]
-      });
-    }
-    return res.status(200).json([]);
+    return res.status(200).json(debugMode ? {
+      ok: false,
+      results: [],
+      error: String(error?.message || error)
+    } : []);
   }
 };
