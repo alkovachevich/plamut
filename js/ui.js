@@ -13,7 +13,6 @@ import {
   getStatusLabel
 } from "./labels.js";
 import { normalizeSearchQuery, hasCyrillic, hasLatin, itemMatchesQuery, searchMediaWithFallback } from "./search.js";
-import { isCyrillicQuery, searchFantLabBooks, mergeFantLabWithFallback, shouldFallbackFromFantLab, isDebugSearchEnabled } from "./services/fantlab.js";
 import {
   normalizeAuthorName,
   normalizeTitleForMatch,
@@ -2274,10 +2273,10 @@ const normalized = candidates
     function getBookSourcePriority(source, queryMeta = {}){
       const normalizedSource = String(source || "").toLowerCase();
       const isIsbnSearch = Boolean(queryMeta?.isbn);
-      const isCyrillicQuery = Boolean(queryMeta?.hasCyrillic && !queryMeta?.isbn);
-      if(normalizedSource === "fantlab") return isCyrillicQuery ? 24 : 6;
-      if(normalizedSource === "openlibrary") return isIsbnSearch ? 24 : 20;
-      if(normalizedSource === "google") return isIsbnSearch ? 16 : 14;
+      const isCyrillicPrimary = Boolean(queryMeta?.hasCyrillic && !queryMeta?.isbn);
+      if(normalizedSource === "openlibrary") return isIsbnSearch ? 26 : (isCyrillicPrimary ? 20 : 18);
+      if(normalizedSource === "google") return isIsbnSearch ? 18 : 14;
+      if(normalizedSource === "wikidata") return isCyrillicPrimary ? 17 : 13;
       return 0;
     }
 
@@ -2319,10 +2318,8 @@ const normalized = candidates
       else if(queryKey && titleMain.startsWith(queryKey)) score += 70;
       else if(queryKey && titlePool.includes(queryKey)) score += 36;
 
-      if(queryMeta?.hasCyrillic && String(item.source || "").toLowerCase() === "fantlab"){
-        const cyrillicTitleProbe = [item.title || "", item.title_ru || "", item.title_original || ""].join(" ");
-        if(hasCyrillic(cyrillicTitleProbe)) score += 18;
-      }
+      if(queryMeta?.hasCyrillic && hasCyrillic([item.title || "", item.title_ru || "", item.title_original || ""].join(" "))) score += 16;
+      if(queryMeta?.hasLatin && hasLatin([item.title || "", item.title_en || "", item.title_original || ""].join(" "))) score += 10;
 
       if(creatorKey) score += 4;
       if(item.cover) score += 3;
@@ -2441,6 +2438,26 @@ const normalized = candidates
       source_priority: getBookSourcePriority(source, queryMeta),
        canonical_key: canonical_key || buildBookCanonicalKey(source || "book", safeIsbn || work_key || buildBookIdentityKey({ title: safeTitle, creator: safeCreator }), safeTitle)
       };
+    }
+
+    function normalizeBookResult(rawBook = {}, defaults = {}){
+      return createBookResult({
+        title: rawBook.title || rawBook.name || "",
+        title_ru: rawBook.title_ru || "",
+        title_en: rawBook.title_en || "",
+        title_original: rawBook.title_original || rawBook.original_title || rawBook.title || "",
+        creator: rawBook.creator || rawBook.author_name || "",
+        cover: rawBook.cover || rawBook.cover_url || "",
+        isbn: rawBook.isbn || "",
+        description: rawBook.description || "",
+        description_ru: rawBook.description_ru || "",
+        description_original: rawBook.description_original || "",
+        description_en: rawBook.description_en || "",
+        work_key: rawBook.work_key || "",
+        canonical_key: rawBook.canonical_key || "",
+        source: rawBook.source || defaults.source || "",
+        queryMeta: defaults.queryMeta || {}
+      });
     }
 
     async function enrichBookTitlesForLocale(items = [], queryMeta = {}){
@@ -2825,50 +2842,25 @@ const normalized = candidates
       }
     }
 
-    async function searchFantLabProxy(queryMeta, limit = 10, queriesOverride = null){
-      if(!queryMeta?.text || queryMeta?.isbn) return [];
+    const BOOK_SEARCH_DEBUG = (() => {
+      try { return window.localStorage?.getItem("DEBUG_BOOK_SEARCH") === "true"; } catch { return false; }
+    })();
+    const BOOK_WIKIDATA_CACHE_TTL_MS = 15 * 60 * 1000;
+    const bookWikidataQueryCache = new Map();
 
-      const queries = Array.isArray(queriesOverride) && queriesOverride.length
-        ? queriesOverride
-        : await buildSearchQueries(queryMeta);
+    function debugBookSearch(event, payload = {}){
+      if(!BOOK_SEARCH_DEBUG) return;
+      console.debug(`[book-search] ${event}`, payload);
+    }
 
-      for(const query of queries){
-        if(!query) continue;
-        try {
-          const rankedFantlab = await searchFantLabBooks(query, {
-            debug: isDebugSearchEnabled()
-          });
-
-          const results = rankedFantlab
-            .map((item) => createBookResult({
-              title: item?.title || "",
-              title_ru: item?.title || "",
-              title_en: item?.original_title || "",
-              title_original: item?.original_title || item?.title || "",
-              creator: item?.author_name || "",
-              cover: item?.cover_url || "",
-              description: "",
-              description_ru: "",
-              description_original: "",
-              description_en: "",
-              work_key: item?.fantlab_work_id ? `fantlab:${item.fantlab_work_id}` : (item?.fantlab_url || ""),
-              canonical_key: item?.fantlab_work_id
-                ? buildBookCanonicalKey("fantlab", item.fantlab_work_id, item?.title || "")
-                : buildBookCanonicalKey("fantlab", item?.fantlab_url || "", item?.title || ""),
-              source: "fantlab",
-              queryMeta
-            }))
-            .filter((item) => item && item.title);
-
-          if(results.length){
-            return results.slice(0, limit);
-          }
-        } catch (error) {
-          console.error("FantLab proxy search error:", error);
-        }
-      }
-
-      return [];
+    function prepareBookSearchQuery(query){
+      const queryMeta = normalizeSearchQuery(query);
+      return {
+        ...queryMeta,
+        sourceText: String(query || ""),
+        normalizedText: normalizeComparisonText(queryMeta.text || ""),
+        isMixed: Boolean(queryMeta.hasCyrillic && queryMeta.hasLatin)
+      };
     }
 
     async function searchGoogleBooks(queryMeta, limit = 10, queriesOverride = null){
@@ -2918,6 +2910,51 @@ const normalized = candidates
       }
     }
 
+    async function searchWikidataBooks(queryMeta, limit = 10, queriesOverride = null){
+      if(queryMeta?.isbn) return [];
+      const queries = Array.isArray(queriesOverride) && queriesOverride.length ? queriesOverride : [queryMeta.text];
+      const results = [];
+      for(const query of queries){
+        const clean = normalizeSpaces(query);
+        if(!clean) continue;
+        const cacheKey = `${queryMeta.hasCyrillic ? "ru" : "en"}|${normalizeComparisonText(clean)}`;
+        const cached = bookWikidataQueryCache.get(cacheKey);
+        if(cached && (Date.now() - cached.at) < BOOK_WIKIDATA_CACHE_TTL_MS){
+          results.push(...cached.results);
+          continue;
+        }
+        try {
+          const language = queryMeta.hasCyrillic ? "ru" : "en";
+          const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&type=item&language=${encodeURIComponent(language)}&limit=${encodeURIComponent(limit)}&search=${encodeURIComponent(clean)}&origin=*`;
+          const searchData = await fetchJson(searchUrl);
+          const entities = Array.isArray(searchData?.search) ? searchData.search : [];
+          const normalized = entities.map((entity) => createBookResult({
+            title: entity?.label || "",
+            title_ru: language === "ru" ? (entity?.label || "") : "",
+            title_en: language === "en" ? (entity?.label || "") : "",
+            title_original: entity?.label || "",
+            creator: "",
+            description: entity?.description || "",
+            description_original: entity?.description || "",
+            work_key: entity?.id ? `wikidata:${entity.id}` : "",
+            canonical_key: buildBookCanonicalKey("wikidata", entity?.id || "", entity?.label || ""),
+            source: "wikidata",
+            queryMeta
+          })).map((item, index) => ({
+            ...item,
+            wikidata_id: item.work_key.replace("wikidata:", ""),
+            aliases: [],
+            confidence_score: Math.max(0.2, 0.74 - (index * 0.04))
+          }));
+          bookWikidataQueryCache.set(cacheKey, { at: Date.now(), results: normalized });
+          results.push(...normalized);
+        } catch (error) {
+          console.error("Wikidata book search error:", error);
+        }
+      }
+      return results.slice(0, limit * Math.max(1, queries.length));
+    }
+
     function getBookSearchCacheKey(queryMeta = {}){
       return [
         "Books",
@@ -2929,6 +2966,40 @@ const normalized = candidates
         queryMeta.hasCyrillic ? "cy" : "",
         queryMeta.hasLatin ? "la" : ""
       ].join("|");
+    }
+
+    function dedupeBookResults(items = [], queryMeta = {}){
+      const byKey = new Map();
+      for(const item of items){
+        if(!item) continue;
+        const keys = [];
+        if(item.isbn) keys.push(`isbn:${item.isbn}`);
+        if(item.wikidata_id) keys.push(`wikidata:${item.wikidata_id}`);
+        keys.push(buildBookIdentityKey(item));
+        keys.push(`norm:${normalizeTitleForMatch(item.title || item.title_original || "")}:${normalizeAuthorName(item.creator || "")}`);
+
+        const firstFreeKey = keys.find((key) => !byKey.has(key));
+        if(firstFreeKey){
+          byKey.set(firstFreeKey, item);
+          continue;
+        }
+        const mergeIntoKey = keys.find((key) => byKey.has(key));
+        if(!mergeIntoKey) continue;
+        byKey.set(mergeIntoKey, mergeBookResultPair(byKey.get(mergeIntoKey), item, queryMeta));
+      }
+      return Array.from(byKey.values());
+    }
+
+    function rankBookResultsHybrid(results = [], queryMeta = {}){
+      const ranked = rankBookResults(results, queryMeta).map((item, index) => {
+        const score = buildBookResultScore(item, queryMeta);
+        return {
+          ...item,
+          confidence_score: Math.max(0.05, Math.min(0.99, (score - 8) / 130)),
+          rank: index + 1
+        };
+      });
+      return ranked;
     }
 
     function isBroadBookQuery(queryMeta = {}){
@@ -3070,8 +3141,8 @@ const normalized = candidates
       return { ...payload };
     }
 
-    async function searchBooksApi(query, limit = 10){
-      const queryMeta = normalizeSearchQuery(query);
+    async function searchBooksHybrid(query, limit = 10){
+      const queryMeta = prepareBookSearchQuery(query);
       if(!queryMeta.text && !queryMeta.isbn){
         return [];
       }
@@ -3083,50 +3154,40 @@ const normalized = candidates
 
       try {
         const queries = queryMeta.isbn ? [queryMeta.isbn] : await buildSearchQueries(queryMeta);
-        const primaryQueries = queries.slice(0, 1);
-        const fallbackQueries = queries.length > 1 ? queries : primaryQueries;
+        const localizedQueries = queries.length > 1 ? queries : [queryMeta.text, ...queries].filter(Boolean);
+        const primaryQueries = queryMeta.hasCyrillic ? localizedQueries : [...localizedQueries].reverse();
         let collected = [];
         const stageLimit = Math.max(limit, 8);
+        debugBookSearch("query.prepared", { text: queryMeta.text, hasCyrillic: queryMeta.hasCyrillic, hasLatin: queryMeta.hasLatin, isbn: queryMeta.isbn });
 
-        async function runStage(searchFn, stageQueries){
-          const results = await searchFn(queryMeta, stageLimit, stageQueries);
-          if(results?.length){
-            collected = mergeBookResults([...collected, ...results], queryMeta);
-          }
-          return rankBookResults(collected, queryMeta);
-        }
+        const tasks = queryMeta.isbn
+          ? [
+            searchOpenLibraryBooks(queryMeta, stageLimit, [queryMeta.isbn]),
+            searchGoogleBooks(queryMeta, stageLimit, [`isbn:${queryMeta.isbn}`])
+          ]
+          : [
+            searchOpenLibraryBooks(queryMeta, stageLimit, primaryQueries),
+            searchGoogleBooks(queryMeta, stageLimit, primaryQueries),
+            searchWikidataBooks(queryMeta, stageLimit, primaryQueries)
+          ];
 
-        if(queryMeta.isbn){
-          await runStage(searchOpenLibraryBooks, [queryMeta.isbn]);
-          if(collected.length < Math.min(4, limit)){
-            await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
+        const settled = await Promise.allSettled(tasks);
+        settled.forEach((entry, idx) => {
+          if(entry.status === "fulfilled"){
+            const list = Array.isArray(entry.value) ? entry.value : [];
+            collected.push(...list);
+            debugBookSearch("source.results", { sourceIndex: idx, count: list.length });
+          } else {
+            debugBookSearch("source.error", { sourceIndex: idx, reason: String(entry.reason || "") });
           }
-        } else if(isCyrillicQuery(queryMeta.text)){
-          const fantlabResults = await searchFantLabProxy(queryMeta, stageLimit, fallbackQueries);
-          if(fantlabResults?.length){
-            collected = mergeBookResults([...collected, ...fantlabResults], queryMeta);
-          }
+        });
 
-          const fantlabWeak = shouldFallbackFromFantLab(fantlabResults, queryMeta.text);
-          if(fantlabWeak || collected.length < Math.min(5, limit)){
-            await runStage(searchOpenLibraryBooks, fallbackQueries);
-          }
-          if(fantlabWeak || collected.length < Math.min(6, limit)){
-            await runStage(searchGoogleBooks, fallbackQueries);
-          }
+        const merged = mergeBookResults(collected, queryMeta);
+        const deduped = dedupeBookResults(merged, queryMeta);
+        debugBookSearch("results.deduped", { before: merged.length, after: deduped.length });
 
-          if(fantlabResults?.length){
-            collected = mergeBookResults(mergeFantLabWithFallback(fantlabResults, collected), queryMeta);
-          }
-        } else {
-          await runStage(searchOpenLibraryBooks, fallbackQueries);
-          if(collected.length < Math.min(5, limit)){
-            await runStage(searchGoogleBooks, fallbackQueries);
-          }
-        }
-
-        const ranked = rankBookResults(mergeBookResults(collected, queryMeta), queryMeta).slice(0, stageLimit);
-
+        const ranked = rankBookResultsHybrid(deduped, queryMeta).slice(0, stageLimit);
+        debugBookSearch("results.top", ranked.slice(0, 3).map((item) => ({ title: item.title, source: item.source, confidence: item.confidence_score })));
         const finalResults = ranked.slice(0, limit);
         bookSearchResponseCache.set(cacheKey, { at: Date.now(), results: finalResults.slice() });
         return finalResults;
@@ -3134,6 +3195,10 @@ const normalized = candidates
         console.error("Books search error:", e);
         return [];
       }
+    }
+
+    async function searchBooksApi(query, limit = 10){
+      return searchBooksHybrid(query, limit);
     }
 
     async function searchTMDbApi(query, mediaType = "movie", limit = 10){
