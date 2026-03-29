@@ -17,7 +17,7 @@ function normalizeRuText(text){
     .replace(/[ё]/g, "е")
     .replace(/[«»“”„‟]/g, '"')
     .replace(/[’']/g, "'")
-    .replace(/[^\p{L}\p{N}\s"'\-]+/gu, " "));
+    .replace(/[^A-Za-zА-Яа-яЁё0-9\s"'\-]+/g, " "));
 }
 
 function decodeHtmlEntities(input){
