@@ -1,6 +1,15 @@
 import { normalizeSpaces, normalizeComparisonText } from "../utils.js";
 
-const DEBUG_SEARCH = typeof window !== "undefined" && window.localStorage?.getItem("DEBUG_SEARCH") === "true";
+function readDebugSearchFlag(){
+  try {
+    if(typeof window === "undefined") return false;
+    return window.localStorage && window.localStorage.getItem("DEBUG_SEARCH") === "true";
+  } catch {
+    return false;
+  }
+}
+
+const DEBUG_SEARCH = readDebugSearchFlag();
 
 export function normalizeRuText(text){
   return normalizeSpaces(String(text || "")
@@ -8,13 +17,17 @@ export function normalizeRuText(text){
     .replace(/[ё]/g, "е")
     .replace(/[«»“”„‟]/g, '"')
     .replace(/[’']/g, "'")
-    .replace(/[^\p{L}\p{N}\s"'\-]+/gu, " "));
+    .replace(/[^A-Za-zА-Яа-яЁё0-9\s"'\-]+/g, " "));
 }
 
 export function isCyrillicQuery(query){
   const clean = normalizeSpaces(query);
   if(!clean) return false;
   return /[\u0400-\u04FF]/u.test(clean);
+}
+
+export function isDebugSearchEnabled(){
+  return DEBUG_SEARCH;
 }
 
 export async function searchFantLabBooks(query, options = {}){
