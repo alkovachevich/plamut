@@ -493,6 +493,13 @@ import { state } from "./state.js";
       document.getElementById("login-top-btn").textContent = t().topbar.login;
       document.getElementById("share-library-btn").textContent = t().topbar.shareLibrary;
       document.getElementById("auth-text").textContent = t().auth.text;
+      setTextIfPresent("profile-menu-open-btn", t().topbar.profile);
+      setTextIfPresent("profile-menu-logout-btn", t().topbar.logout);
+      setTextIfPresent("profile-menu-theme-title", t().topbar.theme);
+      setTextIfPresent("profile-menu-theme-light", t().topbar.themeLight);
+      setTextIfPresent("profile-menu-theme-dark", t().topbar.themeDark);
+      setTextIfPresent("profile-menu-theme-system", t().topbar.themeSystem);
+      setTextIfPresent("profile-menu-language-title", t().topbar.language);
 
       setTextIfPresent("share-modal-title", t().share.modalTitle);
       setTextIfPresent("share-modal-subtitle", t().share.modalSubtitle);
@@ -6031,7 +6038,7 @@ function syncHeaderProfileIdentity(displayName = "", username = ""){
   const nameNode = document.getElementById("header-popover-name");
   const handleNode = document.getElementById("header-popover-handle");
   if(nameNode) nameNode.textContent = resolvedName || "Plamut";
-  if(handleNode) handleNode.textContent = resolvedUsername ? `@${resolvedUsername}` : t().brand.subtitle;
+  if(handleNode) handleNode.textContent = resolvedUsername ? resolvedName : t().brand.subtitle;
 }
 
 function toggleProfileMenu(force){
@@ -7301,6 +7308,7 @@ export const publicApi = {
   addCategorySearchResult,
   changeStatusById,
   toggleCardMenu,
+  closeCardMenu,
   openFolderModalById,
   removeItemFromFolderById,
   deleteItemById
