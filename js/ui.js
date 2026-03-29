@@ -13,7 +13,7 @@ import {
   getStatusLabel
 } from "./labels.js";
 import { normalizeSearchQuery, hasCyrillic, hasLatin, itemMatchesQuery, searchMediaWithFallback } from "./search.js";
-import { isCyrillicQuery, searchFantLabBooks, mergeFantLabWithFallback, shouldFallbackFromFantLab } from "./services/fantlab.js";
+import { isCyrillicQuery, searchFantLabBooks, mergeFantLabWithFallback, shouldFallbackFromFantLab, isDebugSearchEnabled } from "./services/fantlab.js";
 import {
   normalizeAuthorName,
   normalizeTitleForMatch,
@@ -2835,8 +2835,8 @@ const normalized = candidates
       for(const query of queries){
         if(!query) continue;
         try {
-               const rankedFantlab = await searchFantLabBooks(query, {
-            debug: window.localStorage?.getItem("DEBUG_SEARCH") === "true"
+          const rankedFantlab = await searchFantLabBooks(query, {
+            debug: isDebugSearchEnabled()
           });
 
           const results = rankedFantlab
@@ -2859,7 +2859,7 @@ const normalized = candidates
               queryMeta
             }))
             .filter((item) => item && item.title);
-          
+
           if(results.length){
             return results.slice(0, limit);
           }
@@ -2920,9 +2920,9 @@ const normalized = candidates
 
     function getBookSearchCacheKey(queryMeta = {}){
       return [
-        state.currentLanguage || "",
         "Books",
         "multi-source",
+        state.currentLanguage || "",
         queryMeta.text || "",
         queryMeta.comparison || "",
         queryMeta.isbn || "",
@@ -3101,7 +3101,7 @@ const normalized = candidates
           if(collected.length < Math.min(4, limit)){
             await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
           }
-         } else if(isCyrillicQuery(queryMeta.text)){
+        } else if(isCyrillicQuery(queryMeta.text)){
           const fantlabResults = await searchFantLabProxy(queryMeta, stageLimit, fallbackQueries);
           if(fantlabResults?.length){
             collected = mergeBookResults([...collected, ...fantlabResults], queryMeta);
@@ -3111,11 +3111,11 @@ const normalized = candidates
           if(fantlabWeak || collected.length < Math.min(5, limit)){
             await runStage(searchOpenLibraryBooks, fallbackQueries);
           }
-           if(fantlabWeak || collected.length < Math.min(6, limit)){
+          if(fantlabWeak || collected.length < Math.min(6, limit)){
             await runStage(searchGoogleBooks, fallbackQueries);
           }
-          
-             if(fantlabResults?.length){
+
+          if(fantlabResults?.length){
             collected = mergeBookResults(mergeFantLabWithFallback(fantlabResults, collected), queryMeta);
           }
         } else {
