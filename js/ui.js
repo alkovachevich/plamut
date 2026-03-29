@@ -13,6 +13,7 @@ import {
   getStatusLabel
 } from "./labels.js";
 import { normalizeSearchQuery, hasCyrillic, hasLatin, itemMatchesQuery, searchMediaWithFallback } from "./search.js";
+import { isCyrillicQuery, searchFantLabBooks, mergeFantLabWithFallback, shouldFallbackFromFantLab } from "./services/fantlab.js";
 import {
   normalizeAuthorName,
   normalizeTitleForMatch,
@@ -2834,27 +2835,31 @@ const normalized = candidates
       for(const query of queries){
         if(!query) continue;
         try {
-          const url = "/api/books/fantlab?q=" + encodeURIComponent(query);
-          const data = await fetchJson(url);
-          const items = Array.isArray(data) ? data : [];
-          const results = items
+               const rankedFantlab = await searchFantLabBooks(query, {
+            debug: window.localStorage?.getItem("DEBUG_SEARCH") === "true"
+          });
+
+          const results = rankedFantlab
             .map((item) => createBookResult({
               title: item?.title || "",
-              title_ru: item?.title_ru || "",
-              title_en: item?.title_en || "",
-              title_original: item?.title_original || item?.title || "",
-              creator: item?.creator || "",
-              cover: item?.cover || "",
-              description: item?.description || "",
-              description_ru: item?.description_ru || "",
-              description_original: item?.description_original || item?.description_en || "",
-              description_en: item?.description_en || "",
-              work_key: item?.work_key || "",
-              canonical_key: item?.canonical_key || "",
+              title_ru: item?.title || "",
+              title_en: item?.original_title || "",
+              title_original: item?.original_title || item?.title || "",
+              creator: item?.author_name || "",
+              cover: item?.cover_url || "",
+              description: "",
+              description_ru: "",
+              description_original: "",
+              description_en: "",
+              work_key: item?.fantlab_work_id ? `fantlab:${item.fantlab_work_id}` : (item?.fantlab_url || ""),
+              canonical_key: item?.fantlab_work_id
+                ? buildBookCanonicalKey("fantlab", item.fantlab_work_id, item?.title || "")
+                : buildBookCanonicalKey("fantlab", item?.fantlab_url || "", item?.title || ""),
               source: "fantlab",
               queryMeta
             }))
             .filter((item) => item && item.title);
+          
           if(results.length){
             return results.slice(0, limit);
           }
@@ -2916,6 +2921,8 @@ const normalized = candidates
     function getBookSearchCacheKey(queryMeta = {}){
       return [
         state.currentLanguage || "",
+        "Books",
+        "multi-source",
         queryMeta.text || "",
         queryMeta.comparison || "",
         queryMeta.isbn || "",
@@ -3094,13 +3101,22 @@ const normalized = candidates
           if(collected.length < Math.min(4, limit)){
             await runStage(searchGoogleBooks, [`isbn:${queryMeta.isbn}`]);
           }
-        } else if(queryMeta.hasCyrillic){
-          await runStage(searchFantLabProxy, fallbackQueries);
-          if(collected.length < Math.min(5, limit)){
+         } else if(isCyrillicQuery(queryMeta.text)){
+          const fantlabResults = await searchFantLabProxy(queryMeta, stageLimit, fallbackQueries);
+          if(fantlabResults?.length){
+            collected = mergeBookResults([...collected, ...fantlabResults], queryMeta);
+          }
+
+          const fantlabWeak = shouldFallbackFromFantLab(fantlabResults, queryMeta.text);
+          if(fantlabWeak || collected.length < Math.min(5, limit)){
             await runStage(searchOpenLibraryBooks, fallbackQueries);
           }
-          if(collected.length < Math.min(6, limit)){
+           if(fantlabWeak || collected.length < Math.min(6, limit)){
             await runStage(searchGoogleBooks, fallbackQueries);
+          }
+          
+             if(fantlabResults?.length){
+            collected = mergeBookResults(mergeFantLabWithFallback(fantlabResults, collected), queryMeta);
           }
         } else {
           await runStage(searchOpenLibraryBooks, fallbackQueries);
