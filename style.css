@@ -546,6 +546,11 @@ body.header-compact .profile-trigger {
   pointer-events: auto;
   transform: translateY(0) scale(1);
 }
+
+.media-card.menu-open {
+  overflow: visible;
+  z-index: 6;
+}
 .media-menu-item {
   width: 100%;
   padding: 10px 12px;
