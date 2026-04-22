@@ -1,4 +1,9 @@
-import { DEFAULT_LANGUAGE, DEFAULT_THEME, LOCAL_STORAGE_KEYS, DEFAULT_USER } from "./config.js";
+import {
+  DEFAULT_LANGUAGE,
+  DEFAULT_THEME,
+  LOCAL_STORAGE_KEYS,
+  DEFAULT_USER
+} from "./config.js";
 
 const listeners = new Set();
 
@@ -8,6 +13,8 @@ export const state = {
 
   sidebarOpen: false,
   searchModalOpen: false,
+  authModalOpen: false,
+  authMode: "login",
 
   searchQuery: "",
   searchResults: null,
@@ -22,12 +29,15 @@ export const state = {
   currentUniverse: null
 };
 
+window.__PLAMUT_STATE__ = state;
+
 /* =========================
    STATE CORE
 ========================= */
 
 export function setState(patch = {}) {
   Object.assign(state, patch);
+  window.__PLAMUT_STATE__ = state;
   listeners.forEach((listener) => listener(state));
 }
 
@@ -91,6 +101,29 @@ export function closeSearchModal() {
 }
 
 /* =========================
+   AUTH MODAL
+========================= */
+
+export function openAuthModal(mode = "login") {
+  setState({
+    authModalOpen: true,
+    authMode: mode === "register" ? "register" : "login"
+  });
+}
+
+export function closeAuthModal() {
+  setState({
+    authModalOpen: false
+  });
+}
+
+export function setAuthMode(mode = "login") {
+  setState({
+    authMode: mode === "register" ? "register" : "login"
+  });
+}
+
+/* =========================
    SEARCH
 ========================= */
 
@@ -122,7 +155,7 @@ export function logoutUser() {
 }
 
 /* =========================
-   CONTEXT (CATEGORY / CARD / UNIVERSE)
+   CONTEXT
 ========================= */
 
 export function setCurrentCategory(category) {
