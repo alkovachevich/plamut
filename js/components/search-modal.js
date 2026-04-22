@@ -4,10 +4,11 @@ import {
   state,
   closeSearchModal,
   setSearchQuery,
-  setSearchResults
+  setSearchResults,
+  setCurrentItem
 } from "../state.js";
 import { debounce, escapeHtml } from "../utils.js";
-import { runGlobalSearch } from "../services/search-service.js";
+import { runGlobalSearch, flattenResults, sortByScore, limitResults } from "../services/search-service.js";
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
@@ -25,7 +26,7 @@ function renderEmpty(query) {
 
   return `
     <div class="search-modal__empty">
-      Ничего не найдено. Попробуй изменить запрос или добавить позже вручную.
+      Ничего не найдено. Попробуй изменить запрос.
     </div>
   `;
 }
@@ -45,7 +46,9 @@ function renderCover(item) {
 }
 
 function renderResultCard(item) {
-  const year = item.year ? `<span class="search-result-card__year">${escapeHtml(String(item.year))}</span>` : "";
+  const year = item.year
+    ? `<span class="search-result-card__year">${escapeHtml(String(item.year))}</span>`
+    : "";
 
   return `
     <button
@@ -104,11 +107,25 @@ function renderGroups(groupedResults) {
   return html || "";
 }
 
-function attachResultHandlers(root) {
+function attachResultHandlers(root, groupedResults) {
+  const flat = limitResults(
+    sortByScore(flattenResults(groupedResults || {})),
+    SEARCH_LIMITS.PAGE_RESULTS
+  );
+
+  const itemsByKey = new Map(
+    flat.map((item) => [item.canonical_key, item])
+  );
+
   root.querySelectorAll("[data-card-key]").forEach((button) => {
     button.addEventListener("click", () => {
       const canonicalKey = button.dataset.cardKey;
       const category = button.dataset.cardCategory;
+      const item = itemsByKey.get(canonicalKey) || null;
+
+      if (item) {
+        setCurrentItem(item);
+      }
 
       closeSearchModal();
       navigate("/card", {
@@ -166,7 +183,7 @@ async function performSearch(root, query) {
       </div>
     `;
 
-    attachResultHandlers(resultsRoot);
+    attachResultHandlers(resultsRoot, groupedResults);
   } catch (error) {
     console.error("Search modal error:", error);
     resultsRoot.innerHTML = `
