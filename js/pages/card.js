@@ -31,28 +31,40 @@ function resolveTitle(entity) {
   );
 }
 
+function getPayloadFromState(params = {}) {
+  const current = state.currentItem;
+
+  if (!current?.canonical_key) {
+    return null;
+  }
+
+  if (params?.key && current.canonical_key !== params.key) {
+    return null;
+  }
+
+  return current;
+}
+
 /* =========================
    LOAD ENTITY
 ========================= */
 
 async function loadEntity(params) {
-  const { key, category, payload } = params || {};
+  const { key, category } = params || {};
+  const statePayload = getPayloadFromState(params);
 
-  // 1. Пытаемся взять из БД
   if (key) {
     const fromDb = await getEntityByCanonicalKey(key);
     if (fromDb) return fromDb;
   }
 
-  // 2. Если есть payload (из поиска) — сохраняем и возвращаем
-  if (payload && payload.canonical_key) {
+  if (statePayload?.canonical_key) {
     return await saveEntityIfMissing({
-      ...payload,
-      category: payload.category || category
+      ...statePayload,
+      category: statePayload.category || category
     });
   }
 
-  // 3. fallback
   return null;
 }
 
@@ -61,7 +73,9 @@ async function loadEntity(params) {
 ========================= */
 
 export async function renderCardPage(root, params = {}) {
-  root.innerHTML = `<div style="padding:20px;">Загрузка...</div>`;
+  root.innerHTML = `
+    <div style="padding:20px;">Загрузка...</div>
+  `;
 
   let entity = null;
 
@@ -77,7 +91,6 @@ export async function renderCardPage(root, params = {}) {
   }
 
   const userId = state.user?.id;
-
   let alreadyAdded = false;
 
   try {
@@ -102,14 +115,17 @@ export async function renderCardPage(root, params = {}) {
       .card-header {
         display: flex;
         gap: 16px;
+        align-items: flex-start;
       }
 
       .cover {
         width: 120px;
+        min-width: 120px;
         height: 170px;
         border-radius: 16px;
         background: var(--bg-soft);
         overflow: hidden;
+        border: 1px solid var(--border);
       }
 
       .cover img {
@@ -118,26 +134,44 @@ export async function renderCardPage(root, params = {}) {
         object-fit: cover;
       }
 
+      .cover-fallback {
+        display: grid;
+        place-items: center;
+        height: 100%;
+        color: var(--text-soft);
+        font-size: 24px;
+        font-weight: 700;
+      }
+
       .meta {
         flex: 1;
         display: flex;
         flex-direction: column;
         gap: 8px;
+        min-width: 0;
       }
 
       .title {
-        font-size: 20px;
+        font-size: 22px;
         font-weight: 800;
+        line-height: 1.25;
       }
 
       .subtitle {
         font-size: 14px;
         color: var(--text-soft);
+        line-height: 1.4;
+      }
+
+      .badges {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 6px 10px;
         border-radius: 999px;
         background: var(--accent-soft);
         font-size: 12px;
@@ -147,6 +181,7 @@ export async function renderCardPage(root, params = {}) {
         display: flex;
         gap: 10px;
         margin-top: 10px;
+        flex-wrap: wrap;
       }
 
       .btn {
@@ -155,21 +190,40 @@ export async function renderCardPage(root, params = {}) {
         background: var(--surface);
         border: 1px solid var(--border);
         font-weight: 600;
+        color: var(--text);
       }
 
       .btn.primary {
         background: var(--accent);
         color: #fff;
+        border-color: transparent;
       }
 
       .btn.disabled {
-        opacity: 0.5;
+        opacity: 0.6;
         pointer-events: none;
       }
 
       .description {
-        line-height: 1.6;
+        line-height: 1.7;
         color: var(--text-soft);
+        white-space: pre-wrap;
+      }
+
+      .empty-description {
+        color: var(--text-soft);
+      }
+
+      @media (max-width: 640px) {
+        .card-header {
+          flex-direction: column;
+        }
+
+        .cover {
+          width: 140px;
+          min-width: 140px;
+          height: 200px;
+        }
       }
     </style>
 
@@ -178,8 +232,8 @@ export async function renderCardPage(root, params = {}) {
         <div class="cover">
           ${
             entity.cover_url
-              ? `<img src="${escapeHtml(entity.cover_url)}" />`
-              : `<div style="display:grid;place-items:center;height:100%;">?</div>`
+              ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" />`
+              : `<div class="cover-fallback">?</div>`
           }
         </div>
 
@@ -187,27 +241,41 @@ export async function renderCardPage(root, params = {}) {
           <div class="title">${escapeHtml(title)}</div>
 
           ${
-            entity.original_title
+            entity.original_title && entity.original_title !== title
               ? `<div class="subtitle">${escapeHtml(entity.original_title)}</div>`
               : ""
           }
 
-          <div class="badge">
-            ${escapeHtml(CATEGORY_LABELS[entity.category] || entity.category)}
+          <div class="badges">
+            <div class="badge">
+              ${escapeHtml(CATEGORY_LABELS[entity.category] || entity.category)}
+            </div>
+
+            ${
+              entity.year
+                ? `<div class="badge">${escapeHtml(String(entity.year))}</div>`
+                : ""
+            }
           </div>
 
           <div class="actions">
-            <button class="btn primary ${
-              alreadyAdded ? "disabled" : ""
-            }" data-action="add">
+            <button
+              class="btn primary ${alreadyAdded ? "disabled" : ""}"
+              data-action="add"
+              type="button"
+            >
               ${alreadyAdded ? "Уже в библиотеке" : "Добавить"}
             </button>
           </div>
         </div>
       </div>
 
-      <div class="description">
-        ${escapeHtml(description)}
+      <div class="${description ? "description" : "empty-description"}">
+        ${
+          description
+            ? escapeHtml(description)
+            : "Описание пока отсутствует."
+        }
       </div>
     </section>
   `;
@@ -215,9 +283,9 @@ export async function renderCardPage(root, params = {}) {
   const addBtn = root.querySelector('[data-action="add"]');
 
   addBtn?.addEventListener("click", async () => {
-    const userId = state.user?.id;
+    const currentUserId = state.user?.id;
 
-    if (!userId) {
+    if (!currentUserId) {
       openAuthModal("login");
       return;
     }
@@ -227,11 +295,11 @@ export async function renderCardPage(root, params = {}) {
       addBtn.textContent = "Добавление...";
 
       const result = await addToUserLibrary({
-        userId,
+        userId: currentUserId,
         entity
       });
 
-      if (result.alreadyExists) {
+      if (result?.alreadyExists) {
         addBtn.textContent = "Уже в библиотеке";
       } else {
         addBtn.textContent = "Добавлено";
