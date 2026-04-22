@@ -1,173 +1,358 @@
-import { SEARCH_LIMITS, CATEGORY_LABELS } from "../config.js";
-import {
-  searchBooks,
-  formatBookForUi
-} from "./books-search.js";
-import {
-  searchMoviesAndSeries,
-  formatMovieForUi
-} from "./movies-search.js";
-import {
-  searchAnimeOrManga,
-  formatAnimeMangaForUi
-} from "./anime-search.js";
+import { state, setTheme, setLanguage } from "../state.js";
+import { escapeHtml } from "../utils.js";
 
-/* =========================
-   HELPERS
-========================= */
+function renderSectionContent(section) {
+  switch (section) {
+    case "avatar":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Аватар</div>
+          <div class="settings-panel-text">
+            Здесь будет загрузка и изменение аватара пользователя.
+          </div>
+        </div>
+      `;
 
-function normalizeQuery(value = "") {
-  return String(value).trim();
+    case "profile":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Имя пользователя</div>
+          <div class="settings-form-grid">
+            <label class="settings-label">
+              <span>Display name</span>
+              <input class="settings-input" type="text" value="${escapeHtml(state.user.display_name || "")}" placeholder="Введите имя" />
+            </label>
+
+            <label class="settings-label">
+              <span>Username</span>
+              <input class="settings-input" type="text" value="${escapeHtml(state.user.username || "")}" placeholder="Введите username" />
+            </label>
+          </div>
+        </div>
+      `;
+
+    case "password":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Пароль</div>
+          <div class="settings-form-grid">
+            <label class="settings-label">
+              <span>Новый пароль</span>
+              <input class="settings-input" type="password" placeholder="••••••••" />
+            </label>
+
+            <label class="settings-label">
+              <span>Подтвердить пароль</span>
+              <input class="settings-input" type="password" placeholder="••••••••" />
+            </label>
+          </div>
+        </div>
+      `;
+
+    case "appearance":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Внешний вид</div>
+
+          <div class="settings-setting-block">
+            <div class="settings-setting-title">Тема</div>
+            <div class="settings-chip-row">
+              <button class="settings-chip ${state.theme === "light" ? "is-active" : ""}" data-theme="light">
+                Светлая
+              </button>
+              <button class="settings-chip ${state.theme === "dark" ? "is-active" : ""}" data-theme="dark">
+                Тёмная
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-setting-block">
+            <div class="settings-setting-title">Язык</div>
+            <div class="settings-chip-row">
+              <button class="settings-chip ${state.language === "ru" ? "is-active" : ""}" data-language="ru">
+                Русский
+              </button>
+              <button class="settings-chip ${state.language === "en" ? "is-active" : ""}" data-language="en">
+                English
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-setting-block">
+            <div class="settings-setting-title">Цветовая схема</div>
+            <div class="settings-panel-text">
+              Пока используется базовая фирменная схема Plamut.
+            </div>
+          </div>
+        </div>
+      `;
+
+    case "public":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Публичная карточка</div>
+
+          <div class="settings-form-grid">
+            <label class="settings-label">
+              <span>Заголовок карточки</span>
+              <input class="settings-input" type="text" placeholder="Моя библиотека" />
+            </label>
+
+            <label class="settings-label">
+              <span>Описание</span>
+              <textarea class="settings-textarea" placeholder="Короткое описание профиля"></textarea>
+            </label>
+          </div>
+
+          <div class="settings-inline-actions">
+            <button class="settings-primary-button" type="button">
+              Предпросмотр
+            </button>
+          </div>
+        </div>
+      `;
+
+    case "nfc":
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">NFC</div>
+          <div class="settings-panel-text">
+            Скоро появится.
+          </div>
+        </div>
+      `;
+
+    default:
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-title">Настройки</div>
+          <div class="settings-panel-text">
+            Выбери раздел слева, чтобы изменить параметры профиля.
+          </div>
+        </div>
+      `;
+  }
 }
 
-function emptyGroups() {
-  return {
-    books: [],
-    movies: [],
-    series: [],
-    anime: [],
-    manga: []
-  };
-}
+export function renderSettingsPage(root) {
+  const initialSection = state.routeParams?.section || "appearance";
 
-function addCategoryLabels(items, category) {
-  return items.map((item) => ({
-    ...item,
-    category,
-    category_label: CATEGORY_LABELS[category] || category
-  }));
-}
+  root.innerHTML = `
+    <style>
+      .settings-page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
 
-function splitMovieAndSeries(items = []) {
-  return {
-    movies: items.filter((item) => item.category === "movies"),
-    series: items.filter((item) => item.category === "series")
-  };
-}
+      .settings-title {
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
 
-/* =========================
-   GLOBAL SEARCH
-========================= */
+      .settings-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
 
-export async function runGlobalSearch(query) {
-  const clean = normalizeQuery(query);
-  const groups = emptyGroups();
+      .settings-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow);
+      }
 
-  if (clean.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    return groups;
-  }
+      .settings-nav-button {
+        min-height: 48px;
+        padding: 0 14px;
+        border-radius: 14px;
+        text-align: left;
+        font-weight: 700;
+        color: var(--text-soft);
+      }
 
-  let books = [];
-  let moviesAndSeries = [];
-  let anime = [];
-  let manga = [];
+      .settings-nav-button.is-active {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
 
-  try {
-    [books, moviesAndSeries, anime, manga] = await Promise.all([
-      searchBooks(clean),
-      searchMoviesAndSeries(clean),
-      searchAnimeOrManga(clean, "anime"),
-      searchAnimeOrManga(clean, "manga")
-    ]);
-  } catch (error) {
-    console.warn("Global search error:", error);
-  }
+      .settings-content {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
 
-  const movieSeriesSplit = splitMovieAndSeries(
-    moviesAndSeries.map(formatMovieForUi)
-  );
+      .settings-panel-card {
+        padding: 20px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow);
+      }
 
-  groups.books = addCategoryLabels(
-    books.map(formatBookForUi),
-    "books"
-  );
+      .settings-panel-title {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 10px;
+      }
 
-  groups.movies = addCategoryLabels(
-    movieSeriesSplit.movies,
-    "movies"
-  );
+      .settings-panel-text {
+        color: var(--text-soft);
+        line-height: 1.6;
+      }
 
-  groups.series = addCategoryLabels(
-    movieSeriesSplit.series,
-    "series"
-  );
+      .settings-form-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
 
-  groups.anime = addCategoryLabels(
-    anime.map(formatAnimeMangaForUi),
-    "anime"
-  );
+      .settings-label {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-weight: 600;
+      }
 
-  groups.manga = addCategoryLabels(
-    manga.map(formatAnimeMangaForUi),
-    "manga"
-  );
+      .settings-label span {
+        color: var(--text-soft);
+        font-size: 14px;
+      }
 
-  return groups;
-}
+      .settings-input,
+      .settings-textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        border-radius: 14px;
+        padding: 12px 14px;
+        outline: none;
+      }
 
-/* =========================
-   CATEGORY SEARCH
-========================= */
+      .settings-textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
 
-export async function runCategorySearch(query, category) {
-  const clean = normalizeQuery(query);
+      .settings-setting-block + .settings-setting-block {
+        margin-top: 18px;
+      }
 
-  if (clean.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    return [];
-  }
+      .settings-setting-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-soft);
+        margin-bottom: 10px;
+      }
 
-  if (category === "books") {
-    const results = await searchBooks(clean);
-    return addCategoryLabels(results.map(formatBookForUi), "books");
-  }
+      .settings-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
 
-  if (category === "movies" || category === "series") {
-    const results = await searchMoviesAndSeries(clean);
-    const formatted = results.map(formatMovieForUi);
-    return addCategoryLabels(
-      formatted.filter((item) => item.category === category),
-      category
-    );
-  }
+      .settings-chip {
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        font-weight: 700;
+        color: var(--text-soft);
+      }
 
-  if (category === "anime" || category === "manga") {
-    const results = await searchAnimeOrManga(clean, category);
-    return addCategoryLabels(
-      results.map(formatAnimeMangaForUi),
-      category
-    );
-  }
+      .settings-chip.is-active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
 
-  return [];
-}
+      .settings-inline-actions {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+      }
 
-/* =========================
-   FLATTEN (для full search page)
-========================= */
+      .settings-primary-button {
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: #fff;
+        font-weight: 700;
+        box-shadow: var(--shadow);
+      }
 
-export function flattenResults(grouped) {
-  const result = [];
+      @media (min-width: 900px) {
+        .settings-layout {
+          grid-template-columns: 280px minmax(0, 1fr);
+          align-items: start;
+        }
 
-  Object.entries(grouped).forEach(([category, items]) => {
-    items.forEach((item) => {
-      result.push({
-        ...item,
-        category
+        .settings-sidebar {
+          position: sticky;
+          top: 88px;
+        }
+      }
+    </style>
+
+    <section class="settings-page">
+      <div class="settings-title">Настройки</div>
+
+      <div class="settings-layout">
+        <aside class="settings-sidebar">
+          <button class="settings-nav-button" data-section="appearance">Внешний вид</button>
+          <button class="settings-nav-button" data-section="avatar">Аватар</button>
+          <button class="settings-nav-button" data-section="profile">Имя пользователя</button>
+          <button class="settings-nav-button" data-section="password">Пароль</button>
+          <button class="settings-nav-button" data-section="public">Публичная карточка</button>
+          <button class="settings-nav-button" data-section="nfc">NFC</button>
+        </aside>
+
+        <div class="settings-content" data-settings-content>
+          ${renderSectionContent(initialSection)}
+        </div>
+      </div>
+    </section>
+  `;
+
+  const contentRoot = root.querySelector("[data-settings-content]");
+  const navButtons = [...root.querySelectorAll("[data-section]")];
+
+  function setActive(section) {
+    navButtons.forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.section === section);
+    });
+
+    if (contentRoot) {
+      contentRoot.innerHTML = renderSectionContent(section);
+
+      contentRoot.querySelectorAll("[data-theme]").forEach((button) => {
+        button.addEventListener("click", () => {
+          setTheme(button.dataset.theme);
+        });
       });
+
+      contentRoot.querySelectorAll("[data-language]").forEach((button) => {
+        button.addEventListener("click", () => {
+          setLanguage(button.dataset.language);
+        });
+      });
+    }
+  }
+
+  navButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setActive(button.dataset.section);
     });
   });
 
-  return result;
-}
-
-/* =========================
-   SORT / LIMIT
-========================= */
-
-export function sortByScore(items = []) {
-  return [...items].sort((a, b) => (b.score || 0) - (a.score || 0));
-}
-
-export function limitResults(items = [], limit = SEARCH_LIMITS.PAGE_RESULTS) {
-  return items.slice(0, limit);
+  setActive(initialSection);
 }
