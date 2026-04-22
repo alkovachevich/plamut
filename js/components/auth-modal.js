@@ -1,17 +1,12 @@
 import {
   state,
   closeAuthModal,
-  setAuthMode,
-  setUser
+  setAuthMode
 } from "../state.js";
-
-import { navigate } from "../router.js";
 
 import {
   signInWithEmail,
-  signUpWithEmail,
-  getCurrentUser,
-  fetchUserProfile
+  signUpWithEmail
 } from "../lib/supabase-client.js";
 
 /* =========================
@@ -30,6 +25,20 @@ function escapeHtml(value = "") {
 function renderError(message = "") {
   if (!message) return "";
   return `<div class="auth-error">${escapeHtml(message)}</div>`;
+}
+
+function getSubmitLabel(mode) {
+  return mode === "login" ? "Войти" : "Создать аккаунт";
+}
+
+function getTitle(mode) {
+  return mode === "login" ? "Вход" : "Регистрация";
+}
+
+function getSwitchLabel(mode) {
+  return mode === "login"
+    ? "Нет аккаунта? Зарегистрироваться"
+    : "Уже есть аккаунт? Войти";
 }
 
 /* =========================
@@ -94,6 +103,7 @@ export function renderAuthModal(root) {
         padding: 0 12px;
         background: var(--surface);
         color: var(--text);
+        outline: none;
       }
 
       .auth-button {
@@ -102,6 +112,12 @@ export function renderAuthModal(root) {
         background: var(--accent);
         color: #fff;
         font-weight: 700;
+        border: none;
+      }
+
+      .auth-button:disabled {
+        opacity: 0.7;
+        cursor: default;
       }
 
       .auth-switch {
@@ -115,6 +131,7 @@ export function renderAuthModal(root) {
       .auth-error {
         color: var(--danger);
         font-size: 13px;
+        line-height: 1.45;
       }
 
       .auth-close {
@@ -123,34 +140,31 @@ export function renderAuthModal(root) {
         top: 12px;
         background: transparent;
         font-size: 18px;
+        color: var(--text);
       }
     </style>
 
     <div class="auth-overlay ${isOpen ? "is-open" : ""}">
       <div class="auth-panel">
-        <button class="auth-close" data-close>✕</button>
+        <button class="auth-close" data-close type="button">✕</button>
 
         <div class="auth-title">
-          ${mode === "login" ? "Вход" : "Регистрация"}
+          ${getTitle(mode)}
         </div>
 
         <form class="auth-form">
-          <input class="auth-input" type="email" placeholder="Email" required />
-          <input class="auth-input" type="password" placeholder="Пароль" required />
+          <input class="auth-input" name="email" type="email" placeholder="Email" required />
+          <input class="auth-input" name="password" type="password" placeholder="Пароль" required />
 
           <div data-error></div>
 
           <button class="auth-button" type="submit">
-            ${mode === "login" ? "Войти" : "Создать аккаунт"}
+            ${getSubmitLabel(mode)}
           </button>
         </form>
 
         <div class="auth-switch" data-switch>
-          ${
-            mode === "login"
-              ? "Нет аккаунта? Зарегистрироваться"
-              : "Уже есть аккаунт? Войти"
-          }
+          ${getSwitchLabel(mode)}
         </div>
       </div>
     </div>
@@ -159,6 +173,7 @@ export function renderAuthModal(root) {
   const overlay = root.querySelector(".auth-overlay");
   const form = root.querySelector(".auth-form");
   const errorBox = root.querySelector("[data-error]");
+  const submitButton = root.querySelector(".auth-button");
 
   root.querySelector("[data-close]")?.addEventListener("click", closeAuthModal);
 
@@ -173,39 +188,34 @@ export function renderAuthModal(root) {
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const email = form.querySelector('input[type="email"]').value.trim();
-    const password = form.querySelector('input[type="password"]').value;
+    const emailInput = form.querySelector('input[name="email"]');
+    const passwordInput = form.querySelector('input[name="password"]');
+
+    const email = emailInput?.value?.trim() || "";
+    const password = passwordInput?.value || "";
 
     errorBox.innerHTML = "";
 
+    if (!email || !password) {
+      errorBox.innerHTML = renderError("Заполни email и пароль.");
+      return;
+    }
+
     try {
+      submitButton.disabled = true;
+      submitButton.textContent = mode === "login" ? "Входим..." : "Создаём...";
+
       if (mode === "login") {
         await signInWithEmail(email, password);
       } else {
         await signUpWithEmail(email, password);
       }
 
-      const user = await getCurrentUser();
-
-      let profile = null;
-      if (user?.id) {
-        profile = await fetchUserProfile(user.id);
-      }
-
-      setUser({
-        id: user?.id,
-        email: user?.email,
-        display_name: profile?.display_name || "",
-        username: profile?.username || "",
-        avatar_url: profile?.avatar_url || ""
-      });
-
       closeAuthModal();
-
-      // 🔥 РЕДИРЕКТ НА ГЛАВНУЮ
-      navigate("/");
     } catch (error) {
-      errorBox.innerHTML = renderError(error.message || "Ошибка");
+      errorBox.innerHTML = renderError(error.message || "Ошибка авторизации");
+      submitButton.disabled = false;
+      submitButton.textContent = getSubmitLabel(mode);
     }
   });
 }
