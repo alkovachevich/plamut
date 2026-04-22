@@ -26,7 +26,7 @@ function buildQuery(params = {}) {
   });
 
   const queryString = urlParams.toString();
-  return queryString ? ?${queryString} : "";
+  return queryString ? `?${queryString}` : "";
 }
 
 /* =========================
@@ -34,7 +34,6 @@ function buildQuery(params = {}) {
 ========================= */
 
 function resolveRoute(pathname) {
-  // простое сопоставление путей
   switch (pathname) {
     case ROUTES.HOME:
       return ROUTES.HOME;
@@ -76,7 +75,7 @@ export function navigate(route, params = {}) {
   const path = route;
   const query = buildQuery(params);
 
-  const url = ${path}${query};
+  const url = `${path}${query}`;
 
   if (window.location.pathname + window.location.search !== url) {
     history.pushState({}, "", url);
@@ -104,7 +103,10 @@ function syncRouteFromLocation() {
   const route = resolveRoute(pathname);
   const params = parseQuery(search);
 
-  if (state.route !== route || JSON.stringify(state.routeParams) !== JSON.stringify(params)) {
+  if (
+    state.route !== route ||
+    JSON.stringify(state.routeParams) !== JSON.stringify(params)
+  ) {
     setRoute(route, params);
   }
 }
