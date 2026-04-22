@@ -1,0 +1,46 @@
+#app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  border-bottom: 1px solid transparent;
+}
+
+
+#app-main {
+  width: min(100%, var(--content-max-width));
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+
+.page-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+
+.desktop-only {
+  display: none;
+}
+
+
+@media (min-width: 768px) {
+  #app-main {
+    padding: 28px 24px 56px;
+  }
+
+
+  .desktop-only {
+    display: initial;
+  }
+}
