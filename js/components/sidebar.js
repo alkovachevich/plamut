@@ -4,10 +4,12 @@ import {
   closeSidebar,
   setTheme,
   setLanguage,
-  logoutUser
+  logoutUser,
+  openAuthModal
 } from "../state.js";
 import { escapeHtml, getInitials } from "../utils.js";
 import { ROUTES } from "../config.js";
+import { signOut } from "../lib/supabase-client.js";
 
 function renderAvatar(user) {
   const name = user?.display_name || user?.username || "Гость";
@@ -26,8 +28,13 @@ function renderAvatar(user) {
   return `<div class="avatar-fallback">${escapeHtml(getInitials(name))}</div>`;
 }
 
+function isLoggedIn(user) {
+  return Boolean(user?.id);
+}
+
 export function renderSidebar(root) {
   const user = state.user;
+  const loggedIn = isLoggedIn(user);
   const isOpen = state.sidebarOpen;
 
   root.innerHTML = `
@@ -80,6 +87,7 @@ export function renderSidebar(root) {
         border-radius: 999px;
         overflow: hidden;
         border: 1px solid var(--border);
+        flex-shrink: 0;
       }
 
       .sidebar-avatar img {
@@ -101,11 +109,13 @@ export function renderSidebar(root) {
       .sidebar-profile__name {
         font-size: 18px;
         font-weight: 700;
+        line-height: 1.25;
       }
 
       .sidebar-profile__sub {
         color: var(--text-soft);
         font-size: 14px;
+        line-height: 1.35;
       }
 
       .setting-row {
@@ -116,17 +126,21 @@ export function renderSidebar(root) {
         border-radius: 14px;
         background: var(--surface);
         border: 1px solid var(--border);
+        gap: 12px;
       }
 
       .segmented {
         display: flex;
         gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
 
       .segmented button {
         padding: 6px 10px;
         border-radius: 999px;
         background: var(--bg-soft);
+        color: var(--text);
       }
 
       .segmented .active {
@@ -145,6 +159,7 @@ export function renderSidebar(root) {
         padding: 12px;
         border-radius: 12px;
         font-weight: 600;
+        color: var(--text);
       }
 
       .btn.secondary {
@@ -152,25 +167,34 @@ export function renderSidebar(root) {
         border: 1px solid var(--border);
       }
 
+      .btn.primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
       .btn.danger {
-        background: rgba(255, 91, 110, 0.2);
+        background: rgba(255, 91, 110, 0.14);
         color: var(--danger);
       }
     </style>
 
     <div class="sidebar-overlay ${isOpen ? "is-open" : ""}">
       <div class="sidebar-panel">
-
         <div class="sidebar-profile">
           <div class="sidebar-avatar">
             ${renderAvatar(user)}
           </div>
+
           <div>
             <div class="sidebar-profile__name">
               ${escapeHtml(user.display_name || "Гость")}
             </div>
             <div class="sidebar-profile__sub">
-              @${escapeHtml(user.username || "guest")}
+              ${
+                loggedIn
+                  ? `@${escapeHtml(user.username || "user")}`
+                  : "Войди, чтобы сохранить библиотеку"
+              }
             </div>
           </div>
         </div>
@@ -196,11 +220,20 @@ export function renderSidebar(root) {
             Настройки
           </button>
 
-          <button class="btn danger" data-action="logout">
-            Выйти
-          </button>
+          ${
+            loggedIn
+              ? `
+                <button class="btn danger" data-action="logout">
+                  Выйти
+                </button>
+              `
+              : `
+                <button class="btn primary" data-action="login">
+                  Войти
+                </button>
+              `
+          }
         </div>
-
       </div>
     </div>
   `;
@@ -230,8 +263,31 @@ export function renderSidebar(root) {
     navigate(ROUTES.SETTINGS);
   });
 
-  root.querySelector('[data-action="logout"]')?.addEventListener("click", () => {
-    logoutUser();
+  root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
     closeSidebar();
+    openAuthModal("login");
+  });
+
+  root.querySelector('[data-action="logout"]')?.addEventListener("click", async () => {
+    const logoutBtn = root.querySelector('[data-action="logout"]');
+
+    try {
+      if (logoutBtn) {
+        logoutBtn.disabled = true;
+        logoutBtn.textContent = "Выход...";
+      }
+
+      await signOut();
+      logoutUser();
+      closeSidebar();
+      navigate(ROUTES.HOME);
+    } catch (error) {
+      console.error("Logout error:", error);
+
+      if (logoutBtn) {
+        logoutBtn.disabled = false;
+        logoutBtn.textContent = "Выйти";
+      }
+    }
   });
 }
