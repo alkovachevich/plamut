@@ -1,8 +1,17 @@
-import { runGlobalSearch, flattenResults } from "../services/search-service.js";
+import { runGlobalSearch, flattenResults, sortByScore, limitResults } from "../services/search-service.js";
 import { CATEGORY_LABELS, SEARCH_LIMITS } from "../config.js";
 import { navigate } from "../router.js";
-import { setSearchQuery } from "../state.js";
-import { debounce, escapeHtml } from "../utils.js";
+import {
+  setSearchQuery,
+  setSearchResults,
+  setCurrentItem,
+  state
+} from "../state.js";
+import { debounce, escapeHtml, clampText } from "../utils.js";
+
+/* =========================
+   HELPERS
+========================= */
 
 function renderCover(item) {
   if (item.cover_url) {
@@ -31,31 +40,109 @@ function renderCard(item) {
       </div>
 
       <div class="result-meta">
-        <div class="result-title">
-          ${escapeHtml(item.title || "")}
+        <div class="result-top">
+          <div class="result-title">
+            ${escapeHtml(clampText(item.title || "", 90))}
+          </div>
+
+          ${
+            item.year
+              ? `<span class="result-year">${escapeHtml(String(item.year))}</span>`
+              : ""
+          }
         </div>
 
         ${
           item.original_title
-            ? `<div class="result-subtitle">${escapeHtml(item.original_title)}</div>`
+            ? `<div class="result-subtitle">${escapeHtml(clampText(item.original_title, 100))}</div>`
             : ""
         }
 
         <div class="result-footer">
           <span class="badge">${escapeHtml(CATEGORY_LABELS[item.category] || item.category)}</span>
-          ${
-            item.year
-              ? `<span class="year">${escapeHtml(String(item.year))}</span>`
-              : ""
-          }
         </div>
       </div>
     </button>
   `;
 }
 
+function renderEmpty(message) {
+  return `<div class="empty">${escapeHtml(message)}</div>`;
+}
+
+function attachCardHandlers(root, items = []) {
+  const byKey = new Map(
+    items.map((item) => [item.canonical_key, item])
+  );
+
+  root.querySelectorAll("[data-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.key || "";
+      const category = button.dataset.category || "";
+      const payload = byKey.get(key) || null;
+
+      if (payload) {
+        setCurrentItem(payload);
+      }
+
+      navigate("/card", {
+        key,
+        category
+      });
+    });
+  });
+}
+
+/* =========================
+   SEARCH
+========================= */
+
+async function performSearch(resultsRoot, query) {
+  const cleanQuery = String(query || "").trim();
+
+  if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+    setSearchResults(null);
+    resultsRoot.innerHTML = renderEmpty("Введите больше символов");
+    return;
+  }
+
+  const requestId = Date.now();
+  resultsRoot.dataset.requestId = String(requestId);
+  resultsRoot.innerHTML = renderEmpty("Ищем...");
+
+  try {
+    const grouped = await runGlobalSearch(cleanQuery);
+
+    if (resultsRoot.dataset.requestId !== String(requestId)) {
+      return;
+    }
+
+    setSearchResults(grouped);
+
+    const flat = limitResults(
+      sortByScore(flattenResults(grouped)),
+      SEARCH_LIMITS.PAGE_RESULTS
+    );
+
+    if (!flat.length) {
+      resultsRoot.innerHTML = renderEmpty("Ничего не найдено");
+      return;
+    }
+
+    resultsRoot.innerHTML = flat.map(renderCard).join("");
+    attachCardHandlers(resultsRoot, flat);
+  } catch (error) {
+    console.error("Search page error:", error);
+    resultsRoot.innerHTML = renderEmpty("Ошибка поиска");
+  }
+}
+
+/* =========================
+   PAGE
+========================= */
+
 export function renderSearchPage(root, params = {}) {
-  const query = params.q || "";
+  const initialQuery = params.q || state.searchQuery || "";
 
   root.innerHTML = `
     <style>
@@ -69,6 +156,11 @@ export function renderSearchPage(root, params = {}) {
         display: flex;
         flex-direction: column;
         gap: 12px;
+      }
+
+      .search-title {
+        font-size: 28px;
+        font-weight: 800;
       }
 
       .search-input {
@@ -90,7 +182,7 @@ export function renderSearchPage(root, params = {}) {
 
       .result-card {
         display: grid;
-        grid-template-columns: 80px 1fr;
+        grid-template-columns: 84px 1fr;
         gap: 12px;
         padding: 10px;
         border-radius: 16px;
@@ -100,8 +192,8 @@ export function renderSearchPage(root, params = {}) {
       }
 
       .result-cover {
-        width: 80px;
-        height: 110px;
+        width: 84px;
+        height: 118px;
         border-radius: 12px;
         overflow: hidden;
         background: var(--bg-soft);
@@ -117,21 +209,45 @@ export function renderSearchPage(root, params = {}) {
         display: grid;
         place-items: center;
         height: 100%;
+        color: var(--text-soft);
+      }
+
+      .result-meta {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        justify-content: center;
+      }
+
+      .result-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
       }
 
       .result-title {
         font-weight: 700;
+        line-height: 1.35;
+      }
+
+      .result-year {
+        flex-shrink: 0;
+        color: var(--text-soft);
+        font-size: 13px;
       }
 
       .result-subtitle {
         font-size: 13px;
         color: var(--text-soft);
+        line-height: 1.4;
       }
 
       .result-footer {
         display: flex;
         gap: 10px;
-        margin-top: 6px;
+        margin-top: 2px;
         font-size: 12px;
         color: var(--text-soft);
       }
@@ -146,21 +262,28 @@ export function renderSearchPage(root, params = {}) {
         text-align: center;
         padding: 30px;
         color: var(--text-soft);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--surface);
       }
     </style>
 
     <section class="page">
       <div class="search-header">
+        <div class="search-title">Поиск</div>
+
         <input
           class="search-input"
           type="text"
-          value="${escapeHtml(query)}"
-          placeholder="Поиск..."
+          value="${escapeHtml(initialQuery)}"
+          placeholder="Поиск книг, фильмов, аниме, манги..."
+          autocomplete="off"
+          spellcheck="false"
         />
       </div>
 
       <div class="results-grid" data-results>
-        <div class="empty">Введите запрос...</div>
+        ${renderEmpty("Введите запрос...")}
       </div>
     </section>
   `;
@@ -168,47 +291,18 @@ export function renderSearchPage(root, params = {}) {
   const input = root.querySelector(".search-input");
   const resultsRoot = root.querySelector("[data-results]");
 
-  async function doSearch(value) {
-    if (!value || value.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-      resultsRoot.innerHTML = `<div class="empty">Введите больше символов</div>`;
-      return;
-    }
+  const debouncedSearch = debounce((value) => {
+    performSearch(resultsRoot, value);
+  }, SEARCH_LIMITS.DEBOUNCE_MS);
 
-    resultsRoot.innerHTML = `<div class="empty">Ищем...</div>`;
-
-    try {
-      const grouped = await runGlobalSearch(value);
-      const flat = flattenResults(grouped);
-
-      if (!flat.length) {
-        resultsRoot.innerHTML = `<div class="empty">Ничего не найдено</div>`;
-        return;
-      }
-
-      resultsRoot.innerHTML = flat.map(renderCard).join("");
-
-      resultsRoot.querySelectorAll("[data-key]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          navigate("/card", {
-            key: btn.dataset.key,
-            category: btn.dataset.category
-          });
-        });
-      });
-    } catch (e) {
-      resultsRoot.innerHTML = `<div class="empty">Ошибка поиска</div>`;
-    }
-  }
-
-  const debounced = debounce(doSearch, 300);
-
-  input.addEventListener("input", () => {
-    const value = input.value;
+  input?.addEventListener("input", () => {
+    const value = input.value || "";
     setSearchQuery(value);
-    debounced(value);
+    debouncedSearch(value);
   });
 
-  if (query) {
-    doSearch(query);
+  if (initialQuery && initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+    setSearchQuery(initialQuery);
+    performSearch(resultsRoot, initialQuery);
   }
 }
