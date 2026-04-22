@@ -2,6 +2,10 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
 
+/* =========================
+   CLIENT
+========================= */
+
 function createClient() {
   if (!window.supabase) {
     throw new Error("Supabase SDK не загружен");
@@ -36,7 +40,7 @@ export async function getCurrentSession() {
     return null;
   }
 
-  return data.session || null;
+  return data?.session || null;
 }
 
 export async function getCurrentUser() {
@@ -48,7 +52,7 @@ export async function getCurrentUser() {
     return null;
   }
 
-  return data.user || null;
+  return data?.user || null;
 }
 
 export async function signInWithEmail(email, password) {
@@ -89,35 +93,52 @@ export async function signOut() {
   if (error) {
     throw error;
   }
+
+  return true;
 }
 
 /* =========================
-   DB HELPERS (BASIC)
+   PROFILE HELPERS
 ========================= */
 
 export async function fetchUserProfile(userId) {
+  if (!userId) return null;
+
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("fetchUserProfile error:", error);
     return null;
   }
 
-  return data;
+  return data || null;
 }
 
 export async function upsertUserProfile(profile) {
+  if (!profile?.id) {
+    throw new Error("upsertUserProfile: profile.id is required");
+  }
+
   const supabase = getSupabaseClient();
+
+  const payload = {
+    id: profile.id,
+    username: profile.username || null,
+    display_name: profile.display_name || null,
+    avatar_url: profile.avatar_url || null
+  };
 
   const { data, error } = await supabase
     .from("profiles")
-    .upsert(profile)
+    .upsert(payload, {
+      onConflict: "id"
+    })
     .select()
     .single();
 
