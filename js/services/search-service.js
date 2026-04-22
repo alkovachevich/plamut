@@ -1,5 +1,13 @@
 import { SEARCH_LIMITS, CATEGORY_LABELS } from "../config.js";
 import {
+  searchBooks,
+  formatBookForUi
+} from "./books-search.js";
+import {
+  searchMoviesAndSeries,
+  formatMovieForUi
+} from "./movies-search.js";
+import {
   searchAnimeOrManga,
   formatAnimeMangaForUi
 } from "./anime-search.js";
@@ -30,8 +38,15 @@ function addCategoryLabels(items, category) {
   }));
 }
 
+function splitMovieAndSeries(items = []) {
+  return {
+    movies: items.filter((item) => item.category === "movies"),
+    series: items.filter((item) => item.category === "series")
+  };
+}
+
 /* =========================
-   GLOBAL SEARCH (ALL CATEGORIES)
+   GLOBAL SEARCH
 ========================= */
 
 export async function runGlobalSearch(query) {
@@ -42,19 +57,40 @@ export async function runGlobalSearch(query) {
     return groups;
   }
 
-  /* ===== Anime + Manga (реально работает) ===== */
-
+  let books = [];
+  let moviesAndSeries = [];
   let anime = [];
   let manga = [];
 
   try {
-    [anime, manga] = await Promise.all([
+    [books, moviesAndSeries, anime, manga] = await Promise.all([
+      searchBooks(clean),
+      searchMoviesAndSeries(clean),
       searchAnimeOrManga(clean, "anime"),
       searchAnimeOrManga(clean, "manga")
     ]);
-  } catch (e) {
-    console.warn("Anime/Manga search error:", e);
+  } catch (error) {
+    console.warn("Global search error:", error);
   }
+
+  const movieSeriesSplit = splitMovieAndSeries(
+    moviesAndSeries.map(formatMovieForUi)
+  );
+
+  groups.books = addCategoryLabels(
+    books.map(formatBookForUi),
+    "books"
+  );
+
+  groups.movies = addCategoryLabels(
+    movieSeriesSplit.movies,
+    "movies"
+  );
+
+  groups.series = addCategoryLabels(
+    movieSeriesSplit.series,
+    "series"
+  );
 
   groups.anime = addCategoryLabels(
     anime.map(formatAnimeMangaForUi),
@@ -65,12 +101,6 @@ export async function runGlobalSearch(query) {
     manga.map(formatAnimeMangaForUi),
     "manga"
   );
-
-  /* ===== Остальные категории (пока пустые, но структура есть) ===== */
-
-  groups.books = [];
-  groups.movies = [];
-  groups.series = [];
 
   return groups;
 }
@@ -86,6 +116,20 @@ export async function runCategorySearch(query, category) {
     return [];
   }
 
+  if (category === "books") {
+    const results = await searchBooks(clean);
+    return addCategoryLabels(results.map(formatBookForUi), "books");
+  }
+
+  if (category === "movies" || category === "series") {
+    const results = await searchMoviesAndSeries(clean);
+    const formatted = results.map(formatMovieForUi);
+    return addCategoryLabels(
+      formatted.filter((item) => item.category === category),
+      category
+    );
+  }
+
   if (category === "anime" || category === "manga") {
     const results = await searchAnimeOrManga(clean, category);
     return addCategoryLabels(
@@ -98,7 +142,7 @@ export async function runCategorySearch(query, category) {
 }
 
 /* =========================
-   FLATTEN (для страниц)
+   FLATTEN (для full search page)
 ========================= */
 
 export function flattenResults(grouped) {
@@ -117,7 +161,7 @@ export function flattenResults(grouped) {
 }
 
 /* =========================
-   SORT HELPERS
+   SORT / LIMIT
 ========================= */
 
 export function sortByScore(items = []) {
