@@ -1,3 +1,5 @@
+import { openAuthModal } from "../state.js";
+
 export function renderGuestPage(root) {
   root.innerHTML = `
     <style>
@@ -227,4 +229,12 @@ export function renderGuestPage(root) {
       </section>
     </section>
   `;
+
+  root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
+    openAuthModal("login");
+  });
+
+  root.querySelector('[data-action="register"]')?.addEventListener("click", () => {
+    openAuthModal("register");
+  });
 }
