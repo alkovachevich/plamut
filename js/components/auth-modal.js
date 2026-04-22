@@ -5,6 +5,8 @@ import {
   setUser
 } from "../state.js";
 
+import { navigate } from "../router.js";
+
 import {
   signInWithEmail,
   signUpWithEmail,
@@ -31,7 +33,7 @@ function renderError(message = "") {
 }
 
 /* =========================
-   MAIN RENDER
+   MAIN
 ========================= */
 
 export function renderAuthModal(root) {
@@ -199,6 +201,9 @@ export function renderAuthModal(root) {
       });
 
       closeAuthModal();
+
+      // 🔥 РЕДИРЕКТ НА ГЛАВНУЮ
+      navigate("/");
     } catch (error) {
       errorBox.innerHTML = renderError(error.message || "Ошибка");
     }
