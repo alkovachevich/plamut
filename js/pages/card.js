@@ -1,37 +1,59 @@
 import { escapeHtml } from "../utils.js";
-import { navigate } from "../router.js";
 import { CATEGORY_LABELS } from "../config.js";
+import { state, openAuthModal } from "../state.js";
+
+import {
+  getEntityByCanonicalKey,
+  saveEntityIfMissing,
+  addToUserLibrary,
+  isAlreadyInUserLibrary
+} from "../services/entity-db.js";
 
 /* =========================
-   MOCK FETCH (пока без БД)
+   HELPERS
 ========================= */
 
-function parseKey(key = "") {
-  const parts = key.split(":");
-  return {
-    category: parts[0],
-    source: parts[1],
-    id: parts[2]
-  };
+function resolveDescription(entity) {
+  return (
+    entity?.description_ru ||
+    entity?.description_en ||
+    entity?.description ||
+    ""
+  );
 }
 
-async function fetchEntity(params) {
-  const { key, category } = params;
+function resolveTitle(entity) {
+  return (
+    entity?.title_primary ||
+    entity?.title ||
+    entity?.original_title ||
+    ""
+  );
+}
 
-  if (!key) return null;
+/* =========================
+   LOAD ENTITY
+========================= */
 
-  const parsed = parseKey(key);
+async function loadEntity(params) {
+  const { key, category, payload } = params || {};
 
-  // Пока просто возвращаем минимальную структуру
-  return {
-    canonical_key: key,
-    category: category || parsed.category,
-    title: `Объект ${parsed.id}`,
-    original_title: `Original ${parsed.id}`,
-    year: 2020,
-    cover_url: "",
-    description: "Описание будет подтягиваться позже из API или базы данных."
-  };
+  // 1. Пытаемся взять из БД
+  if (key) {
+    const fromDb = await getEntityByCanonicalKey(key);
+    if (fromDb) return fromDb;
+  }
+
+  // 2. Если есть payload (из поиска) — сохраняем и возвращаем
+  if (payload && payload.canonical_key) {
+    return await saveEntityIfMissing({
+      ...payload,
+      category: payload.category || category
+    });
+  }
+
+  // 3. fallback
+  return null;
 }
 
 /* =========================
@@ -39,16 +61,35 @@ async function fetchEntity(params) {
 ========================= */
 
 export async function renderCardPage(root, params = {}) {
-  root.innerHTML = `
-    <div style="padding:20px;">Загрузка...</div>
-  `;
+  root.innerHTML = `<div style="padding:20px;">Загрузка...</div>`;
 
-  const entity = await fetchEntity(params);
+  let entity = null;
+
+  try {
+    entity = await loadEntity(params);
+  } catch (error) {
+    console.error("Card load error:", error);
+  }
 
   if (!entity) {
     root.innerHTML = `<div style="padding:20px;">Не найдено</div>`;
     return;
   }
+
+  const userId = state.user?.id;
+
+  let alreadyAdded = false;
+
+  try {
+    if (userId && entity.id) {
+      alreadyAdded = await isAlreadyInUserLibrary(userId, entity.id);
+    }
+  } catch (e) {
+    console.warn("Library check error:", e);
+  }
+
+  const title = resolveTitle(entity);
+  const description = resolveDescription(entity);
 
   root.innerHTML = `
     <style>
@@ -116,6 +157,16 @@ export async function renderCardPage(root, params = {}) {
         font-weight: 600;
       }
 
+      .btn.primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
       .description {
         line-height: 1.6;
         color: var(--text-soft);
@@ -133,7 +184,7 @@ export async function renderCardPage(root, params = {}) {
         </div>
 
         <div class="meta">
-          <div class="title">${escapeHtml(entity.title)}</div>
+          <div class="title">${escapeHtml(title)}</div>
 
           ${
             entity.original_title
@@ -146,23 +197,49 @@ export async function renderCardPage(root, params = {}) {
           </div>
 
           <div class="actions">
-            <button class="btn" data-action="add">Добавить</button>
-            <button class="btn" data-action="relations">Связи</button>
+            <button class="btn primary ${
+              alreadyAdded ? "disabled" : ""
+            }" data-action="add">
+              ${alreadyAdded ? "Уже в библиотеке" : "Добавить"}
+            </button>
           </div>
         </div>
       </div>
 
       <div class="description">
-        ${escapeHtml(entity.description)}
+        ${escapeHtml(description)}
       </div>
     </section>
   `;
 
-  root.querySelector('[data-action="add"]')?.addEventListener("click", () => {
-    alert("Добавление в библиотеку подключим следующим шагом");
-  });
+  const addBtn = root.querySelector('[data-action="add"]');
 
-  root.querySelector('[data-action="relations"]')?.addEventListener("click", () => {
-    alert("Связи/вселенные подключим следующим шагом");
+  addBtn?.addEventListener("click", async () => {
+    const userId = state.user?.id;
+
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
+
+    try {
+      addBtn.classList.add("disabled");
+      addBtn.textContent = "Добавление...";
+
+      const result = await addToUserLibrary({
+        userId,
+        entity
+      });
+
+      if (result.alreadyExists) {
+        addBtn.textContent = "Уже в библиотеке";
+      } else {
+        addBtn.textContent = "Добавлено";
+      }
+    } catch (error) {
+      console.error("Add to library error:", error);
+      addBtn.classList.remove("disabled");
+      addBtn.textContent = "Ошибка";
+    }
   });
 }
