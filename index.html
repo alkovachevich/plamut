@@ -1,139 +1,124 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plamut</title>
+
+  <!-- Supabase -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
   <style>
     :root {
-      --bg: #0f1117;
-      --bg-elevated: #171a22;
-      --bg-soft: #1e2230;
-      --surface: rgba(255, 255, 255, 0.04);
-      --surface-strong: rgba(255, 255, 255, 0.08);
-      --border: rgba(255, 255, 255, 0.1);
-      --text: #f4f6fb;
-      --text-soft: #b7bfd1;
-      --text-muted: #8a92a7;
-      --accent: #7c5cff;
-      --accent-strong: #6948ff;
-      --accent-soft: rgba(124, 92, 255, 0.18);
+      --bg: #0b0f14;
+      --bg-elevated: #11161d;
+      --bg-soft: #161c24;
+      --surface: #1b222c;
+
+      --text: #e8edf3;
+      --text-soft: #9aa6b2;
+      --text-muted: #6b7683;
+
+      --border: #232b36;
+
+      --accent: #5b8cff;
+      --accent-strong: #3b6bff;
+      --accent-soft: rgba(91, 140, 255, 0.15);
+
       --danger: #ff5b6e;
-      --shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
-      --radius-xl: 28px;
-      --radius-lg: 22px;
-      --radius-md: 16px;
-      --radius-sm: 12px;
-      --header-height: 72px;
-      --content-max-width: 1280px;
-      color-scheme: dark;
+
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+
+      --header-height: 64px;
+      --content-max-width: 1100px;
     }
 
-    html[data-theme="light"] {
-      --bg: #f5f7fc;
+    [data-theme="light"] {
+      --bg: #f6f8fb;
       --bg-elevated: #ffffff;
-      --bg-soft: #edf1fa;
-      --surface: rgba(17, 24, 39, 0.03);
-      --surface-strong: rgba(17, 24, 39, 0.06);
-      --border: rgba(17, 24, 39, 0.08);
-      --text: #161b2b;
-      --text-soft: #4c566f;
-      --text-muted: #697388;
-      --accent-soft: rgba(124, 92, 255, 0.12);
-      --shadow: 0 12px 34px rgba(33, 39, 59, 0.08);
-      color-scheme: light;
+      --bg-soft: #eef2f7;
+      --surface: #ffffff;
+
+      --text: #0f1720;
+      --text-soft: #5b6775;
+      --text-muted: #7c8794;
+
+      --border: #dbe2ea;
+
+      --accent-soft: rgba(91, 140, 255, 0.12);
+
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
     }
 
-    *,
-    *::before,
-    *::after {
+    * {
       box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, sans-serif;
     }
 
-    html,
     body {
-      margin: 0;
-      min-height: 100%;
       background: var(--bg);
       color: var(--text);
-      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-    }
-
-    body {
       min-height: 100vh;
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    button,
-    input,
-    textarea,
-    select {
-      font: inherit;
     }
 
     button {
-      border: 0;
-      background: none;
-      color: inherit;
+      border: none;
       cursor: pointer;
+      font: inherit;
     }
 
-    img {
-      display: block;
-      max-width: 100%;
+    input, textarea {
+      font: inherit;
     }
 
-    #app-shell {
+    /* Layout */
+
+    .app {
+      display: flex;
+      flex-direction: column;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at top right, var(--accent-soft), transparent 32%),
-        radial-gradient(circle at top left, rgba(45, 212, 191, 0.08), transparent 25%),
-        var(--bg);
     }
 
     #app-header {
       position: sticky;
       top: 0;
-      z-index: 40;
-      backdrop-filter: blur(14px);
-      background: color-mix(in srgb, var(--bg) 72%, transparent);
-      border-bottom: 1px solid transparent;
+      z-index: 50;
+      backdrop-filter: blur(8px);
+      background: rgba(10, 14, 20, 0.6);
     }
 
     #app-main {
       width: min(100%, var(--content-max-width));
       margin: 0 auto;
-      padding: 20px 16px 48px;
+      padding: 20px 16px 40px;
+      flex: 1;
     }
 
-    @media (min-width: 768px) {
-      #app-main {
-        padding: 28px 24px 56px;
-      }
+    /* Containers for overlays */
+
+    #sidebar-root,
+    #search-modal-root,
+    #auth-modal-root {
+      position: relative;
+      z-index: 100;
     }
   </style>
 </head>
+
 <body>
-  <div id="app-shell">
+  <div class="app">
     <header id="app-header"></header>
+
     <main id="app-main"></main>
+
+    <!-- overlays -->
     <div id="sidebar-root"></div>
     <div id="search-modal-root"></div>
-    <div id="modal-root"></div>
-    <div id="toast-root"></div>
+    <div id="auth-modal-root"></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
