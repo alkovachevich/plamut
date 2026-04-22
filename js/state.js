@@ -1,45 +1,138 @@
-    export const state = {
-  currentLanguage: localStorage.getItem("plamut_language") || "ru",
-  currentThemeMode: localStorage.getItem("plamut_theme_mode") || "system",
-  currentFilterFolder: localStorage.getItem("plamut_folder_filter") || "All",
-  currentItemActionSheetId: null,
+import { DEFAULT_LANGUAGE, DEFAULT_THEME, LOCAL_STORAGE_KEYS, DEFAULT_USER } from "./config.js";
+
+const listeners = new Set();
+
+export const state = {
+  route: "/",
+  routeParams: {},
+
+  sidebarOpen: false,
+  searchModalOpen: false,
+
+  searchQuery: "",
+  searchResults: null,
+
+  theme: localStorage.getItem(LOCAL_STORAGE_KEYS.THEME) || DEFAULT_THEME,
+  language: localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE) || DEFAULT_LANGUAGE,
+
+  user: { ...DEFAULT_USER },
+
   currentCategory: null,
-  currentOpenItemId: null,
-  currentRelationsItemId: null,
-  currentRelationsCategory: null,
-  currentStatusItemId: null,
-  currentSearchResults: [],
-  isPublicView: false,
-  currentPublicProfileName: "Library",
-  searchTimer: null,
-  currentFilterStatus: localStorage.getItem("plamut_status_filter") || "All",
-  currentShelfSearchQuery: "",
-  currentFolderModalItemId: null,
-  pendingFolderSelection: "",
-  currentOpenMenuItemId: null,
-  currentProfileData: null,
-  currentPublicProfile: null,
-  activeShareToken: "",
-  currentPublicShareItems: [],
-  currentPublicShareState: "loading",
-  publicLibraryExpanded: false,
-  currentNfcContext: null,
-  currentPublicLibraryMeta: { categories: [], folders: [], statuses: [] },
-  currentSavedLibraryState: { saved: false, source: "none" },
-  relationCache: new Map(),
-  relationBuildLocks: new Map(),
-  categorySearchCache: new Map(),
-  categorySearchInFlight: new Map(),
-  localCategorySearchCache: new Map(),
-  bookDescriptionCache: new Map(),
-  activeCategorySearchToken: 0,
-  relatedLibraryItemsCache: { userId: "", items: [], loaded: false, promise: null },
-  demoData: {
-    Books: [],
-    Movies: [],
-    Series: [],
-    Anime: [],
-    Manga: [],
-    Blacklist: []
-  }
+  currentItem: null,
+  currentUniverse: null
 };
+
+/* =========================
+   STATE CORE
+========================= */
+
+export function setState(patch = {}) {
+  Object.assign(state, patch);
+  listeners.forEach((listener) => listener(state));
+}
+
+export function subscribe(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/* =========================
+   ROUTE STATE
+========================= */
+
+export function setRoute(route, params = {}) {
+  setState({
+    route,
+    routeParams: params
+  });
+}
+
+/* =========================
+   THEME
+========================= */
+
+export function setTheme(theme) {
+  localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, theme);
+  setState({ theme });
+}
+
+/* =========================
+   LANGUAGE
+========================= */
+
+export function setLanguage(language) {
+  localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, language);
+  setState({ language });
+}
+
+/* =========================
+   UI CONTROLS
+========================= */
+
+export function openSidebar() {
+  setState({ sidebarOpen: true });
+}
+
+export function closeSidebar() {
+  setState({ sidebarOpen: false });
+}
+
+export function openSearchModal(initialQuery = "") {
+  setState({
+    searchModalOpen: true,
+    searchQuery: initialQuery
+  });
+}
+
+export function closeSearchModal() {
+  setState({
+    searchModalOpen: false
+  });
+}
+
+/* =========================
+   SEARCH
+========================= */
+
+export function setSearchQuery(query) {
+  setState({ searchQuery: query });
+}
+
+export function setSearchResults(results) {
+  setState({ searchResults: results });
+}
+
+/* =========================
+   USER
+========================= */
+
+export function setUser(user) {
+  setState({
+    user: {
+      ...DEFAULT_USER,
+      ...user
+    }
+  });
+}
+
+export function logoutUser() {
+  setState({
+    user: { ...DEFAULT_USER }
+  });
+}
+
+/* =========================
+   CONTEXT (CATEGORY / CARD / UNIVERSE)
+========================= */
+
+export function setCurrentCategory(category) {
+  setState({ currentCategory: category });
+}
+
+export function setCurrentItem(item) {
+  setState({ currentItem: item });
+}
+
+export function setCurrentUniverse(universe) {
+  setState({ currentUniverse: universe });
+}
