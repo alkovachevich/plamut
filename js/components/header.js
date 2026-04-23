@@ -37,24 +37,34 @@ export function renderHeader(root) {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 12px;
       }
 
       .brand-row {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
       }
 
       .brand-title-button {
         background: transparent;
         padding: 0;
         text-align: left;
+        color: var(--text);
       }
 
       .brand-title {
-        font-size: 26px;
+        font-size: 24px;
         font-weight: 800;
         letter-spacing: -0.03em;
+        color: var(--text);
+      }
+
+      .brand-subtitle {
+        font-size: 12px;
+        color: var(--text-soft);
+        margin-top: 2px;
       }
 
       .avatar-button {
@@ -64,10 +74,11 @@ export function renderHeader(root) {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: var(--bg-elevated);
+        background: var(--surface-strong);
         border: 1px solid var(--border);
         box-shadow: var(--shadow);
         overflow: hidden;
+        flex-shrink: 0;
       }
 
       .avatar-button img {
@@ -91,6 +102,7 @@ export function renderHeader(root) {
       <div class="brand-row">
         <button class="brand-title-button" type="button" aria-label="На главную">
           <div class="brand-title">${APP_NAME}</div>
+          <div class="brand-subtitle">Library & universes</div>
         </button>
       </div>
 
