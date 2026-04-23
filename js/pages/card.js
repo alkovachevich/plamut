@@ -1,6 +1,11 @@
 import { escapeHtml } from "../utils.js";
 import { getCategoryLabel } from "../config.js";
-import { state, openAuthModal } from "../state.js";
+import {
+  state,
+  openAuthModal,
+  getTemporaryCardItem,
+  clearTemporaryCardItem
+} from "../state.js";
 
 import {
   getEntityByCanonicalKey,
@@ -8,10 +13,6 @@ import {
   addToUserLibrary,
   isAlreadyInUserLibrary
 } from "../services/entity-db.js";
-
-/* =========================
-   HELPERS
-========================= */
 
 function resolveDescription(entity) {
   return (
@@ -31,46 +32,28 @@ function resolveTitle(entity) {
   );
 }
 
-function getPayloadFromState(params = {}) {
-  const current = state.currentItem;
-
-  if (!current?.canonical_key) {
-    return null;
-  }
-
-  if (params?.key && current.canonical_key !== params.key) {
-    return null;
-  }
-
-  return current;
-}
-
-/* =========================
-   LOAD ENTITY
-========================= */
-
-async function loadEntity(params) {
+async function loadEntity(params = {}) {
   const { key, category } = params || {};
-  const statePayload = getPayloadFromState(params);
 
   if (key) {
     const fromDb = await getEntityByCanonicalKey(key);
-    if (fromDb) return fromDb;
+    if (fromDb) {
+      clearTemporaryCardItem();
+      return fromDb;
+    }
   }
 
-  if (statePayload?.canonical_key) {
-    return await saveEntityIfMissing({
-      ...statePayload,
-      category: statePayload.category || category
-    });
+  const temp = getTemporaryCardItem();
+
+  if (temp?.canonical_key && (!key || temp.canonical_key === key)) {
+    return {
+      ...temp,
+      category: temp.category || category
+    };
   }
 
   return null;
 }
-
-/* =========================
-   RENDER
-========================= */
 
 export async function renderCardPage(root, params = {}) {
   root.innerHTML = `
@@ -326,6 +309,10 @@ export async function renderCardPage(root, params = {}) {
         userId: currentUserId,
         entity
       });
+
+      if (result?.entity?.canonical_key) {
+        clearTemporaryCardItem();
+      }
 
       if (result?.alreadyExists) {
         addBtn.textContent = "Уже в библиотеке";
