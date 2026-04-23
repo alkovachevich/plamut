@@ -101,12 +101,14 @@ function getCover(entity = {}) {
 }
 
 function uniqueFolders(items = []) {
-  return [...new Set(
-    items
-      .map((item) => item.folder_name || "")
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, "ru"))
-  )];
+  return [
+    ...new Set(
+      items
+        .map((item) => item.folder_name || "")
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "ru"))
+    )
+  ];
 }
 
 function sortItems(items = [], sort = "recent") {
@@ -114,7 +116,10 @@ function sortItems(items = [], sort = "recent") {
 
   if (sort === "title") {
     return result.sort((a, b) =>
-      resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), "ru")
+      resolveTitle(a.media_entities).localeCompare(
+        resolveTitle(b.media_entities),
+        "ru"
+      )
     );
   }
 
@@ -165,7 +170,9 @@ function renderFolderTabs(folders = [], activeFolder = "all") {
     </button>
   `;
 
-  const rest = folders.map((folder) => `
+  const rest = folders
+    .map(
+      (folder) => `
     <button
       class="folder-chip ${activeFolder === folder ? "active" : ""}"
       type="button"
@@ -173,7 +180,9 @@ function renderFolderTabs(folders = [], activeFolder = "all") {
     >
       ${escapeHtml(folder)}
     </button>
-  `).join("");
+  `
+    )
+    .join("");
 
   return all + rest;
 }
@@ -745,9 +754,11 @@ export async function renderCategoryPage(root, params = {}) {
     renderList();
   });
 
-  document.addEventListener("click", () => {
-    closeAllMenus(root);
-  }, { once: true });
+  root.addEventListener("click", (event) => {
+    if (!event.target.closest(".library-card__menu-wrap")) {
+      closeAllMenus(root);
+    }
+  });
 
   try {
     items = await fetchUserCategoryLibrary(userId, category);
