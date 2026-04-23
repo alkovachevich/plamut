@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS, STATUS_LABELS } from "../config.js";
+import { STATUS_LABELS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import { openAuthModal, openSearchModal, state } from "../state.js";
 import { clampText, escapeHtml } from "../utils.js";
@@ -37,13 +37,14 @@ async function fetchUserCategoryLibrary(userId, category) {
       )
     `)
     .eq("user_id", userId)
-    .eq("category", category);
+    .eq("category", category)
+    .order("created_at", { ascending: false });
 
   if (error) {
     throw error;
   }
 
-  return Array.isArray(data) ? data : [];
+  return Array.isArray(data) ? data.filter((item) => item?.media_entities) : [];
 }
 
 async function updateUserMediaStatus(userMediaId, status) {
@@ -193,6 +194,8 @@ function renderLibraryCard(item) {
   const subtitle = resolveSubtitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "Planned";
   const folderName = item.folder_name || "";
+  const canonicalKey = entity.canonical_key || "";
+  const entityCategory = entity.category || item.category || "";
 
   return `
     <article class="library-card" data-user-media-id="${item.id}">
@@ -200,8 +203,9 @@ function renderLibraryCard(item) {
         class="library-card__cover"
         type="button"
         data-action="open-card"
-        data-key="${escapeHtml(entity.canonical_key || "")}"
-        data-category="${escapeHtml(entity.category || item.category || "")}"
+        data-key="${escapeHtml(canonicalKey)}"
+        data-category="${escapeHtml(entityCategory)}"
+        ${canonicalKey ? "" : "disabled"}
       >
         ${renderCover(entity)}
       </button>
@@ -252,8 +256,9 @@ function renderLibraryCard(item) {
           class="library-card__text"
           type="button"
           data-action="open-card"
-          data-key="${escapeHtml(entity.canonical_key || "")}"
-          data-category="${escapeHtml(entity.category || item.category || "")}"
+          data-key="${escapeHtml(canonicalKey)}"
+          data-category="${escapeHtml(entityCategory)}"
+          ${canonicalKey ? "" : "disabled"}
         >
           <div class="library-card__title">${escapeHtml(clampText(title, 80))}</div>
           ${
@@ -356,7 +361,7 @@ function renderGuestState(root, title) {
 
 export async function renderCategoryPage(root, params = {}) {
   const category = params.category || "unknown";
-  const title = CATEGORY_LABELS[category] || category;
+  const title = getCategoryLabel(state.language, category);
   const userId = state.user?.id;
 
   if (!userId) {
@@ -678,6 +683,8 @@ export async function renderCategoryPage(root, params = {}) {
       button.addEventListener("click", () => {
         const key = button.dataset.key || "";
         const buttonCategory = button.dataset.category || category;
+
+        if (!key) return;
 
         navigate("/card", {
           key,
