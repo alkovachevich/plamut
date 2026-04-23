@@ -295,10 +295,11 @@ function renderGuestState(root, title) {
       .category-guest__title {
         font-size: 28px;
         font-weight: 800;
+        color: var(--text);
       }
 
       .category-guest__card {
-        border: 1px solid var(--border);
+        border: 1px solid var(--border-soft);
         background: var(--surface);
         border-radius: 20px;
         padding: 20px;
@@ -377,6 +378,7 @@ export async function renderCategoryPage(root, params = {}) {
       .page-title {
         font-size: 28px;
         font-weight: 800;
+        color: var(--text);
       }
 
       .page-actions {
@@ -386,8 +388,8 @@ export async function renderCategoryPage(root, params = {}) {
       }
 
       .sort-select {
-        min-height: 42px;
-        border-radius: 12px;
+        min-height: 44px;
+        border-radius: 14px;
         border: 1px solid var(--border);
         background: var(--surface);
         color: var(--text);
@@ -395,7 +397,7 @@ export async function renderCategoryPage(root, params = {}) {
       }
 
       .add-btn {
-        padding: 10px 16px;
+        padding: 11px 16px;
         border-radius: 999px;
         background: var(--accent);
         color: #fff;
@@ -411,10 +413,10 @@ export async function renderCategoryPage(root, params = {}) {
 
       .folder-chip {
         white-space: nowrap;
-        padding: 8px 12px;
+        padding: 9px 13px;
         border-radius: 999px;
         background: var(--surface);
-        border: 1px solid var(--border);
+        border: 1px solid var(--border-soft);
         color: var(--text-soft);
       }
 
@@ -427,7 +429,7 @@ export async function renderCategoryPage(root, params = {}) {
       .library-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-        gap: 14px;
+        gap: 16px;
       }
 
       .library-card {
@@ -440,10 +442,10 @@ export async function renderCategoryPage(root, params = {}) {
       .library-card__cover {
         width: 100%;
         aspect-ratio: 2 / 3;
-        border-radius: 16px;
+        border-radius: 18px;
         overflow: hidden;
-        background: var(--bg-soft);
-        border: 1px solid var(--border);
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
       }
 
       .library-card__cover img {
@@ -465,6 +467,10 @@ export async function renderCategoryPage(root, params = {}) {
         display: flex;
         flex-direction: column;
         gap: 8px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: 16px;
+        padding: 12px;
       }
 
       .library-card__top {
@@ -488,6 +494,7 @@ export async function renderCategoryPage(root, params = {}) {
         border-radius: 999px;
         background: var(--accent-soft);
         font-size: 12px;
+        color: var(--text);
       }
 
       .library-badge.folder {
@@ -500,12 +507,14 @@ export async function renderCategoryPage(root, params = {}) {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        color: var(--text);
       }
 
       .library-card__title {
         font-size: 15px;
         font-weight: 700;
         line-height: 1.35;
+        color: var(--text);
       }
 
       .library-card__subtitle,
@@ -525,7 +534,7 @@ export async function renderCategoryPage(root, params = {}) {
         height: 34px;
         border-radius: 999px;
         border: 1px solid var(--border);
-        background: var(--surface);
+        background: var(--surface-strong);
         color: var(--text);
         font-size: 20px;
         line-height: 1;
@@ -571,7 +580,7 @@ export async function renderCategoryPage(root, params = {}) {
         padding: 40px 20px;
         text-align: center;
         color: var(--text-soft);
-        border: 1px solid var(--border);
+        border: 1px solid var(--border-soft);
         border-radius: 18px;
         background: var(--surface);
         display: flex;
