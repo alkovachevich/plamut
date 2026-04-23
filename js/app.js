@@ -55,7 +55,7 @@ function hasRequiredRoots() {
 }
 
 function renderFatalAppError(message) {
-  const safeMessage = String(message || "Application root error");
+  const safeMessage = String(message || "Application error");
 
   document.body.innerHTML = `
     <div style="
@@ -189,41 +189,18 @@ async function ensureUserProfile(user) {
 
   const existingProfile = await fetchUserProfile(user.id);
 
-  if (existingProfile) {
-    const needsPatch =
-      !existingProfile.username ||
-      !existingProfile.display_name ||
-      (buildAvatarUrl(user, existingProfile) && !existingProfile.avatar_url);
-
-    if (!needsPatch) {
-      return existingProfile;
-    }
-
-    try {
-      return await upsertUserProfile({
-        id: user.id,
-        username: existingProfile.username || buildUsername(user),
-        display_name:
-          existingProfile.display_name || buildDisplayName(user, existingProfile),
-        avatar_url:
-          existingProfile.avatar_url || buildAvatarUrl(user, existingProfile)
-      });
-    } catch (error) {
-      console.error("ensureUserProfile patch error:", error);
-      return existingProfile;
-    }
-  }
+  const payload = {
+    id: user.id,
+    username: existingProfile?.username || buildUsername(user),
+    display_name: existingProfile?.display_name || buildDisplayName(user, existingProfile),
+    avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile)
+  };
 
   try {
-    return await upsertUserProfile({
-      id: user.id,
-      username: buildUsername(user),
-      display_name: buildDisplayName(user, null),
-      avatar_url: buildAvatarUrl(user, null)
-    });
+    return await upsertUserProfile(payload);
   } catch (error) {
-    console.error("ensureUserProfile create error:", error);
-    return null;
+    console.error("ensureUserProfile error:", error);
+    return existingProfile || null;
   }
 }
 
@@ -314,50 +291,65 @@ function bindAuthListener() {
    ROUTING
 ========================= */
 
-function renderRoute() {
+function renderRouteSafely() {
   const route = state.route;
   const params = state.routeParams || {};
 
-  switch (route) {
-    case ROUTES.HOME:
-      renderHomePage(mainRoot);
-      break;
+  try {
+    switch (route) {
+      case ROUTES.HOME:
+        renderHomePage(mainRoot);
+        break;
 
-    case ROUTES.CATEGORIES:
-      renderCategoriesPage(mainRoot);
-      break;
+      case ROUTES.CATEGORIES:
+        renderCategoriesPage(mainRoot);
+        break;
 
-    case ROUTES.CATEGORY_LIBRARY:
-      renderCategoryPage(mainRoot, params);
-      break;
+      case ROUTES.CATEGORY_LIBRARY:
+        renderCategoryPage(mainRoot, params);
+        break;
 
-    case ROUTES.SEARCH:
-      renderSearchPage(mainRoot, params);
-      break;
+      case ROUTES.SEARCH:
+        renderSearchPage(mainRoot, params);
+        break;
 
-    case ROUTES.CARD:
-      renderCardPage(mainRoot, params);
-      break;
+      case ROUTES.CARD:
+        renderCardPage(mainRoot, params);
+        break;
 
-    case ROUTES.UNIVERSES:
-      renderUniversesPage(mainRoot);
-      break;
+      case ROUTES.UNIVERSES:
+        renderUniversesPage(mainRoot);
+        break;
 
-    case ROUTES.UNIVERSE_DETAILS:
-      renderUniversePage(mainRoot, params);
-      break;
+      case ROUTES.UNIVERSE_DETAILS:
+        renderUniversePage(mainRoot, params);
+        break;
 
-    case ROUTES.SETTINGS:
-      renderSettingsPage(mainRoot);
-      break;
+      case ROUTES.SETTINGS:
+        renderSettingsPage(mainRoot);
+        break;
 
-    case ROUTES.GUEST:
-      renderGuestPage(mainRoot, params);
-      break;
+      case ROUTES.GUEST:
+        renderGuestPage(mainRoot, params);
+        break;
 
-    default:
-      renderHomePage(mainRoot);
-      break;
+      default:
+        renderHomePage(mainRoot);
+        break;
+    }
+  } catch (error) {
+    console.error("Route render error:", error);
+    mainRoot.innerHTML = `
+      <div style="
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--surface);
+        color: var(--text-soft);
+      ">
+        Не удалось открыть страницу. Попробуй вернуться на главную.
+      </div>
+    `;
   }
 }
 
@@ -399,7 +391,7 @@ function renderApp() {
 
   const routeSignature = getRouteSignature();
   if (routeSignature !== lastRouteSignature) {
-    renderRoute();
+    renderRouteSafely();
     lastRouteSignature = routeSignature;
   }
 }
