@@ -289,7 +289,6 @@ export function renderSidebar(root) {
       }
 
       await signOut();
-      logoutUser();
       closeSidebar();
       navigate(ROUTES.HOME);
     } catch (error) {
