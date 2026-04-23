@@ -44,6 +44,32 @@ export const CATEGORY_LABELS = {
   manga: "Manga"
 };
 
+export const CATEGORY_LABELS_I18N = {
+  ru: {
+    books: "Книги",
+    movies: "Фильмы",
+    series: "Сериалы",
+    anime: "Аниме",
+    manga: "Манга"
+  },
+  en: {
+    books: "Books",
+    movies: "Movies",
+    series: "Series",
+    anime: "Anime",
+    manga: "Manga"
+  }
+};
+
+export function getCategoryLabel(language = DEFAULT_LANGUAGE, category = "") {
+  const normalizedLanguage = language === "en" ? "en" : "ru";
+  return (
+    CATEGORY_LABELS_I18N?.[normalizedLanguage]?.[category] ||
+    CATEGORY_LABELS_I18N?.en?.[category] ||
+    category
+  );
+}
+
 export const CATEGORY_ICONS = {
   books: "📚",
   movies: "🎬",
