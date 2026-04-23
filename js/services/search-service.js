@@ -615,21 +615,17 @@ export async function runGlobalSearch(query) {
     return emptyGroups();
   }
 
-  let books = [];
-  let moviesAndSeries = [];
-  let anime = [];
-  let manga = [];
+  const settled = await Promise.allSettled([
+    searchBooks(cleanQuery),
+    searchMoviesAndSeries(cleanQuery),
+    searchAnimeOrManga(cleanQuery, "anime"),
+    searchAnimeOrManga(cleanQuery, "manga")
+  ]);
 
-  try {
-    [books, moviesAndSeries, anime, manga] = await Promise.all([
-      searchBooks(cleanQuery),
-      searchMoviesAndSeries(cleanQuery),
-      searchAnimeOrManga(cleanQuery, "anime"),
-      searchAnimeOrManga(cleanQuery, "manga")
-    ]);
-  } catch (error) {
-    console.warn("Global API search error:", error);
-  }
+  const books = settled[0].status === "fulfilled" ? settled[0].value : [];
+  const moviesAndSeries = settled[1].status === "fulfilled" ? settled[1].value : [];
+  const anime = settled[2].status === "fulfilled" ? settled[2].value : [];
+  const manga = settled[3].status === "fulfilled" ? settled[3].value : [];
 
   return groupItems(
     dedupeByCanonicalKey([
