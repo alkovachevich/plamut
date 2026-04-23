@@ -34,6 +34,12 @@ let initialized = false;
 let authSubscription = null;
 let authHydrationPromise = null;
 
+let lastHeaderSignature = null;
+let lastSidebarSignature = null;
+let lastSearchModalSignature = null;
+let lastAuthModalSignature = null;
+let lastRouteSignature = null;
+
 /* =========================
    ROOT CHECK
 ========================= */
@@ -57,14 +63,14 @@ function renderFatalAppError(message) {
       display: grid;
       place-items: center;
       padding: 24px;
-      background: #0b0f14;
-      color: #e8edf3;
+      background: #111318;
+      color: #f3f5f8;
       font-family: system-ui, -apple-system, sans-serif;
     ">
       <div style="
         width: min(100%, 560px);
-        background: #11161d;
-        border: 1px solid #232b36;
+        background: #181b22;
+        border: 1px solid #343c49;
         border-radius: 20px;
         padding: 24px;
         box-shadow: 0 10px 30px rgba(0,0,0,0.35);
@@ -72,7 +78,7 @@ function renderFatalAppError(message) {
         <div style="font-size: 22px; font-weight: 800; margin-bottom: 10px;">
           Plamut
         </div>
-        <div style="font-size: 15px; line-height: 1.5; color: #9aa6b2;">
+        <div style="font-size: 15px; line-height: 1.5; color: #c3cad5;">
           ${safeMessage}
         </div>
       </div>
@@ -89,6 +95,53 @@ function applyTheme() {
 }
 
 /* =========================
+   SIGNATURES
+========================= */
+
+function getHeaderSignature() {
+  return JSON.stringify({
+    userId: state.user?.id || null,
+    displayName: state.user?.display_name || "",
+    username: state.user?.username || "",
+    avatarUrl: state.user?.avatar_url || ""
+  });
+}
+
+function getSidebarSignature() {
+  return JSON.stringify({
+    sidebarOpen: state.sidebarOpen,
+    userId: state.user?.id || null,
+    displayName: state.user?.display_name || "",
+    username: state.user?.username || "",
+    avatarUrl: state.user?.avatar_url || "",
+    language: state.language,
+    theme: state.theme
+  });
+}
+
+function getSearchModalSignature() {
+  return JSON.stringify({
+    searchModalOpen: state.searchModalOpen,
+    searchQuery: state.searchQuery || ""
+  });
+}
+
+function getAuthModalSignature() {
+  return JSON.stringify({
+    authModalOpen: state.authModalOpen,
+    authMode: state.authMode
+  });
+}
+
+function getRouteSignature() {
+  return JSON.stringify({
+    route: state.route,
+    routeParams: state.routeParams,
+    userId: state.user?.id || null
+  });
+}
+
+/* =========================
    PROFILE HELPERS
 ========================= */
 
@@ -101,12 +154,14 @@ function buildUsername(user) {
     user?.email?.split("@")[0] ||
     "user";
 
-  return String(source)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 32) || "user";
+  return (
+    String(source)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32) || "user"
+  );
 }
 
 function buildDisplayName(user, profile = null) {
@@ -148,8 +203,10 @@ async function ensureUserProfile(user) {
       return await upsertUserProfile({
         id: user.id,
         username: existingProfile.username || buildUsername(user),
-        display_name: existingProfile.display_name || buildDisplayName(user, existingProfile),
-        avatar_url: existingProfile.avatar_url || buildAvatarUrl(user, existingProfile)
+        display_name:
+          existingProfile.display_name || buildDisplayName(user, existingProfile),
+        avatar_url:
+          existingProfile.avatar_url || buildAvatarUrl(user, existingProfile)
       });
     } catch (error) {
       console.error("ensureUserProfile patch error:", error);
@@ -238,7 +295,11 @@ function bindAuthListener() {
 
       await applyAuthenticatedUser(session.user);
 
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+      if (
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "USER_UPDATED"
+      ) {
         closeAuthModal();
       }
     } catch (error) {
@@ -312,12 +373,35 @@ function renderApp() {
 
   applyTheme();
 
-  renderHeader(headerRoot);
-  renderSidebar(sidebarRoot);
-  renderSearchModal(searchModalRoot);
-  renderAuthModal(authModalRoot);
+  const headerSignature = getHeaderSignature();
+  if (headerSignature !== lastHeaderSignature) {
+    renderHeader(headerRoot);
+    lastHeaderSignature = headerSignature;
+  }
 
-  renderRoute();
+  const sidebarSignature = getSidebarSignature();
+  if (sidebarSignature !== lastSidebarSignature) {
+    renderSidebar(sidebarRoot);
+    lastSidebarSignature = sidebarSignature;
+  }
+
+  const searchModalSignature = getSearchModalSignature();
+  if (searchModalSignature !== lastSearchModalSignature) {
+    renderSearchModal(searchModalRoot);
+    lastSearchModalSignature = searchModalSignature;
+  }
+
+  const authModalSignature = getAuthModalSignature();
+  if (authModalSignature !== lastAuthModalSignature) {
+    renderAuthModal(authModalRoot);
+    lastAuthModalSignature = authModalSignature;
+  }
+
+  const routeSignature = getRouteSignature();
+  if (routeSignature !== lastRouteSignature) {
+    renderRoute();
+    lastRouteSignature = routeSignature;
+  }
 }
 
 /* =========================
@@ -329,7 +413,9 @@ async function init() {
   initialized = true;
 
   if (!hasRequiredRoots()) {
-    renderFatalAppError("Структура index.html не содержит обязательные контейнеры приложения.");
+    renderFatalAppError(
+      "Структура index.html не содержит обязательные контейнеры приложения."
+    );
     return;
   }
 
