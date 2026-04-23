@@ -74,7 +74,6 @@ function resolveRoute(pathname) {
 export function navigate(route, params = {}) {
   const path = route;
   const query = buildQuery(params);
-
   const url = `${path}${query}`;
 
   if (window.location.pathname + window.location.search !== url) {
