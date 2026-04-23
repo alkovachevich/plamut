@@ -1,4 +1,4 @@
-import { SEARCH_LIMITS, CATEGORY_LABELS } from "../config.js";
+import { SEARCH_LIMITS, getCategoryLabel, DEFAULT_LANGUAGE } from "../config.js";
 
 import {
   searchBooks,
@@ -52,11 +52,11 @@ function emptyGroups() {
   };
 }
 
-function addCategoryLabels(items, category) {
+function addCategoryLabels(items, category, language = DEFAULT_LANGUAGE) {
   return items.map((item) => ({
     ...item,
     category,
-    category_label: CATEGORY_LABELS[category] || category
+    category_label: getCategoryLabel(language, category)
   }));
 }
 
@@ -94,7 +94,7 @@ function dedupeByCanonicalKey(items = []) {
   return [...map.values()];
 }
 
-function groupFlatResults(items = []) {
+function groupFlatResults(items = [], language = DEFAULT_LANGUAGE) {
   const groups = emptyGroups();
 
   for (const item of items) {
@@ -103,7 +103,7 @@ function groupFlatResults(items = []) {
 
     groups[category].push({
       ...item,
-      category_label: CATEGORY_LABELS[category] || category
+      category_label: getCategoryLabel(language, category)
     });
   }
 
@@ -200,7 +200,13 @@ async function searchFromCache(query) {
     return [];
   }
 
-  return dedupeByCanonicalKey(entities.map(formatDbEntity));
+  const orderMap = new Map(entityIds.map((id, index) => [id, index]));
+
+  return dedupeByCanonicalKey(
+    entities
+      .sort((a, b) => (orderMap.get(a.id) ?? 9999) - (orderMap.get(b.id) ?? 9999))
+      .map(formatDbEntity)
+  );
 }
 
 async function saveResultsToCache(query, entities = []) {
@@ -217,7 +223,7 @@ async function saveResultsToCache(query, entities = []) {
    API FALLBACK
 ========================= */
 
-async function runApiSearch(cleanQuery) {
+async function runApiSearch(cleanQuery, language = DEFAULT_LANGUAGE) {
   let books = [];
   let moviesAndSeries = [];
   let anime = [];
@@ -253,11 +259,11 @@ async function runApiSearch(cleanQuery) {
       ...formattedManga
     ]),
     grouped: {
-      books: addCategoryLabels(formattedBooks, "books"),
-      movies: addCategoryLabels(formattedMovies, "movies"),
-      series: addCategoryLabels(formattedSeries, "series"),
-      anime: addCategoryLabels(formattedAnime, "anime"),
-      manga: addCategoryLabels(formattedManga, "manga")
+      books: addCategoryLabels(formattedBooks, "books", language),
+      movies: addCategoryLabels(formattedMovies, "movies", language),
+      series: addCategoryLabels(formattedSeries, "series", language),
+      anime: addCategoryLabels(formattedAnime, "anime", language),
+      manga: addCategoryLabels(formattedManga, "manga", language)
     }
   };
 }
@@ -266,27 +272,26 @@ async function runApiSearch(cleanQuery) {
    GLOBAL SEARCH
 ========================= */
 
-export async function runGlobalSearch(query) {
+export async function runGlobalSearch(query, language = DEFAULT_LANGUAGE) {
   const clean = normalizeQuery(query);
 
   if (!clean || clean.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return emptyGroups();
   }
 
-  /* 1. CACHE */
   try {
     const cacheResults = await searchFromCache(clean);
 
     if (cacheResults.length) {
       return groupFlatResults(
-        limitInternal(sortByScoreInternal(cacheResults), SEARCH_LIMITS.PAGE_RESULTS)
+        limitInternal(sortByScoreInternal(cacheResults), SEARCH_LIMITS.PAGE_RESULTS),
+        language
       );
     }
   } catch (e) {
     console.warn("Cache search failed:", e);
   }
 
-  /* 2. DB */
   try {
     const dbResults = await searchInDatabase(clean);
 
@@ -304,15 +309,15 @@ export async function runGlobalSearch(query) {
       await saveResultsToCache(clean, data || []);
 
       return groupFlatResults(
-        limitInternal(sortByScoreInternal(dbResults), SEARCH_LIMITS.PAGE_RESULTS)
+        limitInternal(sortByScoreInternal(dbResults), SEARCH_LIMITS.PAGE_RESULTS),
+        language
       );
     }
   } catch (e) {
     console.warn("DB search failed:", e);
   }
 
-  /* 3. API */
-  const apiResult = await runApiSearch(clean);
+  const apiResult = await runApiSearch(clean, language);
 
   const savedEntities = await persistResults(apiResult.flat);
   await saveResultsToCache(clean, savedEntities);
@@ -324,14 +329,13 @@ export async function runGlobalSearch(query) {
    CATEGORY SEARCH
 ========================= */
 
-export async function runCategorySearch(query, category) {
+export async function runCategorySearch(query, category, language = DEFAULT_LANGUAGE) {
   const clean = normalizeQuery(query);
 
   if (!clean || clean.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
   }
 
-  /* 1. CACHE */
   try {
     const cacheResults = await searchFromCache(clean);
 
@@ -343,14 +347,13 @@ export async function runCategorySearch(query, category) {
         SEARCH_LIMITS.PAGE_RESULTS
       ).map((item) => ({
         ...item,
-        category_label: CATEGORY_LABELS[category] || category
+        category_label: getCategoryLabel(language, category)
       }));
     }
   } catch (e) {
     console.warn("Category cache search failed:", e);
   }
 
-  /* 2. DB */
   try {
     const dbResults = await searchInDatabase(clean);
     const filtered = dbResults.filter((item) => item.category === category);
@@ -368,22 +371,24 @@ export async function runCategorySearch(query, category) {
 
       await saveResultsToCache(clean, data || []);
 
-      return limitInternal(sortByScoreInternal(filtered), SEARCH_LIMITS.PAGE_RESULTS).map((item) => ({
+      return limitInternal(
+        sortByScoreInternal(filtered),
+        SEARCH_LIMITS.PAGE_RESULTS
+      ).map((item) => ({
         ...item,
-        category_label: CATEGORY_LABELS[category] || category
+        category_label: getCategoryLabel(language, category)
       }));
     }
   } catch (e) {
     console.warn("Category DB search failed:", e);
   }
 
-  /* 3. API */
   if (category === "books") {
     const results = await searchBooks(clean);
     const formatted = results.map(formatBookForUi);
     const saved = await persistResults(formatted);
     await saveResultsToCache(clean, saved);
-    return addCategoryLabels(formatted, "books");
+    return addCategoryLabels(formatted, "books", language);
   }
 
   if (category === "movies" || category === "series") {
@@ -393,7 +398,7 @@ export async function runCategorySearch(query, category) {
     const saved = await persistResults(filtered);
     await saveResultsToCache(clean, saved);
 
-    return addCategoryLabels(filtered, category);
+    return addCategoryLabels(filtered, category, language);
   }
 
   if (category === "anime" || category === "manga") {
@@ -402,7 +407,7 @@ export async function runCategorySearch(query, category) {
     const saved = await persistResults(formatted);
     await saveResultsToCache(clean, saved);
 
-    return addCategoryLabels(formatted, category);
+    return addCategoryLabels(formatted, category, language);
   }
 
   return [];
