@@ -1,5 +1,5 @@
 import { escapeHtml } from "../utils.js";
-import { CATEGORY_LABELS } from "../config.js";
+import { getCategoryLabel } from "../config.js";
 import { state, openAuthModal } from "../state.js";
 
 import {
@@ -272,7 +272,7 @@ export async function renderCardPage(root, params = {}) {
 
             <div class="badges">
               <div class="badge">
-                ${escapeHtml(CATEGORY_LABELS[entity.category] || entity.category)}
+                ${escapeHtml(getCategoryLabel(state.language, entity.category))}
               </div>
 
               ${
