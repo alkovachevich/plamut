@@ -40,10 +40,6 @@ let lastSearchModalSignature = null;
 let lastAuthModalSignature = null;
 let lastRouteSignature = null;
 
-/* =========================
-   ROOT CHECK
-========================= */
-
 function hasRequiredRoots() {
   return Boolean(
     headerRoot &&
@@ -86,17 +82,9 @@ function renderFatalAppError(message) {
   `;
 }
 
-/* =========================
-   THEME
-========================= */
-
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", state.theme || "dark");
 }
-
-/* =========================
-   SIGNATURES
-========================= */
 
 function getHeaderSignature() {
   return JSON.stringify({
@@ -140,10 +128,6 @@ function getRouteSignature() {
     userId: state.user?.id || null
   });
 }
-
-/* =========================
-   PROFILE HELPERS
-========================= */
 
 function buildUsername(user) {
   const source =
@@ -221,10 +205,6 @@ async function applyAuthenticatedUser(user) {
   });
 }
 
-/* =========================
-   AUTH BOOTSTRAP
-========================= */
-
 async function hydrateAuthState() {
   if (authHydrationPromise) {
     return authHydrationPromise;
@@ -287,15 +267,13 @@ function bindAuthListener() {
   authSubscription = data?.subscription || null;
 }
 
-/* =========================
-   ROUTING
-========================= */
-
 function renderRouteSafely() {
   const route = state.route;
   const params = state.routeParams || {};
 
   try {
+    if (!mainRoot) return;
+
     switch (route) {
       case ROUTES.HOME:
         renderHomePage(mainRoot);
@@ -353,10 +331,6 @@ function renderRouteSafely() {
   }
 }
 
-/* =========================
-   MAIN RENDER
-========================= */
-
 function renderApp() {
   if (!hasRequiredRoots()) {
     renderFatalAppError("Не найдены обязательные root-контейнеры приложения.");
@@ -396,18 +370,12 @@ function renderApp() {
   }
 }
 
-/* =========================
-   INIT
-========================= */
-
 async function init() {
   if (initialized) return;
   initialized = true;
 
   if (!hasRequiredRoots()) {
-    renderFatalAppError(
-      "Структура index.html не содержит обязательные контейнеры приложения."
-    );
+    renderFatalAppError("Структура index.html не содержит обязательные контейнеры приложения.");
     return;
   }
 
