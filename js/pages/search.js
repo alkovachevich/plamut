@@ -1,9 +1,12 @@
-import { runGlobalSearch, flattenResults, sortByScore, limitResults } from "../services/search-service.js";
+import {
+  runGlobalSearch,
+  flattenResults,
+  sortByScore,
+  limitResults
+} from "../services/search-service.js";
 import { CATEGORY_LABELS, SEARCH_LIMITS } from "../config.js";
 import { navigate } from "../router.js";
 import {
-  setSearchQuery,
-  setSearchResults,
   setCurrentItem,
   state
 } from "../state.js";
@@ -71,9 +74,7 @@ function renderEmpty(message) {
 }
 
 function attachCardHandlers(root, items = []) {
-  const byKey = new Map(
-    items.map((item) => [item.canonical_key, item])
-  );
+  const byKey = new Map(items.map((item) => [item.canonical_key, item]));
 
   root.querySelectorAll("[data-key]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -101,7 +102,6 @@ async function performSearch(resultsRoot, query) {
   const cleanQuery = String(query || "").trim();
 
   if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    setSearchResults(null);
     resultsRoot.innerHTML = renderEmpty("Введите больше символов");
     return;
   }
@@ -116,8 +116,6 @@ async function performSearch(resultsRoot, query) {
     if (resultsRoot.dataset.requestId !== String(requestId)) {
       return;
     }
-
-    setSearchResults(grouped);
 
     const flat = limitResults(
       sortByScore(flattenResults(grouped)),
@@ -161,6 +159,7 @@ export function renderSearchPage(root, params = {}) {
       .search-title {
         font-size: 28px;
         font-weight: 800;
+        color: var(--text);
       }
 
       .search-input {
@@ -189,6 +188,7 @@ export function renderSearchPage(root, params = {}) {
         background: var(--surface);
         border: 1px solid var(--border);
         text-align: left;
+        color: var(--text);
       }
 
       .result-cover {
@@ -230,6 +230,7 @@ export function renderSearchPage(root, params = {}) {
       .result-title {
         font-weight: 700;
         line-height: 1.35;
+        color: var(--text);
       }
 
       .result-year {
@@ -297,12 +298,10 @@ export function renderSearchPage(root, params = {}) {
 
   input?.addEventListener("input", () => {
     const value = input.value || "";
-    setSearchQuery(value);
     debouncedSearch(value);
   });
 
   if (initialQuery && initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    setSearchQuery(initialQuery);
     performSearch(resultsRoot, initialQuery);
   }
 }
