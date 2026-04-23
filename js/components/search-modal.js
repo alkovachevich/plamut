@@ -1,4 +1,4 @@
-import { SEARCH_LIMITS, CATEGORY_LABELS } from "../config.js";
+import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import {
   state,
@@ -12,13 +12,11 @@ import {
   sortByScore,
   limitResults
 } from "../services/search-service.js";
+import { saveEntityIfMissing } from "../services/entity-db.js";
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
-  return Object.values(groupedResults).reduce(
-    (sum, items) => sum + (items?.length || 0),
-    0
-  );
+  return Object.values(groupedResults).reduce((sum, items) => sum + (items?.length || 0), 0);
 }
 
 function renderEmpty(query) {
@@ -85,7 +83,7 @@ function renderResultCard(item) {
         }
 
         <div class="search-result-card__category">
-          ${escapeHtml(CATEGORY_LABELS[item.category] || item.category)}
+          ${escapeHtml(getCategoryLabel(state.language, item.category))}
         </div>
       </div>
     </button>
@@ -103,7 +101,7 @@ function renderGroups(groupedResults) {
       return `
         <section class="search-modal__group">
           <div class="search-modal__group-title">
-            ${escapeHtml(CATEGORY_LABELS[category] || category)}
+            ${escapeHtml(getCategoryLabel(state.language, category))}
           </div>
 
           <div class="search-modal__group-list">
@@ -123,16 +121,23 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
     SEARCH_LIMITS.PAGE_RESULTS
   );
 
-  const itemsByKey = new Map(flat.map((item) => [item.canonical_key, item]));
+  const itemsByKey = new Map(
+    flat.map((item) => [item.canonical_key, item])
+  );
 
   root.querySelectorAll("[data-card-key]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const canonicalKey = button.dataset.cardKey;
       const category = button.dataset.cardCategory;
       const item = itemsByKey.get(canonicalKey) || null;
 
-      if (item) {
-        setCurrentItem(item);
+      try {
+        if (item) {
+          await saveEntityIfMissing(item);
+          setCurrentItem(item);
+        }
+      } catch (error) {
+        console.error("Pre-save entity error:", error);
       }
 
       closeSearchModal();
