@@ -4,9 +4,7 @@ import {
   setAuthMode,
   setUser
 } from "../state.js";
-
 import { navigate } from "../router.js";
-
 import {
   signInWithEmail,
   signUpWithEmail,
@@ -14,10 +12,6 @@ import {
   fetchUserProfile,
   upsertUserProfile
 } from "../lib/supabase-client.js";
-
-/* =========================
-   HELPERS
-========================= */
 
 function escapeHtml(value = "") {
   return String(value)
@@ -94,25 +88,16 @@ function buildAvatarUrl(user, profile = null) {
 async function ensureProfile(user) {
   if (!user?.id) return null;
 
-  const profile = await fetchUserProfile(user.id);
+  const existing = await fetchUserProfile(user.id);
 
-  if (profile) {
-    const payload = {
-      id: user.id,
-      username: profile.username || buildUsername(user),
-      display_name: profile.display_name || buildDisplayName(user, profile),
-      avatar_url: profile.avatar_url || buildAvatarUrl(user, profile)
-    };
-
-    return await upsertUserProfile(payload);
-  }
-
-  return await upsertUserProfile({
+  const payload = {
     id: user.id,
-    username: buildUsername(user),
-    display_name: buildDisplayName(user, null),
-    avatar_url: buildAvatarUrl(user, null)
-  });
+    username: existing?.username || buildUsername(user),
+    display_name: existing?.display_name || buildDisplayName(user, existing),
+    avatar_url: existing?.avatar_url || buildAvatarUrl(user, existing)
+  };
+
+  return await upsertUserProfile(payload);
 }
 
 async function applyUserToStateFromAuth() {
@@ -122,7 +107,13 @@ async function applyUserToStateFromAuth() {
     return null;
   }
 
-  const profile = await ensureProfile(authUser);
+  let profile = null;
+
+  try {
+    profile = await ensureProfile(authUser);
+  } catch (error) {
+    console.error("Profile upsert error:", error);
+  }
 
   setUser({
     id: authUser.id,
@@ -137,10 +128,6 @@ async function applyUserToStateFromAuth() {
     profile
   };
 }
-
-/* =========================
-   MAIN
-========================= */
 
 export function renderAuthModal(root) {
   const isOpen = state.authModalOpen;
@@ -311,8 +298,8 @@ export function renderAuthModal(root) {
 
       if (mode === "login") {
         await signInWithEmail(email, password);
-        const result = await applyUserToStateFromAuth();
 
+        const result = await applyUserToStateFromAuth();
         if (!result?.authUser?.id) {
           throw new Error("Не удалось получить пользователя после входа.");
         }
@@ -323,10 +310,8 @@ export function renderAuthModal(root) {
       }
 
       const signUpResult = await signUpWithEmail(email, password);
-      const authUser = signUpResult?.user || signUpResult?.data?.user || null;
-      const hasSession = Boolean(
-        signUpResult?.session || signUpResult?.data?.session
-      );
+      const authUser = signUpResult?.user || null;
+      const hasSession = Boolean(signUpResult?.session);
 
       if (authUser?.id && hasSession) {
         await applyUserToStateFromAuth();
