@@ -88,6 +88,7 @@ export function renderAuthModal(root) {
         font-size: 22px;
         font-weight: 800;
         margin-bottom: 12px;
+        color: var(--text);
       }
 
       .auth-form {
@@ -142,6 +143,12 @@ export function renderAuthModal(root) {
         font-size: 18px;
         color: var(--text);
       }
+
+      .auth-note {
+        color: var(--text-soft);
+        font-size: 13px;
+        line-height: 1.5;
+      }
     </style>
 
     <div class="auth-overlay ${isOpen ? "is-open" : ""}">
@@ -161,6 +168,12 @@ export function renderAuthModal(root) {
           <button class="auth-button" type="submit">
             ${getSubmitLabel(mode)}
           </button>
+
+          ${
+            mode === "register"
+              ? `<div class="auth-note">После регистрации может понадобиться подтверждение email, если это включено в Supabase.</div>`
+              : ""
+          }
         </form>
 
         <div class="auth-switch" data-switch>
@@ -207,11 +220,23 @@ export function renderAuthModal(root) {
 
       if (mode === "login") {
         await signInWithEmail(email, password);
+        closeAuthModal();
       } else {
-        await signUpWithEmail(email, password);
-      }
+        const result = await signUpWithEmail(email, password);
+        const hasSession = Boolean(result?.session);
 
-      closeAuthModal();
+        if (hasSession) {
+          closeAuthModal();
+        } else {
+          errorBox.innerHTML = `
+            <div class="auth-note">
+              Аккаунт создан. Проверь почту и подтверди email, если письмо было отправлено.
+            </div>
+          `;
+          submitButton.disabled = false;
+          submitButton.textContent = getSubmitLabel(mode);
+        }
+      }
     } catch (error) {
       errorBox.innerHTML = renderError(error.message || "Ошибка авторизации");
       submitButton.disabled = false;
