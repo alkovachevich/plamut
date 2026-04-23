@@ -3,16 +3,17 @@ import { navigate } from "../router.js";
 import {
   state,
   closeSearchModal,
-  setCurrentItem
+  openAuthModal,
+  setTemporaryCardItem
 } from "../state.js";
 import { debounce, escapeHtml } from "../utils.js";
 import {
   runGlobalSearch,
   flattenResults,
   sortByScore,
-  limitResults
+  limitResults,
+  addSearchResultDirectlyToLibrary
 } from "../services/search-service.js";
-import { saveEntityIfMissing } from "../services/entity-db.js";
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
@@ -55,64 +56,65 @@ function renderResultCard(item) {
     : "";
 
   return `
-    <button
-      class="search-result-card"
-      type="button"
-      data-card-key="${escapeHtml(item.canonical_key)}"
-      data-card-category="${escapeHtml(item.category)}"
-    >
-      <div class="search-result-card__cover">
-        ${renderCover(item)}
-        <div class="search-result-card__overlay">
-          <span class="search-result-card__add-chip">Открыть</span>
+    <div class="search-result-card">
+      <button
+        class="search-result-card__main"
+        type="button"
+        data-card-key="${escapeHtml(item.canonical_key)}"
+        data-card-category="${escapeHtml(item.category)}"
+      >
+        <div class="search-result-card__cover">
+          ${renderCover(item)}
         </div>
-      </div>
 
-      <div class="search-result-card__meta">
-        <div class="search-result-card__top">
-          <div class="search-result-card__title">
-            ${escapeHtml(item.title || "")}
+        <div class="search-result-card__meta">
+          <div class="search-result-card__top">
+            <div class="search-result-card__title">
+              ${escapeHtml(item.title || "")}
+            </div>
+            ${year}
           </div>
-          ${year}
-        </div>
 
-        ${
-          item.original_title
-            ? `<div class="search-result-card__subtitle">${escapeHtml(item.original_title)}</div>`
-            : ""
-        }
+          ${
+            item.original_title
+              ? `<div class="search-result-card__subtitle">${escapeHtml(item.original_title)}</div>`
+              : ""
+          }
 
-        <div class="search-result-card__category">
-          ${escapeHtml(getCategoryLabel(state.language, item.category))}
+          <div class="search-result-card__category">
+            ${escapeHtml(getCategoryLabel(state.language, item.category))}
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+
+      <button
+        class="search-result-card__add"
+        type="button"
+        data-add-key="${escapeHtml(item.canonical_key)}"
+      >
+        Добавить
+      </button>
+    </div>
   `;
 }
 
 function renderGroups(groupedResults) {
   const orderedCategories = ["books", "movies", "series", "anime", "manga"];
 
-  const html = orderedCategories
+  return orderedCategories
     .filter((category) => groupedResults?.[category]?.length)
-    .map((category) => {
-      const items = groupedResults[category];
+    .map((category) => `
+      <section class="search-modal__group">
+        <div class="search-modal__group-title">
+          ${escapeHtml(getCategoryLabel(state.language, category))}
+        </div>
 
-      return `
-        <section class="search-modal__group">
-          <div class="search-modal__group-title">
-            ${escapeHtml(getCategoryLabel(state.language, category))}
-          </div>
-
-          <div class="search-modal__group-list">
-            ${items.map(renderResultCard).join("")}
-          </div>
-        </section>
-      `;
-    })
+        <div class="search-modal__group-list">
+          ${groupedResults[category].map(renderResultCard).join("")}
+        </div>
+      </section>
+    `)
     .join("");
-
-  return html || "";
 }
 
 function attachResultHandlers(root, groupedResults, currentQuery) {
@@ -121,30 +123,60 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
     SEARCH_LIMITS.PAGE_RESULTS
   );
 
-  const itemsByKey = new Map(
-    flat.map((item) => [item.canonical_key, item])
-  );
+  const itemsByKey = new Map(flat.map((item) => [item.canonical_key, item]));
 
   root.querySelectorAll("[data-card-key]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       const canonicalKey = button.dataset.cardKey;
       const category = button.dataset.cardCategory;
       const item = itemsByKey.get(canonicalKey) || null;
 
-      try {
-        if (item) {
-          await saveEntityIfMissing(item);
-          setCurrentItem(item);
-        }
-      } catch (error) {
-        console.error("Pre-save entity error:", error);
+      if (item) {
+        setTemporaryCardItem(item);
       }
 
       closeSearchModal();
       navigate("/card", {
         key: canonicalKey,
-        category
+        category,
+        mode: "temp"
       });
+    });
+  });
+
+  root.querySelectorAll("[data-add-key]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.addKey || "";
+      const item = itemsByKey.get(key);
+
+      if (!item) return;
+
+      const userId = state.user?.id;
+
+      if (!userId) {
+        openAuthModal("login");
+        return;
+      }
+
+      try {
+        button.disabled = true;
+        button.textContent = "Добавление...";
+
+        const result = await addSearchResultDirectlyToLibrary({
+          userId,
+          item
+        });
+
+        if (result?.alreadyExists) {
+          button.textContent = "Уже в библиотеке";
+        } else {
+          button.textContent = "Добавлено";
+        }
+      } catch (error) {
+        console.error("Direct add error:", error);
+        button.disabled = false;
+        button.textContent = "Ошибка";
+      }
     });
   });
 
@@ -355,19 +387,36 @@ export function renderSearchModal(root) {
 
       .search-result-card {
         display: grid;
-        grid-template-columns: 74px minmax(0, 1fr);
-        gap: 12px;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
         align-items: center;
-        text-align: left;
         border-radius: 18px;
         border: 1px solid var(--border-soft);
         background: var(--surface);
         padding: 10px;
+      }
+
+      .search-result-card__main {
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        text-align: left;
+        background: transparent;
         color: var(--text);
       }
 
+      .search-result-card__add {
+        min-width: 98px;
+        min-height: 40px;
+        border-radius: 12px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        padding: 0 12px;
+      }
+
       .search-result-card__cover {
-        position: relative;
         width: 74px;
         height: 104px;
         border-radius: 14px;
@@ -389,26 +438,6 @@ export function renderSearchModal(root) {
         place-items: center;
         color: var(--text-muted);
         font-weight: 700;
-      }
-
-      .search-result-card__overlay {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(to top, rgba(8, 10, 14, 0.62), transparent 58%);
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
-        padding: 8px;
-      }
-
-      .search-result-card__add-chip {
-        border-radius: 999px;
-        padding: 6px 10px;
-        background: rgba(17, 19, 24, 0.82);
-        color: #f3f5f8;
-        font-size: 12px;
-        font-weight: 800;
-        border: 1px solid rgba(255, 255, 255, 0.08);
       }
 
       .search-result-card__meta {
@@ -449,9 +478,13 @@ export function renderSearchModal(root) {
         flex-shrink: 0;
       }
 
-      @media (min-width: 768px) {
-        .search-modal__group-list {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+      @media (max-width: 640px) {
+        .search-result-card {
+          grid-template-columns: 1fr;
+        }
+
+        .search-result-card__add {
+          width: 100%;
         }
       }
     </style>
