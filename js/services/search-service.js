@@ -1,27 +1,6 @@
-import {
-  SEARCH_LIMITS
-} from "../config.js";
-
-import {
-  getSupabaseClient
-} from "../lib/supabase-client.js";
-
-import {
-  normalizeString,
-  compactString,
-  uniqueArray,
-  safeArray
-} from "../utils.js";
-
-import {
-  saveEntityIfMissing,
-  saveAliases,
-  addToUserLibrary
-} from "./entity-db.js";
-
-/* =========================
-   HELPERS
-========================= */
+import { SEARCH_LIMITS } from "../config.js";
+import { normalizeString, compactString, uniqueArray, safeArray } from "../utils.js";
+import { addToUserLibrary } from "./entity-db.js";
 
 function normalizeQuery(value = "") {
   return normalizeString(value || "");
@@ -50,13 +29,11 @@ function dedupeByCanonicalKey(items = []) {
   return [...map.values()];
 }
 
-function flattenGroups(groups) {
+function flattenGroups(groups = {}) {
   const result = [];
-
-  Object.values(groups || {}).forEach((items) => {
+  Object.values(groups).forEach((items) => {
     safeArray(items).forEach((item) => result.push(item));
   });
-
   return result;
 }
 
@@ -80,10 +57,6 @@ function groupItems(items = []) {
   return groups;
 }
 
-function cleanText(value = "") {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function buildBookCoverFromOpenLibrary(doc = {}) {
   if (doc?.cover_i) {
     return `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
@@ -98,68 +71,11 @@ function safeNumberYear(value) {
 }
 
 /* =========================
-   DB FIRST / CACHE
-========================= */
-
-async function searchInDatabase(query) {
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("entity_aliases")
-    .select(`
-      entity_id,
-      media_entities (
-        id,
-        canonical_key,
-        category,
-        title_primary,
-        title_ru,
-        title_en,
-        original_title,
-        year,
-        cover_url,
-        description_ru,
-        description_en,
-        primary_source,
-        external_ids
-      )
-    `)
-    .ilike("alias_normalized", `%${query}%`)
-    .limit(50);
-
-  if (error) {
-    console.warn("DB alias search error:", error);
-    return [];
-  }
-
-  return dedupeByCanonicalKey(
-    safeArray(data)
-      .map((row) => row.media_entities)
-      .filter(Boolean)
-      .map((entity) => ({
-        canonical_key: entity.canonical_key,
-        category: entity.category,
-        title: entity.title_primary || entity.title_ru || entity.title_en || "",
-        original_title: entity.original_title || "",
-        year: entity.year || null,
-        cover_url: entity.cover_url || "",
-        description_ru: entity.description_ru || "",
-        description_en: entity.description_en || "",
-        aliases: [],
-        external_ids: entity.external_ids || {},
-        primary_source: entity.primary_source || "db",
-        score: 50
-      }))
-  );
-}
-
-/* =========================
-   BOOKS — WIKIDATA
+   BOOKS
 ========================= */
 
 async function fetchWikidataCandidates(query) {
   const url = new URL("https://www.wikidata.org/w/api.php");
-
   url.searchParams.set("action", "wbsearchentities");
   url.searchParams.set("format", "json");
   url.searchParams.set("language", "ru");
@@ -187,9 +103,8 @@ async function fetchWikidataEntityDetails(ids = []) {
   const url = new URL("https://www.wikidata.org/w/api.php");
   url.searchParams.set("action", "wbgetentities");
   url.searchParams.set("format", "json");
-  url.searchParams.set("props", "labels|aliases|claims|descriptions|sitelinks");
+  url.searchParams.set("props", "labels|aliases|claims|descriptions");
   url.searchParams.set("languages", "ru|en");
-  url.searchParams.set("sitefilter", "enwiki|ruwiki");
   url.searchParams.set("origin", "*");
   url.searchParams.set("ids", ids.join("|"));
 
@@ -247,14 +162,6 @@ function mapWikidataBookEntity(searchItem, entityDetails) {
   const titleRu = labels?.ru?.value || "";
   const titleEn = labels?.en?.value || "";
   const originalTitle = titleRu || titleEn || searchItem?.label || "";
-  const allAliases = uniqueArray([
-    searchItem?.label,
-    searchItem?.match?.text,
-    titleRu,
-    titleEn,
-    ...safeArray(aliases?.ru).map((item) => item?.value),
-    ...safeArray(aliases?.en).map((item) => item?.value)
-  ]);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
@@ -266,18 +173,22 @@ function mapWikidataBookEntity(searchItem, entityDetails) {
     cover_url: "",
     description_ru: descriptions?.ru?.value || "",
     description_en: descriptions?.en?.value || "",
-    aliases: allAliases,
+    aliases: uniqueArray([
+      searchItem?.label,
+      searchItem?.match?.text,
+      titleRu,
+      titleEn,
+      ...safeArray(aliases?.ru).map((item) => item?.value),
+      ...safeArray(aliases?.en).map((item) => item?.value)
+    ]),
     external_ids: {
       wikidata: searchItem.id,
       openlibrary_work: extractOpenLibraryWorkIdFromClaims(claims),
       isbn: extractIsbnValuesFromClaims(claims)
-    }
+    },
+    score: 0
   };
 }
-
-/* =========================
-   BOOKS — OPENLIBRARY
-========================= */
 
 async function fetchOpenLibraryByTitle(query) {
   const url = new URL("https://openlibrary.org/search.json");
@@ -341,12 +252,13 @@ function mapOpenLibraryDoc(doc) {
     aliases: uniqueArray([
       doc?.title,
       ...safeArray(doc?.alternative_title),
-      ...safeArray(doc?.subtitle ? [doc.subtitle] : [])
+      ...(doc?.subtitle ? [doc.subtitle] : [])
     ]),
     external_ids: {
       openlibrary_work: normalizedWorkKey || null,
       isbn: uniqueArray([...safeArray(doc?.isbn).slice(0, 5)])
-    }
+    },
+    score: 0
   };
 }
 
@@ -476,9 +388,7 @@ async function searchBooks(query) {
     console.warn("Open Library books search error:", error);
   }
 
-  const merged = dedupeByCanonicalKey([...wikidataItems, ...openLibraryItems]);
-
-  return merged
+  return dedupeByCanonicalKey([...wikidataItems, ...openLibraryItems])
     .map((item) => ({
       ...item,
       score: scoreBookResult(cleanQuery, item)
@@ -488,7 +398,7 @@ async function searchBooks(query) {
 }
 
 /* =========================
-   MOVIES / SERIES — TMDB
+   MOVIES / SERIES
 ========================= */
 
 function buildTmdbImage(path) {
@@ -524,9 +434,8 @@ function mapTmdbItem(item = {}) {
     description_ru: item.overview || "",
     description_en: "",
     aliases: uniqueArray([title, originalTitle]),
-    external_ids: {
-      tmdb: item.id
-    }
+    external_ids: { tmdb: item.id },
+    score: 0
   };
 }
 
@@ -536,7 +445,6 @@ function scoreMovieLike(query, item) {
   const original = compactString(item.original_title || "");
 
   let score = 0;
-
   if (title === q || original === q) score += 120;
   if (title.startsWith(q) || original.startsWith(q)) score += 40;
   if (title.includes(q) || original.includes(q)) score += 20;
@@ -581,7 +489,7 @@ async function searchMoviesAndSeries(query) {
 }
 
 /* =========================
-   ANIME / MANGA — ANILIST
+   ANIME / MANGA
 ========================= */
 
 function buildAniListGraphqlBody(query, type) {
@@ -644,9 +552,8 @@ function mapAniListItem(item = {}, category = "anime") {
       item?.title?.english,
       item?.title?.romaji
     ]),
-    external_ids: {
-      anilist: item.id
-    }
+    external_ids: { anilist: item.id },
+    score: 0
   };
 }
 
@@ -657,7 +564,6 @@ function scoreAnimeLike(query, item) {
   const aliases = safeArray(item.aliases).map(compactString);
 
   let score = 0;
-
   if (title === q || original === q || aliases.includes(q)) score += 120;
   if (title.startsWith(q) || original.startsWith(q)) score += 40;
   if (title.includes(q) || original.includes(q)) score += 20;
@@ -699,31 +605,7 @@ async function searchAnimeOrManga(query, category = "anime") {
 }
 
 /* =========================
-   PERSIST
-========================= */
-
-async function persistResults(items = []) {
-  const result = [];
-
-  for (const item of items) {
-    try {
-      const saved = await saveEntityIfMissing(item);
-
-      if (saved?.id && item.aliases?.length) {
-        await saveAliases(saved.id, item.aliases, item.primary_source || "search");
-      }
-
-      result.push(saved);
-    } catch (error) {
-      console.warn("Persist result error:", error);
-    }
-  }
-
-  return result;
-}
-
-/* =========================
-   MAIN SEARCH
+   MAIN
 ========================= */
 
 export async function runGlobalSearch(query) {
@@ -731,16 +613,6 @@ export async function runGlobalSearch(query) {
 
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return emptyGroups();
-  }
-
-  try {
-    const dbResults = await searchInDatabase(cleanQuery);
-
-    if (dbResults.length) {
-      return groupItems(limitInternal(sortByScoreInternal(dbResults), SEARCH_LIMITS.PAGE_RESULTS));
-    }
-  } catch (error) {
-    console.warn("DB-first search error:", error);
   }
 
   let books = [];
@@ -759,16 +631,14 @@ export async function runGlobalSearch(query) {
     console.warn("Global API search error:", error);
   }
 
-  const all = dedupeByCanonicalKey([
-    ...books,
-    ...moviesAndSeries,
-    ...anime,
-    ...manga
-  ]);
-
-  await persistResults(all);
-
-  return groupItems(all);
+  return groupItems(
+    dedupeByCanonicalKey([
+      ...books,
+      ...moviesAndSeries,
+      ...anime,
+      ...manga
+    ])
+  );
 }
 
 export async function runCategorySearch(query, category) {
@@ -785,25 +655,11 @@ export async function addSearchResultDirectlyToLibrary({ userId, item }) {
     throw new Error("Search item is invalid");
   }
 
-  const entity = await saveEntityIfMissing(item);
-
-  if (item.aliases?.length && entity?.id) {
-    await saveAliases(entity.id, item.aliases, item.primary_source || "search");
-  }
-
   return await addToUserLibrary({
     userId,
-    entity: {
-      ...item,
-      canonical_key: entity.canonical_key,
-      category: entity.category
-    }
+    entity: item
   });
 }
-
-/* =========================
-   FLAT HELPERS
-========================= */
 
 export function flattenResults(grouped) {
   return flattenGroups(grouped);
