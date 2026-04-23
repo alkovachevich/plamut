@@ -2,20 +2,17 @@ import {
   runGlobalSearch,
   flattenResults,
   sortByScore,
-  limitResults
+  limitResults,
+  addSearchResultDirectlyToLibrary
 } from "../services/search-service.js";
 import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import {
-  setCurrentItem,
-  state
+  state,
+  openAuthModal,
+  setTemporaryCardItem
 } from "../state.js";
 import { debounce, escapeHtml, clampText } from "../utils.js";
-import { saveEntityIfMissing } from "../services/entity-db.js";
-
-/* =========================
-   HELPERS
-========================= */
 
 function renderCover(item) {
   if (item.cover_url) {
@@ -33,40 +30,46 @@ function renderCover(item) {
 
 function renderCard(item) {
   return `
-    <button
-      class="result-card"
-      type="button"
-      data-key="${escapeHtml(item.canonical_key)}"
-      data-category="${escapeHtml(item.category)}"
-    >
-      <div class="result-cover">
-        ${renderCover(item)}
-      </div>
+    <div class="result-card">
+      <button
+        class="result-card__main"
+        type="button"
+        data-key="${escapeHtml(item.canonical_key)}"
+        data-category="${escapeHtml(item.category)}"
+      >
+        <div class="result-cover">
+          ${renderCover(item)}
+        </div>
 
-      <div class="result-meta">
-        <div class="result-top">
-          <div class="result-title">
-            ${escapeHtml(clampText(item.title || "", 90))}
+        <div class="result-meta">
+          <div class="result-top">
+            <div class="result-title">
+              ${escapeHtml(clampText(item.title || "", 90))}
+            </div>
+
+            ${
+              item.year
+                ? `<span class="result-year">${escapeHtml(String(item.year))}</span>`
+                : ""
+            }
           </div>
 
           ${
-            item.year
-              ? `<span class="result-year">${escapeHtml(String(item.year))}</span>`
+            item.original_title
+              ? `<div class="result-subtitle">${escapeHtml(clampText(item.original_title, 100))}</div>`
               : ""
           }
-        </div>
 
-        ${
-          item.original_title
-            ? `<div class="result-subtitle">${escapeHtml(clampText(item.original_title, 100))}</div>`
-            : ""
-        }
-
-        <div class="result-footer">
-          <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category))}</span>
+          <div class="result-footer">
+            <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category))}</span>
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+
+      <button class="result-add-btn" type="button" data-add-key="${escapeHtml(item.canonical_key)}">
+        Добавить
+      </button>
+    </div>
   `;
 }
 
@@ -80,31 +83,59 @@ function attachCardHandlers(root, items = []) {
   );
 
   root.querySelectorAll("[data-key]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       const key = button.dataset.key || "";
       const category = button.dataset.category || "";
       const payload = byKey.get(key) || null;
 
-      try {
-        if (payload) {
-          await saveEntityIfMissing(payload);
-          setCurrentItem(payload);
-        }
-      } catch (error) {
-        console.error("Pre-save entity error:", error);
+      if (payload) {
+        setTemporaryCardItem(payload);
       }
 
       navigate("/card", {
         key,
-        category
+        category,
+        mode: "temp"
       });
     });
   });
-}
 
-/* =========================
-   SEARCH
-========================= */
+  root.querySelectorAll("[data-add-key]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.addKey || "";
+      const item = byKey.get(key);
+
+      if (!item) return;
+
+      const userId = state.user?.id;
+
+      if (!userId) {
+        openAuthModal("login");
+        return;
+      }
+
+      try {
+        button.disabled = true;
+        button.textContent = "Добавление...";
+
+        const result = await addSearchResultDirectlyToLibrary({
+          userId,
+          item
+        });
+
+        if (result?.alreadyExists) {
+          button.textContent = "Уже в библиотеке";
+        } else {
+          button.textContent = "Добавлено";
+        }
+      } catch (error) {
+        console.error("Direct add from search page error:", error);
+        button.disabled = false;
+        button.textContent = "Ошибка";
+      }
+    });
+  });
+}
 
 async function performSearch(resultsRoot, query) {
   const cleanQuery = String(query || "").trim();
@@ -142,10 +173,6 @@ async function performSearch(resultsRoot, query) {
     resultsRoot.innerHTML = renderEmpty("Ошибка поиска");
   }
 }
-
-/* =========================
-   PAGE
-========================= */
 
 export function renderSearchPage(root, params = {}) {
   const initialQuery = params.q || state.searchQuery || "";
@@ -189,14 +216,32 @@ export function renderSearchPage(root, params = {}) {
 
       .result-card {
         display: grid;
-        grid-template-columns: 84px 1fr;
-        gap: 12px;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
         padding: 10px;
         border-radius: 16px;
         background: var(--surface);
         border: 1px solid var(--border);
+      }
+
+      .result-card__main {
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        gap: 12px;
         text-align: left;
         color: var(--text);
+        background: transparent;
+      }
+
+      .result-add-btn {
+        min-width: 108px;
+        min-height: 42px;
+        border-radius: 12px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        align-self: center;
+        padding: 0 12px;
       }
 
       .result-cover {
@@ -274,6 +319,16 @@ export function renderSearchPage(root, params = {}) {
         border: 1px solid var(--border);
         border-radius: 18px;
         background: var(--surface);
+      }
+
+      @media (max-width: 640px) {
+        .result-card {
+          grid-template-columns: 1fr;
+        }
+
+        .result-add-btn {
+          width: 100%;
+        }
       }
     </style>
 
