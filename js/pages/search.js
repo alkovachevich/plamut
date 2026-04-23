@@ -4,13 +4,14 @@ import {
   sortByScore,
   limitResults
 } from "../services/search-service.js";
-import { CATEGORY_LABELS, SEARCH_LIMITS } from "../config.js";
+import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import {
   setCurrentItem,
   state
 } from "../state.js";
 import { debounce, escapeHtml, clampText } from "../utils.js";
+import { saveEntityIfMissing } from "../services/entity-db.js";
 
 /* =========================
    HELPERS
@@ -62,7 +63,7 @@ function renderCard(item) {
         }
 
         <div class="result-footer">
-          <span class="badge">${escapeHtml(CATEGORY_LABELS[item.category] || item.category)}</span>
+          <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category))}</span>
         </div>
       </div>
     </button>
@@ -74,16 +75,23 @@ function renderEmpty(message) {
 }
 
 function attachCardHandlers(root, items = []) {
-  const byKey = new Map(items.map((item) => [item.canonical_key, item]));
+  const byKey = new Map(
+    items.map((item) => [item.canonical_key, item])
+  );
 
   root.querySelectorAll("[data-key]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const key = button.dataset.key || "";
       const category = button.dataset.category || "";
       const payload = byKey.get(key) || null;
 
-      if (payload) {
-        setCurrentItem(payload);
+      try {
+        if (payload) {
+          await saveEntityIfMissing(payload);
+          setCurrentItem(payload);
+        }
+      } catch (error) {
+        console.error("Pre-save entity error:", error);
       }
 
       navigate("/card", {
