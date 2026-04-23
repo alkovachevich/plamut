@@ -8,7 +8,12 @@ import {
   setCurrentItem
 } from "../state.js";
 import { debounce, escapeHtml } from "../utils.js";
-import { runGlobalSearch, flattenResults, sortByScore, limitResults } from "../services/search-service.js";
+import {
+  runGlobalSearch,
+  flattenResults,
+  sortByScore,
+  limitResults
+} from "../services/search-service.js";
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
@@ -60,7 +65,7 @@ function renderResultCard(item) {
       <div class="search-result-card__cover">
         ${renderCover(item)}
         <div class="search-result-card__overlay">
-          <span class="search-result-card__add-chip">Добавить</span>
+          <span class="search-result-card__add-chip">Открыть</span>
         </div>
       </div>
 
@@ -77,6 +82,10 @@ function renderResultCard(item) {
             ? `<div class="search-result-card__subtitle">${escapeHtml(item.original_title)}</div>`
             : ""
         }
+
+        <div class="search-result-card__category">
+          ${escapeHtml(CATEGORY_LABELS[item.category] || item.category)}
+        </div>
       </div>
     </button>
   `;
@@ -205,7 +214,7 @@ export function renderSearchModal(root) {
       .search-modal-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(5, 10, 20, 0.58);
+        background: rgba(5, 10, 20, 0.62);
         z-index: 95;
         opacity: 0;
         pointer-events: none;
@@ -250,6 +259,7 @@ export function renderSearchModal(root) {
       .search-modal__title {
         font-size: 22px;
         font-weight: 800;
+        color: var(--text);
       }
 
       .search-modal__close {
@@ -259,8 +269,9 @@ export function renderSearchModal(root) {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: var(--surface);
+        background: var(--surface-strong);
         border: 1px solid var(--border);
+        color: var(--text);
       }
 
       .search-modal__searchbox {
@@ -300,6 +311,9 @@ export function renderSearchModal(root) {
         color: var(--text-soft);
         text-align: center;
         padding: 18px;
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
+        border-radius: 18px;
       }
 
       .search-modal__group {
@@ -331,8 +345,9 @@ export function renderSearchModal(root) {
         padding: 0 16px;
         border-radius: 14px;
         font-weight: 700;
-        background: var(--surface);
+        background: var(--surface-strong);
         border: 1px solid var(--border);
+        color: var(--text);
       }
 
       .search-result-card {
@@ -342,9 +357,10 @@ export function renderSearchModal(root) {
         align-items: center;
         text-align: left;
         border-radius: 18px;
-        border: 1px solid var(--border);
+        border: 1px solid var(--border-soft);
         background: var(--surface);
         padding: 10px;
+        color: var(--text);
       }
 
       .search-result-card__cover {
@@ -375,7 +391,7 @@ export function renderSearchModal(root) {
       .search-result-card__overlay {
         position: absolute;
         inset: 0;
-        background: linear-gradient(to top, rgba(8, 10, 14, 0.72), transparent 55%);
+        background: linear-gradient(to top, rgba(8, 10, 14, 0.62), transparent 58%);
         display: flex;
         align-items: flex-end;
         justify-content: center;
@@ -385,10 +401,11 @@ export function renderSearchModal(root) {
       .search-result-card__add-chip {
         border-radius: 999px;
         padding: 6px 10px;
-        background: rgba(255, 255, 255, 0.92);
-        color: #111827;
+        background: rgba(17, 19, 24, 0.82);
+        color: #f3f5f8;
         font-size: 12px;
         font-weight: 800;
+        border: 1px solid rgba(255, 255, 255, 0.08);
       }
 
       .search-result-card__meta {
@@ -409,12 +426,18 @@ export function renderSearchModal(root) {
         font-size: 15px;
         font-weight: 700;
         line-height: 1.35;
+        color: var(--text);
       }
 
       .search-result-card__subtitle {
         font-size: 13px;
         color: var(--text-soft);
         line-height: 1.4;
+      }
+
+      .search-result-card__category {
+        font-size: 12px;
+        color: var(--text-muted);
       }
 
       .search-result-card__year {
