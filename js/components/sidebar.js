@@ -4,7 +4,6 @@ import {
   closeSidebar,
   setTheme,
   setLanguage,
-  logoutUser,
   openAuthModal
 } from "../state.js";
 import { escapeHtml, getInitials } from "../utils.js";
@@ -227,13 +226,13 @@ export function renderSidebar(root) {
         </div>
 
         <div class="sidebar-actions">
-          <button class="btn secondary" data-action="settings">
-            Настройки
-          </button>
-
           ${
             loggedIn
               ? `
+                <button class="btn secondary" data-action="settings">
+                  Настройки
+                </button>
+
                 <button class="btn danger" data-action="logout">
                   Выйти
                 </button>
@@ -241,6 +240,10 @@ export function renderSidebar(root) {
               : `
                 <button class="btn primary" data-action="login">
                   Войти
+                </button>
+
+                <button class="btn secondary" data-action="register">
+                  Регистрация
                 </button>
               `
           }
@@ -277,6 +280,11 @@ export function renderSidebar(root) {
   root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
     closeSidebar();
     openAuthModal("login");
+  });
+
+  root.querySelector('[data-action="register"]')?.addEventListener("click", () => {
+    closeSidebar();
+    openAuthModal("register");
   });
 
   root.querySelector('[data-action="logout"]')?.addEventListener("click", async () => {
