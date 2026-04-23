@@ -74,7 +74,7 @@ async function loadEntity(params) {
 
 export async function renderCardPage(root, params = {}) {
   root.innerHTML = `
-    <div style="padding:20px;">Загрузка...</div>
+    <div style="padding:20px;color:var(--text-soft);">Загрузка...</div>
   `;
 
   let entity = null;
@@ -86,7 +86,7 @@ export async function renderCardPage(root, params = {}) {
   }
 
   if (!entity) {
-    root.innerHTML = `<div style="padding:20px;">Не найдено</div>`;
+    root.innerHTML = `<div style="padding:20px;color:var(--text-soft);">Не найдено</div>`;
     return;
   }
 
@@ -109,20 +109,27 @@ export async function renderCardPage(root, params = {}) {
       .page {
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 22px;
+      }
+
+      .card-shell {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: 24px;
+        padding: 18px;
       }
 
       .card-header {
         display: flex;
-        gap: 16px;
+        gap: 18px;
         align-items: flex-start;
       }
 
       .cover {
-        width: 120px;
-        min-width: 120px;
-        height: 170px;
-        border-radius: 16px;
+        width: 124px;
+        min-width: 124px;
+        height: 180px;
+        border-radius: 18px;
         background: var(--bg-soft);
         overflow: hidden;
         border: 1px solid var(--border);
@@ -147,20 +154,21 @@ export async function renderCardPage(root, params = {}) {
         flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
         min-width: 0;
       }
 
       .title {
-        font-size: 22px;
+        font-size: 24px;
         font-weight: 800;
-        line-height: 1.25;
+        line-height: 1.22;
+        color: var(--text);
       }
 
       .subtitle {
         font-size: 14px;
         color: var(--text-soft);
-        line-height: 1.4;
+        line-height: 1.45;
       }
 
       .badges {
@@ -171,25 +179,26 @@ export async function renderCardPage(root, params = {}) {
 
       .badge {
         display: inline-block;
-        padding: 6px 10px;
+        padding: 7px 11px;
         border-radius: 999px;
         background: var(--accent-soft);
         font-size: 12px;
+        color: var(--text);
       }
 
       .actions {
         display: flex;
         gap: 10px;
-        margin-top: 10px;
+        margin-top: 8px;
         flex-wrap: wrap;
       }
 
       .btn {
-        padding: 10px 14px;
-        border-radius: 12px;
+        padding: 11px 16px;
+        border-radius: 14px;
         background: var(--surface);
         border: 1px solid var(--border);
-        font-weight: 600;
+        font-weight: 700;
         color: var(--text);
       }
 
@@ -200,12 +209,26 @@ export async function renderCardPage(root, params = {}) {
       }
 
       .btn.disabled {
-        opacity: 0.6;
+        opacity: 0.65;
         pointer-events: none;
       }
 
+      .description-block {
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
+        border-radius: 18px;
+        padding: 16px;
+      }
+
+      .description-title {
+        font-size: 14px;
+        font-weight: 800;
+        color: var(--text);
+        margin-bottom: 10px;
+      }
+
       .description {
-        line-height: 1.7;
+        line-height: 1.75;
         color: var(--text-soft);
         white-space: pre-wrap;
       }
@@ -220,62 +243,67 @@ export async function renderCardPage(root, params = {}) {
         }
 
         .cover {
-          width: 140px;
-          min-width: 140px;
-          height: 200px;
+          width: 148px;
+          min-width: 148px;
+          height: 212px;
         }
       }
     </style>
 
     <section class="page">
-      <div class="card-header">
-        <div class="cover">
-          ${
-            entity.cover_url
-              ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" />`
-              : `<div class="cover-fallback">?</div>`
-          }
-        </div>
-
-        <div class="meta">
-          <div class="title">${escapeHtml(title)}</div>
-
-          ${
-            entity.original_title && entity.original_title !== title
-              ? `<div class="subtitle">${escapeHtml(entity.original_title)}</div>`
-              : ""
-          }
-
-          <div class="badges">
-            <div class="badge">
-              ${escapeHtml(CATEGORY_LABELS[entity.category] || entity.category)}
-            </div>
-
+      <div class="card-shell">
+        <div class="card-header">
+          <div class="cover">
             ${
-              entity.year
-                ? `<div class="badge">${escapeHtml(String(entity.year))}</div>`
-                : ""
+              entity.cover_url
+                ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" />`
+                : `<div class="cover-fallback">?</div>`
             }
           </div>
 
-          <div class="actions">
-            <button
-              class="btn primary ${alreadyAdded ? "disabled" : ""}"
-              data-action="add"
-              type="button"
-            >
-              ${alreadyAdded ? "Уже в библиотеке" : "Добавить"}
-            </button>
+          <div class="meta">
+            <div class="title">${escapeHtml(title)}</div>
+
+            ${
+              entity.original_title && entity.original_title !== title
+                ? `<div class="subtitle">${escapeHtml(entity.original_title)}</div>`
+                : ""
+            }
+
+            <div class="badges">
+              <div class="badge">
+                ${escapeHtml(CATEGORY_LABELS[entity.category] || entity.category)}
+              </div>
+
+              ${
+                entity.year
+                  ? `<div class="badge">${escapeHtml(String(entity.year))}</div>`
+                  : ""
+              }
+            </div>
+
+            <div class="actions">
+              <button
+                class="btn primary ${alreadyAdded ? "disabled" : ""}"
+                data-action="add"
+                type="button"
+              >
+                ${alreadyAdded ? "Уже в библиотеке" : "Добавить"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="${description ? "description" : "empty-description"}">
-        ${
-          description
-            ? escapeHtml(description)
-            : "Описание пока отсутствует."
-        }
+      <div class="description-block">
+        <div class="description-title">Описание</div>
+        <div class="${description ? "description" : "empty-description"}">
+          ${
+            description
+              ? escapeHtml(description)
+              : "Описание пока отсутствует."
+          }
+        </div>
       </div>
     </section>
   `;
