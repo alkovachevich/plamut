@@ -6,7 +6,6 @@ import {
 } from "./config.js";
 
 const listeners = new Set();
-
 const TEMP_CARD_STORAGE_KEY = "plamut_temp_card_item";
 
 export const state = {
@@ -33,10 +32,6 @@ export const state = {
 
 window.__PLAMUT_STATE__ = state;
 
-/* =========================
-   STATE CORE
-========================= */
-
 export function setState(patch = {}) {
   Object.assign(state, patch);
   window.__PLAMUT_STATE__ = state;
@@ -48,10 +43,6 @@ export function subscribe(listener) {
   return () => listeners.delete(listener);
 }
 
-/* =========================
-   ROUTE STATE
-========================= */
-
 export function setRoute(route, params = {}) {
   setState({
     route,
@@ -59,27 +50,15 @@ export function setRoute(route, params = {}) {
   });
 }
 
-/* =========================
-   THEME
-========================= */
-
 export function setTheme(theme) {
   localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, theme);
   setState({ theme });
 }
 
-/* =========================
-   LANGUAGE
-========================= */
-
 export function setLanguage(language) {
   localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, language);
   setState({ language });
 }
-
-/* =========================
-   UI CONTROLS
-========================= */
 
 export function openSidebar() {
   setState({ sidebarOpen: true });
@@ -102,10 +81,6 @@ export function closeSearchModal() {
   });
 }
 
-/* =========================
-   AUTH MODAL
-========================= */
-
 export function openAuthModal(mode = "login") {
   setState({
     authModalOpen: true,
@@ -125,10 +100,6 @@ export function setAuthMode(mode = "login") {
   });
 }
 
-/* =========================
-   SEARCH
-========================= */
-
 export function setSearchQuery(query) {
   setState({ searchQuery: query });
 }
@@ -136,10 +107,6 @@ export function setSearchQuery(query) {
 export function setSearchResults(results) {
   setState({ searchResults: results });
 }
-
-/* =========================
-   USER
-========================= */
 
 export function setUser(user) {
   setState({
@@ -158,10 +125,6 @@ export function logoutUser() {
   });
 }
 
-/* =========================
-   CONTEXT
-========================= */
-
 export function setCurrentCategory(category) {
   setState({ currentCategory: category });
 }
@@ -173,10 +136,6 @@ export function setCurrentItem(item) {
 export function setCurrentUniverse(universe) {
   setState({ currentUniverse: universe });
 }
-
-/* =========================
-   TEMP CARD STORAGE
-========================= */
 
 export function setTemporaryCardItem(item) {
   setCurrentItem(item || null);
