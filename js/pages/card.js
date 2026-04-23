@@ -9,7 +9,6 @@ import {
 
 import {
   getEntityByCanonicalKey,
-  saveEntityIfMissing,
   addToUserLibrary,
   isAlreadyInUserLibrary
 } from "../services/entity-db.js";
@@ -36,10 +35,14 @@ async function loadEntity(params = {}) {
   const { key, category } = params || {};
 
   if (key) {
-    const fromDb = await getEntityByCanonicalKey(key);
-    if (fromDb) {
-      clearTemporaryCardItem();
-      return fromDb;
+    try {
+      const fromDb = await getEntityByCanonicalKey(key);
+      if (fromDb) {
+        clearTemporaryCardItem();
+        return fromDb;
+      }
+    } catch (error) {
+      console.warn("DB card load skipped:", error);
     }
   }
 
@@ -219,18 +222,6 @@ export async function renderCardPage(root, params = {}) {
       .empty-description {
         color: var(--text-soft);
       }
-
-      @media (max-width: 640px) {
-        .card-header {
-          flex-direction: column;
-        }
-
-        .cover {
-          width: 148px;
-          min-width: 148px;
-          height: 212px;
-        }
-      }
     </style>
 
     <section class="page">
@@ -281,11 +272,7 @@ export async function renderCardPage(root, params = {}) {
       <div class="description-block">
         <div class="description-title">Описание</div>
         <div class="${description ? "description" : "empty-description"}">
-          ${
-            description
-              ? escapeHtml(description)
-              : "Описание пока отсутствует."
-          }
+          ${description ? escapeHtml(description) : "Описание пока отсутствует."}
         </div>
       </div>
     </section>
