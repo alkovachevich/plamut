@@ -42,7 +42,7 @@ export function renderSidebar(root) {
       .sidebar-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(5, 10, 20, 0.48);
+        background: rgba(5, 10, 20, 0.52);
         z-index: 90;
         opacity: 0;
         pointer-events: none;
@@ -79,6 +79,10 @@ export function renderSidebar(root) {
         display: flex;
         align-items: center;
         gap: 14px;
+        padding: 12px;
+        border-radius: 18px;
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
       }
 
       .sidebar-avatar {
@@ -88,6 +92,7 @@ export function renderSidebar(root) {
         overflow: hidden;
         border: 1px solid var(--border);
         flex-shrink: 0;
+        background: var(--surface-strong);
       }
 
       .sidebar-avatar img {
@@ -110,23 +115,26 @@ export function renderSidebar(root) {
         font-size: 18px;
         font-weight: 700;
         line-height: 1.25;
+        color: var(--text);
       }
 
       .sidebar-profile__sub {
         color: var(--text-soft);
         font-size: 14px;
         line-height: 1.35;
+        margin-top: 3px;
       }
 
       .setting-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 12px;
-        border-radius: 14px;
+        padding: 14px;
+        border-radius: 16px;
         background: var(--surface);
-        border: 1px solid var(--border);
+        border: 1px solid var(--border-soft);
         gap: 12px;
+        color: var(--text);
       }
 
       .segmented {
@@ -137,15 +145,17 @@ export function renderSidebar(root) {
       }
 
       .segmented button {
-        padding: 6px 10px;
+        padding: 7px 12px;
         border-radius: 999px;
         background: var(--bg-soft);
-        color: var(--text);
+        color: var(--text-soft);
+        border: 1px solid transparent;
       }
 
       .segmented .active {
-        background: var(--accent);
-        color: #fff;
+        background: var(--accent-soft);
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.04);
       }
 
       .sidebar-actions {
@@ -156,9 +166,9 @@ export function renderSidebar(root) {
       }
 
       .btn {
-        padding: 12px;
-        border-radius: 12px;
-        font-weight: 600;
+        padding: 13px 14px;
+        border-radius: 14px;
+        font-weight: 700;
         color: var(--text);
       }
 
@@ -173,8 +183,9 @@ export function renderSidebar(root) {
       }
 
       .btn.danger {
-        background: rgba(255, 91, 110, 0.14);
+        background: rgba(255, 124, 139, 0.14);
         color: var(--danger);
+        border: 1px solid rgba(255, 124, 139, 0.18);
       }
     </style>
 
