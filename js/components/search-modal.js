@@ -3,8 +3,6 @@ import { navigate } from "../router.js";
 import {
   state,
   closeSearchModal,
-  setSearchQuery,
-  setSearchResults,
   setCurrentItem
 } from "../state.js";
 import { debounce, escapeHtml } from "../utils.js";
@@ -17,7 +15,10 @@ import {
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
-  return Object.values(groupedResults).reduce((sum, items) => sum + (items?.length || 0), 0);
+  return Object.values(groupedResults).reduce(
+    (sum, items) => sum + (items?.length || 0),
+    0
+  );
 }
 
 function renderEmpty(query) {
@@ -116,15 +117,13 @@ function renderGroups(groupedResults) {
   return html || "";
 }
 
-function attachResultHandlers(root, groupedResults) {
+function attachResultHandlers(root, groupedResults, currentQuery) {
   const flat = limitResults(
     sortByScore(flattenResults(groupedResults || {})),
     SEARCH_LIMITS.PAGE_RESULTS
   );
 
-  const itemsByKey = new Map(
-    flat.map((item) => [item.canonical_key, item])
-  );
+  const itemsByKey = new Map(flat.map((item) => [item.canonical_key, item]));
 
   root.querySelectorAll("[data-card-key]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -145,9 +144,8 @@ function attachResultHandlers(root, groupedResults) {
   });
 
   root.querySelector('[data-action="show-all"]')?.addEventListener("click", () => {
-    const query = state.searchQuery || "";
     closeSearchModal();
-    navigate("/search", { q: query });
+    navigate("/search", { q: currentQuery || "" });
   });
 }
 
@@ -155,30 +153,30 @@ async function performSearch(root, query) {
   const resultsRoot = root.querySelector("[data-search-results]");
   if (!resultsRoot) return;
 
+  const cleanQuery = String(query || "").trim();
+  root.dataset.currentQuery = cleanQuery;
+
   const requestId = Date.now();
   root.dataset.requestId = String(requestId);
 
-  if (!query || query.trim().length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    setSearchResults(null);
-    resultsRoot.innerHTML = renderEmpty(query);
+  if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+    resultsRoot.innerHTML = renderEmpty(cleanQuery);
     return;
   }
 
   resultsRoot.innerHTML = `<div class="search-modal__loading">Ищем…</div>`;
 
   try {
-    const groupedResults = await runGlobalSearch(query);
+    const groupedResults = await runGlobalSearch(cleanQuery);
 
     if (root.dataset.requestId !== String(requestId)) {
       return;
     }
 
-    setSearchResults(groupedResults);
-
     const total = getTotalCount(groupedResults);
 
     if (!total) {
-      resultsRoot.innerHTML = renderEmpty(query);
+      resultsRoot.innerHTML = renderEmpty(cleanQuery);
       return;
     }
 
@@ -192,7 +190,7 @@ async function performSearch(root, query) {
       </div>
     `;
 
-    attachResultHandlers(resultsRoot, groupedResults);
+    attachResultHandlers(resultsRoot, groupedResults, cleanQuery);
   } catch (error) {
     console.error("Search modal error:", error);
     resultsRoot.innerHTML = `
@@ -207,7 +205,7 @@ const debouncedSearch = debounce(performSearch, SEARCH_LIMITS.DEBOUNCE_MS);
 
 export function renderSearchModal(root) {
   const isOpen = state.searchModalOpen;
-  const currentQuery = state.searchQuery || "";
+  const initialQuery = state.searchQuery || "";
 
   root.innerHTML = `
     <style>
@@ -466,7 +464,7 @@ export function renderSearchModal(root) {
           <input
             class="search-modal__input"
             type="text"
-            value="${escapeHtml(currentQuery)}"
+            value="${escapeHtml(initialQuery)}"
             placeholder="Искать книги, фильмы, аниме, мангу…"
             autocomplete="off"
             spellcheck="false"
@@ -474,7 +472,7 @@ export function renderSearchModal(root) {
         </div>
 
         <div class="search-modal__results" data-search-results>
-          ${renderEmpty(currentQuery)}
+          ${renderEmpty(initialQuery)}
         </div>
       </div>
     </div>
@@ -500,12 +498,11 @@ export function renderSearchModal(root) {
   setTimeout(() => input.focus(), 0);
 
   input.addEventListener("input", () => {
-    const value = input.value;
-    setSearchQuery(value);
+    const value = input.value || "";
     debouncedSearch(root, value);
   });
 
-  if (currentQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    performSearch(root, currentQuery);
+  if (initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+    performSearch(root, initialQuery);
   }
 }
