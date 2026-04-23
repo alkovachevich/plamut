@@ -61,11 +61,7 @@ function buildOriginalTitle(entity = {}) {
 }
 
 function buildDescriptionRu(entity = {}) {
-  return cleanNullableText(
-    entity.description_ru ||
-      entity.description ||
-      ""
-  );
+  return cleanNullableText(entity.description_ru || entity.description || "");
 }
 
 function buildDescriptionEn(entity = {}) {
@@ -160,24 +156,6 @@ export async function getEntityByCanonicalKey(canonicalKey) {
   return data || null;
 }
 
-export async function getEntityById(entityId) {
-  if (!entityId) return null;
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await supabase
-    .from(MEDIA_ENTITIES_TABLE)
-    .select("*")
-    .eq("id", entityId)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return data || null;
-}
-
 /* =========================
    ALIASES
 ========================= */
@@ -261,24 +239,16 @@ function mergeEntityPayload(existing, incoming) {
     primary_source:
       incoming.primary_source || existing?.primary_source || "unknown",
 
-    title_primary:
-      incoming.title_primary || existing?.title_primary || "",
-    title_ru:
-      incoming.title_ru || existing?.title_ru || "",
-    title_en:
-      incoming.title_en || existing?.title_en || "",
-    original_title:
-      incoming.original_title || existing?.original_title || "",
+    title_primary: incoming.title_primary || existing?.title_primary || "",
+    title_ru: incoming.title_ru || existing?.title_ru || "",
+    title_en: incoming.title_en || existing?.title_en || "",
+    original_title: incoming.original_title || existing?.original_title || "",
 
-    year:
-      incoming.year ?? existing?.year ?? null,
-    cover_url:
-      incoming.cover_url || existing?.cover_url || "",
+    year: incoming.year ?? existing?.year ?? null,
+    cover_url: incoming.cover_url || existing?.cover_url || "",
 
-    description_ru:
-      incoming.description_ru || existing?.description_ru || "",
-    description_en:
-      incoming.description_en || existing?.description_en || "",
+    description_ru: incoming.description_ru || existing?.description_ru || "",
+    description_en: incoming.description_en || existing?.description_en || "",
 
     external_ids: {
       ...(existing?.external_ids || {}),
@@ -312,14 +282,7 @@ export async function saveEntityIfMissing(inputEntity) {
     throw error;
   }
 
-  await saveAliases(
-    data.id,
-    uniqueArray([
-      ...safeArray(existing?.aliases),
-      ...entity.aliases
-    ]),
-    entity.primary_source
-  );
+  await saveAliases(data.id, entity.aliases, entity.primary_source);
 
   return data;
 }
