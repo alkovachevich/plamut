@@ -7,6 +7,8 @@ import {
 
 const listeners = new Set();
 
+const TEMP_CARD_STORAGE_KEY = "plamut_temp_card_item";
+
 export const state = {
   route: "/",
   routeParams: {},
@@ -149,6 +151,8 @@ export function setUser(user) {
 }
 
 export function logoutUser() {
+  clearTemporaryCardItem();
+
   setState({
     user: { ...DEFAULT_USER }
   });
@@ -168,4 +172,50 @@ export function setCurrentItem(item) {
 
 export function setCurrentUniverse(universe) {
   setState({ currentUniverse: universe });
+}
+
+/* =========================
+   TEMP CARD STORAGE
+========================= */
+
+export function setTemporaryCardItem(item) {
+  setCurrentItem(item || null);
+
+  try {
+    if (!item) {
+      sessionStorage.removeItem(TEMP_CARD_STORAGE_KEY);
+      return;
+    }
+
+    sessionStorage.setItem(TEMP_CARD_STORAGE_KEY, JSON.stringify(item));
+  } catch (error) {
+    console.warn("setTemporaryCardItem error:", error);
+  }
+}
+
+export function getTemporaryCardItem() {
+  if (state.currentItem?.canonical_key) {
+    return state.currentItem;
+  }
+
+  try {
+    const raw = sessionStorage.getItem(TEMP_CARD_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    console.warn("getTemporaryCardItem error:", error);
+    return null;
+  }
+}
+
+export function clearTemporaryCardItem() {
+  setCurrentItem(null);
+
+  try {
+    sessionStorage.removeItem(TEMP_CARD_STORAGE_KEY);
+  } catch (error) {
+    console.warn("clearTemporaryCardItem error:", error);
+  }
 }
