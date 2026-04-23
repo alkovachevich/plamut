@@ -317,6 +317,7 @@ function renderRouteSafely() {
     }
   } catch (error) {
     console.error("Route render error:", error);
+
     mainRoot.innerHTML = `
       <div style="
         padding: 24px;
