@@ -1,12 +1,18 @@
 import {
   state,
   closeAuthModal,
-  setAuthMode
+  setAuthMode,
+  setUser
 } from "../state.js";
+
+import { navigate } from "../router.js";
 
 import {
   signInWithEmail,
-  signUpWithEmail
+  signUpWithEmail,
+  getCurrentUser,
+  fetchUserProfile,
+  upsertUserProfile
 } from "../lib/supabase-client.js";
 
 /* =========================
@@ -27,6 +33,11 @@ function renderError(message = "") {
   return `<div class="auth-error">${escapeHtml(message)}</div>`;
 }
 
+function renderNote(message = "") {
+  if (!message) return "";
+  return `<div class="auth-note">${escapeHtml(message)}</div>`;
+}
+
 function getSubmitLabel(mode) {
   return mode === "login" ? "Войти" : "Создать аккаунт";
 }
@@ -39,6 +50,92 @@ function getSwitchLabel(mode) {
   return mode === "login"
     ? "Нет аккаунта? Зарегистрироваться"
     : "Уже есть аккаунт? Войти";
+}
+
+function buildUsername(user) {
+  const source =
+    user?.user_metadata?.username ||
+    user?.user_metadata?.preferred_username ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "user";
+
+  return (
+    String(source)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32) || "user"
+  );
+}
+
+function buildDisplayName(user, profile = null) {
+  return (
+    profile?.display_name ||
+    user?.user_metadata?.display_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "User"
+  );
+}
+
+function buildAvatarUrl(user, profile = null) {
+  return (
+    profile?.avatar_url ||
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    null
+  );
+}
+
+async function ensureProfile(user) {
+  if (!user?.id) return null;
+
+  const profile = await fetchUserProfile(user.id);
+
+  if (profile) {
+    const payload = {
+      id: user.id,
+      username: profile.username || buildUsername(user),
+      display_name: profile.display_name || buildDisplayName(user, profile),
+      avatar_url: profile.avatar_url || buildAvatarUrl(user, profile)
+    };
+
+    return await upsertUserProfile(payload);
+  }
+
+  return await upsertUserProfile({
+    id: user.id,
+    username: buildUsername(user),
+    display_name: buildDisplayName(user, null),
+    avatar_url: buildAvatarUrl(user, null)
+  });
+}
+
+async function applyUserToStateFromAuth() {
+  const authUser = await getCurrentUser();
+
+  if (!authUser?.id) {
+    return null;
+  }
+
+  const profile = await ensureProfile(authUser);
+
+  setUser({
+    id: authUser.id,
+    email: authUser.email || null,
+    username: profile?.username || buildUsername(authUser),
+    display_name: profile?.display_name || buildDisplayName(authUser, profile),
+    avatar_url: profile?.avatar_url || buildAvatarUrl(authUser, profile)
+  });
+
+  return {
+    authUser,
+    profile
+  };
 }
 
 /* =========================
@@ -135,6 +232,12 @@ export function renderAuthModal(root) {
         line-height: 1.45;
       }
 
+      .auth-note {
+        color: var(--text-soft);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
       .auth-close {
         position: absolute;
         right: 12px;
@@ -142,12 +245,6 @@ export function renderAuthModal(root) {
         background: transparent;
         font-size: 18px;
         color: var(--text);
-      }
-
-      .auth-note {
-        color: var(--text-soft);
-        font-size: 13px;
-        line-height: 1.5;
       }
     </style>
 
@@ -163,17 +260,11 @@ export function renderAuthModal(root) {
           <input class="auth-input" name="email" type="email" placeholder="Email" required />
           <input class="auth-input" name="password" type="password" placeholder="Пароль" required />
 
-          <div data-error></div>
+          <div data-message></div>
 
           <button class="auth-button" type="submit">
             ${getSubmitLabel(mode)}
           </button>
-
-          ${
-            mode === "register"
-              ? `<div class="auth-note">После регистрации может понадобиться подтверждение email, если это включено в Supabase.</div>`
-              : ""
-          }
         </form>
 
         <div class="auth-switch" data-switch>
@@ -185,7 +276,7 @@ export function renderAuthModal(root) {
 
   const overlay = root.querySelector(".auth-overlay");
   const form = root.querySelector(".auth-form");
-  const errorBox = root.querySelector("[data-error]");
+  const messageBox = root.querySelector("[data-message]");
   const submitButton = root.querySelector(".auth-button");
 
   root.querySelector("[data-close]")?.addEventListener("click", closeAuthModal);
@@ -207,10 +298,10 @@ export function renderAuthModal(root) {
     const email = emailInput?.value?.trim() || "";
     const password = passwordInput?.value || "";
 
-    errorBox.innerHTML = "";
+    messageBox.innerHTML = "";
 
     if (!email || !password) {
-      errorBox.innerHTML = renderError("Заполни email и пароль.");
+      messageBox.innerHTML = renderError("Заполни email и пароль.");
       return;
     }
 
@@ -220,25 +311,42 @@ export function renderAuthModal(root) {
 
       if (mode === "login") {
         await signInWithEmail(email, password);
-        closeAuthModal();
-      } else {
-        const result = await signUpWithEmail(email, password);
-        const hasSession = Boolean(result?.session);
+        const result = await applyUserToStateFromAuth();
 
-        if (hasSession) {
-          closeAuthModal();
-        } else {
-          errorBox.innerHTML = `
-            <div class="auth-note">
-              Аккаунт создан. Проверь почту и подтверди email, если письмо было отправлено.
-            </div>
-          `;
-          submitButton.disabled = false;
-          submitButton.textContent = getSubmitLabel(mode);
+        if (!result?.authUser?.id) {
+          throw new Error("Не удалось получить пользователя после входа.");
         }
+
+        closeAuthModal();
+        navigate("/");
+        return;
       }
+
+      const signUpResult = await signUpWithEmail(email, password);
+      const authUser = signUpResult?.user || signUpResult?.data?.user || null;
+      const hasSession = Boolean(
+        signUpResult?.session || signUpResult?.data?.session
+      );
+
+      if (authUser?.id && hasSession) {
+        await applyUserToStateFromAuth();
+        closeAuthModal();
+        navigate("/");
+        return;
+      }
+
+      if (authUser?.id && !hasSession) {
+        messageBox.innerHTML = renderNote(
+          "Аккаунт создан. Проверь почту и подтверди email, если письмо было отправлено."
+        );
+        submitButton.disabled = false;
+        submitButton.textContent = getSubmitLabel(mode);
+        return;
+      }
+
+      throw new Error("Не удалось завершить регистрацию.");
     } catch (error) {
-      errorBox.innerHTML = renderError(error.message || "Ошибка авторизации");
+      messageBox.innerHTML = renderError(error.message || "Ошибка авторизации");
       submitButton.disabled = false;
       submitButton.textContent = getSubmitLabel(mode);
     }
