@@ -2,7 +2,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 30000;
 
 function createClient() {
   if (!window.supabase) {
@@ -13,7 +13,8 @@ function createClient() {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: true,
+      storage: window.localStorage
     }
   });
 }
@@ -45,7 +46,8 @@ export async function getCurrentSession() {
 
   const { data, error } = await withTimeout(
     supabase.auth.getSession(),
-    "Получение session"
+    "Получение session",
+    30000
   );
 
   if (error) {
@@ -60,7 +62,8 @@ export async function getCurrentUser() {
 
   const { data, error } = await withTimeout(
     supabase.auth.getUser(),
-    "Получение пользователя"
+    "Получение пользователя",
+    30000
   );
 
   if (error) {
@@ -75,7 +78,8 @@ export async function signInWithEmail(email, password) {
 
   const { data, error } = await withTimeout(
     supabase.auth.signInWithPassword({ email, password }),
-    "Вход"
+    "Вход",
+    30000
   );
 
   if (error) {
@@ -90,7 +94,8 @@ export async function signUpWithEmail(email, password) {
 
   const { data, error } = await withTimeout(
     supabase.auth.signUp({ email, password }),
-    "Регистрация"
+    "Регистрация",
+    30000
   );
 
   if (error) {
@@ -105,7 +110,8 @@ export async function signOut() {
 
   const { error } = await withTimeout(
     supabase.auth.signOut(),
-    "Выход"
+    "Выход",
+    30000
   );
 
   if (error) {
@@ -126,7 +132,8 @@ export async function fetchUserProfile(userId) {
       .select("*")
       .eq("id", userId)
       .maybeSingle(),
-    "Загрузка профиля"
+    "Загрузка профиля",
+    30000
   );
 
   if (error) {
@@ -164,7 +171,8 @@ export async function upsertUserProfile(profile) {
       .upsert(payload, { onConflict: "id" })
       .select()
       .single(),
-    "Сохранение профиля"
+    "Сохранение профиля",
+    30000
   );
 
   if (error) {
@@ -183,7 +191,8 @@ export async function updateUserPassword(newPassword) {
 
   const { data, error } = await withTimeout(
     supabase.auth.updateUser({ password: newPassword }),
-    "Смена пароля"
+    "Смена пароля",
+    30000
   );
 
   if (error) {
@@ -227,7 +236,7 @@ export async function uploadAvatarImage(userId, file) {
         upsert: false
       }),
     "Загрузка аватара",
-    20000
+    45000
   );
 
   if (uploadError) {
