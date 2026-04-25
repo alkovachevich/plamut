@@ -170,11 +170,24 @@ function renderRelatedCard(item) {
 }
 
 function renderRelatedSection(entity, relatedItems = []) {
-  if (!entity?.id || !relatedItems.length) {
+  const universe = deriveUniverseInfo(entity);
+
+  if (!entity?.id) {
     return "";
   }
 
-  const universe = deriveUniverseInfo(entity);
+  if (!relatedItems.length) {
+    return `
+      <section class="related-section">
+        <div class="related-head">
+          <div>
+            <div class="related-title-main">Связанные произведения</div>
+            <div class="related-subtitle">Пока связей нет. Можно построить вселенную через меню ⋯</div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
 
   return `
     <section class="related-section">
@@ -221,7 +234,10 @@ export async function renderCardPage(root, params = {}) {
         relatedItems = await getRelatedItemsForEntity({
           userId,
           entityId: entity.id
-        }).catch(() => []);
+        }).catch((error) => {
+          console.warn("Related items load skipped:", error);
+          return [];
+        });
       }
     }
   } catch (error) {
@@ -690,6 +706,8 @@ export async function renderCardPage(root, params = {}) {
         navigate("/universe", {
           id: result.universe.universe_key
         });
+      } else {
+        renderCardPage(root, params);
       }
     } catch (error) {
       console.error("Build universe error:", error);
