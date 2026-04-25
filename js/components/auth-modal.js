@@ -25,6 +25,10 @@ function renderError(message = "") {
   return message ? `<div class="auth-error">${escapeHtml(message)}</div>` : "";
 }
 
+function renderNote(message = "") {
+  return message ? `<div class="auth-note">${escapeHtml(message)}</div>` : "";
+}
+
 function getSubmitLabel(mode) {
   return mode === "login" ? "Войти" : "Создать аккаунт";
 }
@@ -56,11 +60,11 @@ function buildDisplayName(user) {
   return user?.email?.split("@")[0] || "User";
 }
 
-async function syncProfileWithoutBlocking(user) {
+async function syncProfileInBackground(user) {
   if (!user?.id) return;
 
   try {
-    const existing = await fetchUserProfile(user.id);
+    const existing = await fetchUserProfile(user.id).catch(() => null);
 
     const payload = {
       id: user.id,
@@ -94,7 +98,7 @@ function applyAuthUserImmediately(user) {
     avatar_url: null
   });
 
-  syncProfileWithoutBlocking(user);
+  syncProfileInBackground(user);
 }
 
 export function renderAuthModal(root) {
@@ -181,6 +185,12 @@ export function renderAuthModal(root) {
         line-height: 1.45;
       }
 
+      .auth-note {
+        color: var(--text-soft);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
       .auth-close {
         position: absolute;
         right: 12px;
@@ -257,11 +267,14 @@ export function renderAuthModal(root) {
       const user = result?.user || result?.session?.user || null;
 
       if (!user?.id) {
-        throw new Error(
-          mode === "login"
-            ? "Не удалось войти."
-            : "Аккаунт создан. Проверь email, если включено подтверждение почты."
-        );
+        if (mode === "register") {
+          messageBox.innerHTML = renderNote("Аккаунт создан. Проверь email, если включено подтверждение почты.");
+          submitButton.disabled = false;
+          submitButton.textContent = getSubmitLabel(mode);
+          return;
+        }
+
+        throw new Error("Не удалось войти.");
       }
 
       applyAuthUserImmediately(user);
