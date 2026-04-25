@@ -28,12 +28,23 @@ function renderCover(entity = {}) {
   return `<div class="item-cover-fallback">?</div>`;
 }
 
+function findRelationForItem(seedEntityId, targetEntityId, relations = []) {
+  return relations.find((rel) => {
+    const from = Number(rel.from_entity_id);
+    const to = Number(rel.to_entity_id);
+
+    if (from === Number(seedEntityId) && to === Number(targetEntityId)) return true;
+    if (to === Number(seedEntityId) && from === Number(targetEntityId)) return true;
+
+    return false;
+  });
+}
+
 function renderItem(item, index, relations = []) {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "Planned";
-
-  const relation = relations.find((rel) => rel.to_entity_id === entity.id || rel.from_entity_id === entity.id);
+  const relation = findRelationForItem(null, entity.id, relations);
   const relationLabel = relation ? getRelationLabel(relation.relation_type) : "Участник";
 
   return `
@@ -71,6 +82,47 @@ function renderItem(item, index, relations = []) {
 
 function renderGuest(root) {
   root.innerHTML = `
+    <style>
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .title {
+        font-size: 28px;
+        font-weight: 900;
+        line-height: 1.15;
+        color: var(--text);
+      }
+
+      .empty-state {
+        padding: 28px;
+        border-radius: 20px;
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        color: var(--text-soft);
+      }
+
+      .empty-title {
+        color: var(--text);
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .login-btn {
+        width: fit-content;
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+      }
+    </style>
+
     <section class="page">
       <div class="title">Вселенная</div>
 
@@ -346,7 +398,7 @@ export async function renderUniversePage(root, params = {}) {
       root.querySelector(".page").innerHTML = `
         <div class="empty-state">
           <div class="empty-title">Вселенная не найдена</div>
-          <div class="empty-text">Добавь связанные произведения в библиотеку.</div>
+          <div class="empty-text">Добавь связанные произведения в библиотеку и построй вселенную из карточки.</div>
         </div>
       `;
       return;
