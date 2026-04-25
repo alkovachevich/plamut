@@ -1,7 +1,7 @@
 import { STATUS_LABELS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import { openAuthModal, openSearchModal, state } from "../state.js";
-import { clampText, escapeHtml } from "../utils.js";
+import { clampText, escapeHtml, safeArray } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
 
 async function fetchUserCategoryLibrary(userId, category) {
@@ -29,7 +29,8 @@ async function fetchUserCategoryLibrary(userId, category) {
         year,
         cover_url,
         description_ru,
-        description_en
+        description_en,
+        external_ids
       )
     `)
     .eq("user_id", userId)
@@ -67,6 +68,106 @@ async function removeFromLibrary(userMediaId) {
   return true;
 }
 
+function openLibraryCoverUrlFromId(coverId) {
+  return coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "";
+}
+
+function openLibraryCoverUrlFromIsbn(isbn) {
+  return isbn ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg` : "";
+}
+
+function openLibraryCoverUrlFromOlid(olid) {
+  return olid ? `https://covers.openlibrary.org/b/olid/${encodeURIComponent(olid)}-L.jpg` : "";
+}
+
+function normalizeOpenLibraryWorkKey(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("/works/")) {
+    return raw.replace("/works/", "");
+  }
+
+  return raw;
+}
+
+async function fetchOpenLibraryWorkCover(workKey) {
+  const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
+  if (!normalizedWorkKey) return "";
+
+  try {
+    const response = await fetch(`https://openlibrary.org/works/${encodeURIComponent(normalizedWorkKey)}.json`, {
+      headers: { Accept: "application/json" }
+    });
+
+    if (!response.ok) return "";
+
+    const payload = await response.json();
+    const coverId = safeArray(payload?.covers).find(Boolean);
+
+    return coverId ? openLibraryCoverUrlFromId(coverId) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function resolveBookCoverFromExternalIds(entity = {}) {
+  if (entity.cover_url) return entity.cover_url;
+
+  const externalIds = entity.external_ids || {};
+  const isbn = safeArray(externalIds.isbn).find(Boolean);
+  const editionKey = safeArray(externalIds.edition_key).find(Boolean);
+  const ia = safeArray(externalIds.ia).find(Boolean);
+  const work = externalIds.openlibrary_work || "";
+
+  if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
+  if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
+  if (ia) return openLibraryCoverUrlFromOlid(ia);
+  if (work) return await fetchOpenLibraryWorkCover(work);
+
+  const canonicalKey = entity.canonical_key || "";
+  if (canonicalKey.startsWith("books:openlibrary:")) {
+    const possibleWork = canonicalKey.replace("books:openlibrary:", "");
+    return await fetchOpenLibraryWorkCover(possibleWork);
+  }
+
+  return "";
+}
+
+async function fixMissingBookCovers(items = []) {
+  const supabase = getSupabaseClient();
+  let changed = false;
+
+  const nextItems = [...items];
+
+  for (const item of nextItems) {
+    const entity = item.media_entities || {};
+
+    if (entity.category !== "books") continue;
+    if (entity.cover_url) continue;
+
+    const newCover = await resolveBookCoverFromExternalIds(entity);
+    if (!newCover) continue;
+
+    try {
+      await supabase
+        .from("media_entities")
+        .update({ cover_url: newCover })
+        .eq("id", entity.id);
+
+      entity.cover_url = newCover;
+      changed = true;
+    } catch (error) {
+      console.warn("Book cover restore skipped:", error);
+    }
+  }
+
+  return {
+    items: nextItems,
+    changed
+  };
+}
+
 function resolveTitle(entity = {}) {
   return (
     entity.title_primary ||
@@ -82,7 +183,9 @@ function resolveSubtitle(entity = {}) {
 }
 
 function getCover(entity = {}) {
-  return entity.cover_url || "";
+  const cover = entity.cover_url || "";
+  if (!cover || cover === "undefined" || cover === "null") return "";
+  return cover;
 }
 
 function uniqueFolders(items = []) {
@@ -127,13 +230,15 @@ function filterItems(items = [], activeFolder = "all") {
 
 function renderCover(entity = {}) {
   const title = resolveTitle(entity);
+  const cover = getCover(entity);
 
-  if (getCover(entity)) {
+  if (cover) {
     return `
       <img
-        src="${escapeHtml(getCover(entity))}"
+        src="${escapeHtml(cover)}"
         alt="${escapeHtml(title)}"
         loading="lazy"
+        onerror="this.style.display='none';this.parentElement.classList.add('is-empty-cover');"
       />
     `;
   }
@@ -172,7 +277,7 @@ function renderLibraryCard(item) {
 
   return `
     <article
-      class="library-card"
+      class="library-card library-card--${escapeHtml(entityCategory)}"
       data-user-media-id="${item.id}"
       data-action="open-card"
       data-key="${escapeHtml(canonicalKey)}"
@@ -385,6 +490,23 @@ export async function renderCategoryPage(root, params = {}) {
         height: 100%;
         object-fit: cover;
         display: block;
+      }
+
+      .library-card--books .library-card__cover img,
+      .library-card--manga .library-card__cover img {
+        object-fit: contain;
+        background: var(--bg-soft);
+      }
+
+      .library-card__cover.is-empty-cover {
+        display: grid;
+        place-items: center;
+      }
+
+      .library-card__cover.is-empty-cover::after {
+        content: "?";
+        color: var(--text-soft);
+        font-weight: 800;
       }
 
       .library-card__cover-fallback {
@@ -722,6 +844,15 @@ export async function renderCategoryPage(root, params = {}) {
   try {
     items = await fetchUserCategoryLibrary(userId, category);
     renderList();
+
+    if (category === "books") {
+      fixMissingBookCovers(items).then((result) => {
+        if (result?.changed) {
+          items = result.items;
+          renderList();
+        }
+      });
+    }
   } catch (error) {
     console.error("Category library load error:", error);
     contentRoot.innerHTML = `
