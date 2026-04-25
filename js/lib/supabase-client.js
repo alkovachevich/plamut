@@ -2,6 +2,8 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
 
+const DEFAULT_TIMEOUT_MS = 12000;
+
 function createClient() {
   if (!window.supabase) {
     throw new Error("Supabase SDK не загружен");
@@ -20,16 +22,34 @@ export function getSupabaseClient() {
   if (!client) {
     client = createClient();
   }
+
   return client;
+}
+
+export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
+  let timer;
+
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label}: превышено время ожидания`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 export async function getCurrentSession() {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
+
+  const { data, error } = await withTimeout(
+    supabase.auth.getSession(),
+    "Получение session"
+  );
 
   if (error) {
-    console.error("Supabase getSession error:", error);
-    return null;
+    throw error;
   }
 
   return data?.session || null;
@@ -37,11 +57,14 @@ export async function getCurrentSession() {
 
 export async function getCurrentUser() {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getUser();
+
+  const { data, error } = await withTimeout(
+    supabase.auth.getUser(),
+    "Получение пользователя"
+  );
 
   if (error) {
-    console.error("Supabase getUser error:", error);
-    return null;
+    throw error;
   }
 
   return data?.user || null;
@@ -50,10 +73,10 @@ export async function getCurrentUser() {
 export async function signInWithEmail(email, password) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password
-  });
+  const { data, error } = await withTimeout(
+    supabase.auth.signInWithPassword({ email, password }),
+    "Вход"
+  );
 
   if (error) {
     throw error;
@@ -65,10 +88,10 @@ export async function signInWithEmail(email, password) {
 export async function signUpWithEmail(email, password) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password
-  });
+  const { data, error } = await withTimeout(
+    supabase.auth.signUp({ email, password }),
+    "Регистрация"
+  );
 
   if (error) {
     throw error;
@@ -80,7 +103,10 @@ export async function signUpWithEmail(email, password) {
 export async function signOut() {
   const supabase = getSupabaseClient();
 
-  const { error } = await supabase.auth.signOut();
+  const { error } = await withTimeout(
+    supabase.auth.signOut(),
+    "Выход"
+  );
 
   if (error) {
     throw error;
@@ -94,15 +120,17 @@ export async function fetchUserProfile(userId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle(),
+    "Загрузка профиля"
+  );
 
   if (error) {
-    console.error("fetchUserProfile error:", error);
-    return null;
+    throw error;
   }
 
   return data || null;
@@ -117,11 +145,11 @@ export async function upsertUserProfile(profile) {
 
   const payload = {
     id: profile.id,
-    username: profile.username || null,
-    display_name: profile.display_name || null,
-    avatar_url: profile.avatar_url || null,
-    preferred_language: profile.preferred_language || undefined,
-    preferred_theme: profile.preferred_theme || undefined
+    username: profile.username ?? undefined,
+    display_name: profile.display_name ?? undefined,
+    avatar_url: profile.avatar_url ?? undefined,
+    preferred_language: profile.preferred_language ?? undefined,
+    preferred_theme: profile.preferred_theme ?? undefined
   };
 
   Object.keys(payload).forEach((key) => {
@@ -130,13 +158,14 @@ export async function upsertUserProfile(profile) {
     }
   });
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .upsert(payload, {
-      onConflict: "id"
-    })
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("profiles")
+      .upsert(payload, { onConflict: "id" })
+      .select()
+      .single(),
+    "Сохранение профиля"
+  );
 
   if (error) {
     throw error;
@@ -152,9 +181,10 @@ export async function updateUserPassword(newPassword) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.auth.updateUser({
-    password: newPassword
-  });
+  const { data, error } = await withTimeout(
+    supabase.auth.updateUser({ password: newPassword }),
+    "Смена пароля"
+  );
 
   if (error) {
     throw error;
@@ -189,25 +219,26 @@ export async function uploadAvatarImage(userId, file) {
   const safeName = sanitizeFilename(file.name || `avatar.${extension}`);
   const path = `${userId}/${Date.now()}-${safeName}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from("avatars")
-    .upload(path, file, {
-      cacheControl: "3600",
-      upsert: false
-    });
+  const { error: uploadError } = await withTimeout(
+    supabase.storage
+      .from("avatars")
+      .upload(path, file, {
+        cacheControl: "3600",
+        upsert: false
+      }),
+    "Загрузка аватара",
+    20000
+  );
 
   if (uploadError) {
     throw uploadError;
   }
 
-  const { data } = supabase.storage
-    .from("avatars")
-    .getPublicUrl(path);
-
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
   const publicUrl = data?.publicUrl || "";
 
   if (!publicUrl) {
-    throw new Error("Не удалось получить публичную ссылку аватара");
+    throw new Error("Не удалось получить ссылку аватара");
   }
 
   return publicUrl;
