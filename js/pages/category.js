@@ -4,10 +4,6 @@ import { openAuthModal, openSearchModal, state } from "../state.js";
 import { clampText, escapeHtml } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
 
-/* =========================
-   DATA
-========================= */
-
 async function fetchUserCategoryLibrary(userId, category) {
   const supabase = getSupabaseClient();
 
@@ -40,27 +36,22 @@ async function fetchUserCategoryLibrary(userId, category) {
     .eq("category", category)
     .order("created_at", { ascending: false });
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return Array.isArray(data) ? data.filter((item) => item?.media_entities) : [];
 }
 
-async function updateUserMediaStatus(userMediaId, status) {
+async function updateUserMedia(userMediaId, payload) {
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
     .from("user_media")
-    .update({ status })
+    .update(payload)
     .eq("id", userMediaId)
     .select()
     .single();
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data;
 }
 
@@ -72,16 +63,9 @@ async function removeFromLibrary(userMediaId) {
     .delete()
     .eq("id", userMediaId);
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return true;
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 function resolveTitle(entity = {}) {
   return (
@@ -117,10 +101,7 @@ function sortItems(items = [], sort = "recent") {
 
   if (sort === "title") {
     return result.sort((a, b) =>
-      resolveTitle(a.media_entities).localeCompare(
-        resolveTitle(b.media_entities),
-        "ru"
-      )
+      resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), "ru")
     );
   }
 
@@ -162,11 +143,7 @@ function renderCover(entity = {}) {
 
 function renderFolderTabs(folders = [], activeFolder = "all") {
   const all = `
-    <button
-      class="folder-chip ${activeFolder === "all" ? "active" : ""}"
-      type="button"
-      data-folder="all"
-    >
+    <button class="folder-chip ${activeFolder === "all" ? "active" : ""}" type="button" data-folder="all">
       Все
     </button>
   `;
@@ -174,14 +151,10 @@ function renderFolderTabs(folders = [], activeFolder = "all") {
   const rest = folders
     .map(
       (folder) => `
-    <button
-      class="folder-chip ${activeFolder === folder ? "active" : ""}"
-      type="button"
-      data-folder="${escapeHtml(folder)}"
-    >
-      ${escapeHtml(folder)}
-    </button>
-  `
+        <button class="folder-chip ${activeFolder === folder ? "active" : ""}" type="button" data-folder="${escapeHtml(folder)}">
+          ${escapeHtml(folder)}
+        </button>
+      `
     )
     .join("");
 
@@ -198,27 +171,22 @@ function renderLibraryCard(item) {
   const entityCategory = entity.category || item.category || "";
 
   return `
-    <article class="library-card" data-user-media-id="${item.id}">
-      <button
-        class="library-card__cover"
-        type="button"
-        data-action="open-card"
-        data-key="${escapeHtml(canonicalKey)}"
-        data-category="${escapeHtml(entityCategory)}"
-        ${canonicalKey ? "" : "disabled"}
-      >
+    <article
+      class="library-card"
+      data-user-media-id="${item.id}"
+      data-action="open-card"
+      data-key="${escapeHtml(canonicalKey)}"
+      data-category="${escapeHtml(entityCategory)}"
+    >
+      <div class="library-card__cover">
         ${renderCover(entity)}
-      </button>
+      </div>
 
       <div class="library-card__body">
         <div class="library-card__top">
           <div class="library-card__badges">
             <span class="library-badge">${escapeHtml(status)}</span>
-            ${
-              folderName
-                ? `<span class="library-badge folder">${escapeHtml(folderName)}</span>`
-                : ""
-            }
+            ${folderName ? `<span class="library-badge folder">${escapeHtml(folderName)}</span>` : ""}
           </div>
 
           <div class="library-card__menu-wrap">
@@ -233,47 +201,27 @@ function renderLibraryCard(item) {
             </button>
 
             <div class="library-card__menu" data-menu="${item.id}">
-              <button type="button" data-action="set-status" data-value="planned" data-user-media-id="${item.id}">
-                Planned
-              </button>
-              <button type="button" data-action="set-status" data-value="in_progress" data-user-media-id="${item.id}">
-                In progress
-              </button>
-              <button type="button" data-action="set-status" data-value="done" data-user-media-id="${item.id}">
-                Done
-              </button>
-              <button type="button" data-action="set-status" data-value="dropped" data-user-media-id="${item.id}">
-                Dropped
-              </button>
-              <button type="button" class="danger" data-action="remove" data-user-media-id="${item.id}">
-                Удалить
-              </button>
+              <button type="button" data-action="set-status" data-value="planned" data-user-media-id="${item.id}">Planned</button>
+              <button type="button" data-action="set-status" data-value="in_progress" data-user-media-id="${item.id}">In progress</button>
+              <button type="button" data-action="set-status" data-value="done" data-user-media-id="${item.id}">Done</button>
+              <button type="button" data-action="set-status" data-value="dropped" data-user-media-id="${item.id}">Dropped</button>
+              <button type="button" data-action="set-folder" data-user-media-id="${item.id}">Папка</button>
+              <button type="button" class="danger" data-action="remove" data-user-media-id="${item.id}">Удалить</button>
             </div>
           </div>
         </div>
 
-        <button
-          class="library-card__text"
-          type="button"
-          data-action="open-card"
-          data-key="${escapeHtml(canonicalKey)}"
-          data-category="${escapeHtml(entityCategory)}"
-          ${canonicalKey ? "" : "disabled"}
-        >
-          <div class="library-card__title">${escapeHtml(clampText(title, 80))}</div>
-          ${
-            subtitle && subtitle !== title
-              ? `<div class="library-card__subtitle">${escapeHtml(clampText(subtitle, 90))}</div>`
-              : ""
-          }
-          <div class="library-card__meta">
-            ${
-              entity.year
-                ? `<span>${escapeHtml(String(entity.year))}</span>`
-                : ""
-            }
-          </div>
-        </button>
+        <div class="library-card__title">${escapeHtml(clampText(title, 80))}</div>
+
+        ${
+          subtitle && subtitle !== title
+            ? `<div class="library-card__subtitle">${escapeHtml(clampText(subtitle, 90))}</div>`
+            : ""
+        }
+
+        <div class="library-card__meta">
+          ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
+        </div>
       </div>
     </article>
   `;
@@ -298,45 +246,6 @@ function closeAllMenus(root) {
 
 function renderGuestState(root, title) {
   root.innerHTML = `
-    <style>
-      .category-guest {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 24px 0;
-      }
-
-      .category-guest__title {
-        font-size: 28px;
-        font-weight: 800;
-        color: var(--text);
-      }
-
-      .category-guest__card {
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-        border-radius: 20px;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .category-guest__text {
-        color: var(--text-soft);
-        line-height: 1.6;
-      }
-
-      .category-guest__button {
-        width: fit-content;
-        padding: 10px 16px;
-        border-radius: 999px;
-        background: var(--accent);
-        color: #fff;
-        font-weight: 700;
-      }
-    </style>
-
     <section class="category-guest">
       <div class="category-guest__title">${escapeHtml(title)}</div>
       <div class="category-guest__card">
@@ -354,10 +263,6 @@ function renderGuestState(root, title) {
     openAuthModal("login");
   });
 }
-
-/* =========================
-   PAGE
-========================= */
 
 export async function renderCategoryPage(root, params = {}) {
   const category = params.category || "unknown";
@@ -442,21 +347,34 @@ export async function renderCategoryPage(root, params = {}) {
 
       .library-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-        gap: 16px;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 18px;
+        align-items: start;
       }
 
       .library-card {
         position: relative;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 0;
+        overflow: visible;
+        cursor: pointer;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: 22px;
+        padding: 10px;
+        transition: transform .18s ease, border-color .18s ease, background .18s ease;
+      }
+
+      .library-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--border);
       }
 
       .library-card__cover {
         width: 100%;
         aspect-ratio: 2 / 3;
-        border-radius: 18px;
+        border-radius: 16px;
         overflow: hidden;
         background: var(--surface);
         border: 1px solid var(--border-soft);
@@ -480,11 +398,8 @@ export async function renderCategoryPage(root, params = {}) {
       .library-card__body {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-soft);
-        border-radius: 16px;
-        padding: 12px;
+        gap: 7px;
+        padding: 12px 4px 4px;
       }
 
       .library-card__top {
@@ -515,18 +430,9 @@ export async function renderCategoryPage(root, params = {}) {
         background: var(--bg-soft);
       }
 
-      .library-card__text {
-        background: transparent;
-        text-align: left;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        color: var(--text);
-      }
-
       .library-card__title {
         font-size: 15px;
-        font-weight: 700;
+        font-weight: 750;
         line-height: 1.35;
         color: var(--text);
       }
@@ -552,14 +458,15 @@ export async function renderCategoryPage(root, params = {}) {
         color: var(--text);
         font-size: 20px;
         line-height: 1;
+        cursor: pointer;
       }
 
       .library-card__menu {
         position: absolute;
         top: calc(100% + 6px);
         right: 0;
-        z-index: 20;
-        width: 180px;
+        z-index: 100;
+        width: 190px;
         padding: 6px;
         border-radius: 14px;
         border: 1px solid var(--border);
@@ -611,6 +518,7 @@ export async function renderCategoryPage(root, params = {}) {
       @media (max-width: 640px) {
         .library-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
         }
 
         .page-header {
@@ -624,6 +532,11 @@ export async function renderCategoryPage(root, params = {}) {
         .sort-select,
         .add-btn {
           flex: 1;
+        }
+
+        .library-card {
+          border-radius: 18px;
+          padding: 8px;
         }
       }
     </style>
@@ -679,10 +592,10 @@ export async function renderCategoryPage(root, params = {}) {
       });
     });
 
-    contentRoot.querySelectorAll('[data-action="open-card"]').forEach((button) => {
-      button.addEventListener("click", () => {
-        const key = button.dataset.key || "";
-        const buttonCategory = button.dataset.category || category;
+    contentRoot.querySelectorAll(".library-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const key = card.dataset.key || "";
+        const buttonCategory = card.dataset.category || category;
 
         if (!key) return;
 
@@ -695,6 +608,7 @@ export async function renderCategoryPage(root, params = {}) {
 
     contentRoot.querySelectorAll('[data-action="toggle-menu"]').forEach((button) => {
       button.addEventListener("click", (event) => {
+        event.preventDefault();
         event.stopPropagation();
 
         const userMediaId = button.dataset.userMediaId;
@@ -711,6 +625,7 @@ export async function renderCategoryPage(root, params = {}) {
 
     contentRoot.querySelectorAll('[data-action="set-status"]').forEach((button) => {
       button.addEventListener("click", async (event) => {
+        event.preventDefault();
         event.stopPropagation();
 
         const userMediaId = Number(button.dataset.userMediaId);
@@ -719,12 +634,10 @@ export async function renderCategoryPage(root, params = {}) {
         if (!userMediaId || !newStatus) return;
 
         try {
-          await updateUserMediaStatus(userMediaId, newStatus);
+          await updateUserMedia(userMediaId, { status: newStatus });
 
           items = items.map((item) =>
-            item.id === userMediaId
-              ? { ...item, status: newStatus }
-              : item
+            item.id === userMediaId ? { ...item, status: newStatus } : item
           );
 
           renderList();
@@ -734,8 +647,47 @@ export async function renderCategoryPage(root, params = {}) {
       });
     });
 
+    contentRoot.querySelectorAll('[data-action="set-folder"]').forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const userMediaId = Number(button.dataset.userMediaId);
+        if (!userMediaId) return;
+
+        const current = items.find((item) => item.id === userMediaId);
+        const currentFolder = current?.folder_name || "";
+
+        const folderName = window.prompt(
+          "Название папки. Оставь пустым, чтобы убрать папку.",
+          currentFolder
+        );
+
+        if (folderName === null) return;
+
+        const cleanFolder = folderName.trim();
+
+        try {
+          await updateUserMedia(userMediaId, { folder_name: cleanFolder || null });
+
+          items = items.map((item) =>
+            item.id === userMediaId ? { ...item, folder_name: cleanFolder || null } : item
+          );
+
+          if (activeFolder !== "all" && activeFolder !== cleanFolder) {
+            activeFolder = "all";
+          }
+
+          renderList();
+        } catch (error) {
+          console.error("Update folder error:", error);
+        }
+      });
+    });
+
     contentRoot.querySelectorAll('[data-action="remove"]').forEach((button) => {
       button.addEventListener("click", async (event) => {
+        event.preventDefault();
         event.stopPropagation();
 
         const userMediaId = Number(button.dataset.userMediaId);
