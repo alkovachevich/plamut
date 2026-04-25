@@ -16,37 +16,6 @@ function emptyGroups() {
   };
 }
 
-function dedupeByCanonicalKey(items = []) {
-  const map = new Map();
-
-  for (const item of items) {
-    if (!item?.canonical_key) continue;
-
-    if (!map.has(item.canonical_key)) {
-      map.set(item.canonical_key, item);
-      continue;
-    }
-
-    const existing = map.get(item.canonical_key);
-
-    map.set(item.canonical_key, {
-      ...existing,
-      ...item,
-      cover_url: existing.cover_url || item.cover_url || "",
-      description_ru: existing.description_ru || item.description_ru || "",
-      description_en: existing.description_en || item.description_en || "",
-      aliases: uniqueArray([...safeArray(existing.aliases), ...safeArray(item.aliases)]),
-      external_ids: {
-        ...(existing.external_ids || {}),
-        ...(item.external_ids || {})
-      },
-      score: Math.max(existing.score || 0, item.score || 0)
-    });
-  }
-
-  return [...map.values()];
-}
-
 function flattenGroups(groups = {}) {
   const result = [];
   Object.values(groups).forEach((items) => {
@@ -81,6 +50,143 @@ function safeNumberYear(value) {
   return Number.isFinite(year) ? year : null;
 }
 
+function cleanTitleForDedupe(value = "") {
+  return normalizeString(value)
+    .replace(/\bкнига\b/g, "")
+    .replace(/\bbook\b/g, "")
+    .replace(/\bроман\b/g, "")
+    .replace(/\bnovel\b/g, "")
+    .replace(/\bтом\b/g, "")
+    .replace(/\bvolume\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTitleKeys(item = {}) {
+  return uniqueArray([
+    item.title,
+    item.title_primary,
+    item.title_ru,
+    item.title_en,
+    item.original_title,
+    ...safeArray(item.aliases)
+  ])
+    .map(cleanTitleForDedupe)
+    .filter(Boolean);
+}
+
+function hasSharedValue(a = [], b = []) {
+  const set = new Set(safeArray(a).filter(Boolean).map(String));
+  return safeArray(b).some((value) => set.has(String(value)));
+}
+
+function mergeItems(existing, incoming) {
+  return {
+    ...existing,
+    ...incoming,
+    title: existing.title || incoming.title || "",
+    original_title: existing.original_title || incoming.original_title || "",
+    year: existing.year || incoming.year || null,
+    cover_url: existing.cover_url || incoming.cover_url || "",
+    description_ru: existing.description_ru || incoming.description_ru || "",
+    description_en: existing.description_en || incoming.description_en || "",
+    aliases: uniqueArray([...safeArray(existing.aliases), ...safeArray(incoming.aliases)]),
+    external_ids: {
+      ...(existing.external_ids || {}),
+      ...(incoming.external_ids || {}),
+      isbn: uniqueArray([
+        ...safeArray(existing.external_ids?.isbn),
+        ...safeArray(incoming.external_ids?.isbn)
+      ]),
+      edition_key: uniqueArray([
+        ...safeArray(existing.external_ids?.edition_key),
+        ...safeArray(incoming.external_ids?.edition_key)
+      ]),
+      ia: uniqueArray([
+        ...safeArray(existing.external_ids?.ia),
+        ...safeArray(incoming.external_ids?.ia)
+      ])
+    },
+    score: Math.max(existing.score || 0, incoming.score || 0)
+  };
+}
+
+function areSameBook(a = {}, b = {}) {
+  if (a.category !== "books" || b.category !== "books") return false;
+
+  const aIds = a.external_ids || {};
+  const bIds = b.external_ids || {};
+
+  if (aIds.openlibrary_work && bIds.openlibrary_work && aIds.openlibrary_work === bIds.openlibrary_work) {
+    return true;
+  }
+
+  if (aIds.wikidata && bIds.wikidata && aIds.wikidata === bIds.wikidata) {
+    return true;
+  }
+
+  if (hasSharedValue(aIds.isbn, bIds.isbn)) {
+    return true;
+  }
+
+  const aTitles = getTitleKeys(a);
+  const bTitles = getTitleKeys(b);
+
+  if (!aTitles.length || !bTitles.length) return false;
+
+  const sameTitle = aTitles.some((title) => bTitles.includes(title));
+  if (!sameTitle) return false;
+
+  if (a.year && b.year) {
+    return Math.abs(Number(a.year) - Number(b.year)) <= 1;
+  }
+
+  return true;
+}
+
+function dedupeBooks(items = []) {
+  const result = [];
+
+  for (const item of items) {
+    if (!item?.canonical_key) continue;
+
+    const existingIndex = result.findIndex((candidate) => areSameBook(candidate, item));
+
+    if (existingIndex >= 0) {
+      result[existingIndex] = mergeItems(result[existingIndex], item);
+    } else {
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
+function dedupeByCanonicalKey(items = []) {
+  const map = new Map();
+
+  for (const item of items) {
+    if (!item?.canonical_key) continue;
+
+    if (!map.has(item.canonical_key)) {
+      map.set(item.canonical_key, item);
+      continue;
+    }
+
+    map.set(item.canonical_key, mergeItems(map.get(item.canonical_key), item));
+  }
+
+  return [...map.values()];
+}
+
+function dedupeAll(items = []) {
+  const byCanonical = dedupeByCanonicalKey(items);
+  const books = dedupeBooks(byCanonical.filter((item) => item.category === "books"));
+  const rest = byCanonical.filter((item) => item.category !== "books");
+
+  return [...books, ...rest];
+}
+
 function openLibraryCoverUrlFromId(coverId) {
   return coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "";
 }
@@ -91,6 +197,13 @@ function openLibraryCoverUrlFromIsbn(isbn) {
 
 function openLibraryCoverUrlFromOlid(olid) {
   return olid ? `https://covers.openlibrary.org/b/olid/${encodeURIComponent(olid)}-L.jpg` : "";
+}
+
+function wikimediaFileUrl(filename = "") {
+  const clean = String(filename || "").trim();
+  if (!clean) return "";
+
+  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(clean)}`;
 }
 
 function normalizeOpenLibraryWorkKey(value = "") {
@@ -134,7 +247,7 @@ function buildOpenLibraryCover(doc = {}) {
 async function fetchOpenLibraryByTitle(query) {
   const url = new URL("https://openlibrary.org/search.json");
   url.searchParams.set("title", query);
-  url.searchParams.set("limit", "20");
+  url.searchParams.set("limit", "24");
   url.searchParams.set("fields", [
     "key",
     "title",
@@ -245,7 +358,7 @@ async function fetchWikidataCandidates(query) {
   url.searchParams.set("uselang", "ru");
   url.searchParams.set("type", "item");
   url.searchParams.set("origin", "*");
-  url.searchParams.set("limit", "12");
+  url.searchParams.set("limit", "14");
   url.searchParams.set("search", query);
 
   const response = await fetch(url.toString(), {
@@ -310,6 +423,14 @@ function extractIsbnValuesFromClaims(claims = {}) {
   ].filter(Boolean));
 }
 
+function extractImageFromWikidataClaims(claims = {}) {
+  const image = safeArray(claims.P18)
+    .map((claim) => claim?.mainsnak?.datavalue?.value)
+    .find(Boolean);
+
+  return image ? wikimediaFileUrl(image) : "";
+}
+
 function mapWikidataBookEntity(searchItem, details) {
   const labels = details?.labels || {};
   const aliases = details?.aliases || {};
@@ -320,6 +441,7 @@ function mapWikidataBookEntity(searchItem, details) {
   const titleEn = labels?.en?.value || "";
   const isbns = extractIsbnValuesFromClaims(claims);
   const openLibraryWork = extractOpenLibraryWorkIdFromClaims(claims);
+  const wikidataImage = extractImageFromWikidataClaims(claims);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
@@ -328,7 +450,7 @@ function mapWikidataBookEntity(searchItem, details) {
     title: titleRu || titleEn || searchItem?.label || "",
     original_title: titleEn || titleRu || searchItem?.label || "",
     year: extractYearFromWikidataClaims(claims),
-    cover_url: openLibraryCoverUrlFromIsbn(isbns[0]),
+    cover_url: openLibraryCoverUrlFromIsbn(isbns[0]) || wikidataImage,
     description_ru: descriptions?.ru?.value || "",
     description_en: descriptions?.en?.value || "",
     aliases: uniqueArray([
@@ -355,26 +477,26 @@ function scoreBookResult(query, item) {
 
   let score = 0;
 
-  if (title === q) score += 120;
-  if (aliases.includes(q)) score += 100;
-  if (title.startsWith(q)) score += 40;
-  if (aliases.some((alias) => alias.startsWith(q))) score += 35;
-  if (aliases.some((alias) => alias.includes(q))) score += 20;
-  if (item.cover_url) score += 30;
-  if (item.primary_source === "openlibrary") score += 12;
-  if (item.year) score += 4;
+  if (title === q) score += 140;
+  if (aliases.includes(q)) score += 115;
+  if (title.startsWith(q)) score += 45;
+  if (aliases.some((alias) => alias.startsWith(q))) score += 38;
+  if (aliases.some((alias) => alias.includes(q))) score += 22;
+  if (item.cover_url) score += 35;
+  if (item.primary_source === "openlibrary") score += 14;
+  if (item.year) score += 5;
 
   return score;
 }
 
 function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
   return wikidataItems.map((item) => {
-    const itemTitle = compactString(item.title || item.original_title || "");
+    const itemTitle = cleanTitleForDedupe(item.title || item.original_title || "");
     const itemIsbns = safeArray(item.external_ids?.isbn);
     const itemWork = item.external_ids?.openlibrary_work || "";
 
     const match = openLibraryItems.find((candidate) => {
-      const candidateTitle = compactString(candidate.title || candidate.original_title || "");
+      const candidateTitle = cleanTitleForDedupe(candidate.title || candidate.original_title || "");
       const candidateIsbns = safeArray(candidate.external_ids?.isbn);
       const candidateWork = candidate.external_ids?.openlibrary_work || "";
 
@@ -387,15 +509,7 @@ function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
 
     if (!match) return item;
 
-    return {
-      ...item,
-      cover_url: item.cover_url || match.cover_url || "",
-      aliases: uniqueArray([...safeArray(item.aliases), ...safeArray(match.aliases)]),
-      external_ids: {
-        ...(match.external_ids || {}),
-        ...(item.external_ids || {})
-      }
-    };
+    return mergeItems(match, item);
   });
 }
 
@@ -434,7 +548,7 @@ async function searchBooks(query) {
 
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
 
-  return dedupeByCanonicalKey([...openLibraryItems, ...enrichedWikidata])
+  return dedupeBooks([...openLibraryItems, ...enrichedWikidata])
     .map((item) => ({
       ...item,
       score: scoreBookResult(cleanQuery, item)
@@ -610,6 +724,55 @@ async function searchAnimeOrManga(query, category = "anime") {
     .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
 }
 
+function hasAnimeOrMangaMatch(item, animeMangaItems = []) {
+  const itemTitles = getTitleKeys(item);
+
+  if (!itemTitles.length) return false;
+
+  return animeMangaItems.some((candidate) => {
+    const candidateTitles = getTitleKeys(candidate);
+    return itemTitles.some((title) => candidateTitles.includes(title));
+  });
+}
+
+function filterCrossCategoryNoise({ books = [], moviesSeries = [], anime = [], manga = [] }) {
+  const animeMangaItems = [...anime, ...manga];
+
+  const filteredMoviesSeries = moviesSeries.filter((item) => {
+    if (!animeMangaItems.length) return true;
+
+    const itemTitle = compactString(item.title || item.original_title || "");
+    const isLikelyAnimeTitle = hasAnimeOrMangaMatch(item, animeMangaItems);
+
+    if (isLikelyAnimeTitle) return false;
+
+    if (itemTitle.includes("naruto") || itemTitle.includes("наруто")) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const filteredBooks = books.filter((item) => {
+    if (!animeMangaItems.length) return true;
+
+    const itemTitle = compactString(item.title || item.original_title || "");
+
+    if (itemTitle.includes("naruto") || itemTitle.includes("наруто")) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return {
+    books: filteredBooks,
+    moviesSeries: filteredMoviesSeries,
+    anime,
+    manga
+  };
+}
+
 /* =========================
    MAIN
 ========================= */
@@ -628,12 +791,24 @@ export async function runGlobalSearch(query) {
     searchAnimeOrManga(cleanQuery, "manga")
   ]);
 
+  const books = settled[0].status === "fulfilled" ? settled[0].value : [];
+  const moviesSeries = settled[1].status === "fulfilled" ? settled[1].value : [];
+  const anime = settled[2].status === "fulfilled" ? settled[2].value : [];
+  const manga = settled[3].status === "fulfilled" ? settled[3].value : [];
+
+  const filtered = filterCrossCategoryNoise({
+    books,
+    moviesSeries,
+    anime,
+    manga
+  });
+
   return groupItems(
-    dedupeByCanonicalKey([
-      ...(settled[0].status === "fulfilled" ? settled[0].value : []),
-      ...(settled[1].status === "fulfilled" ? settled[1].value : []),
-      ...(settled[2].status === "fulfilled" ? settled[2].value : []),
-      ...(settled[3].status === "fulfilled" ? settled[3].value : [])
+    dedupeAll([
+      ...filtered.books,
+      ...filtered.moviesSeries,
+      ...filtered.anime,
+      ...filtered.manga
     ])
   );
 }
