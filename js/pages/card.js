@@ -1,5 +1,6 @@
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, clampText } from "../utils.js";
 import { getCategoryLabel, STATUS_LABELS } from "../config.js";
+import { navigate } from "../router.js";
 import {
   state,
   openAuthModal,
@@ -12,6 +13,12 @@ import {
   addToUserLibrary,
   isAlreadyInUserLibrary
 } from "../services/entity-db.js";
+
+import {
+  buildUniverseForEntity,
+  getRelatedItemsForEntity,
+  deriveUniverseInfo
+} from "../services/universe-service.js";
 
 import { getSupabaseClient } from "../lib/supabase-client.js";
 
@@ -123,9 +130,69 @@ function renderManageMenu(userMedia) {
         <button type="button" data-action="set-status" data-value="done">Done</button>
         <button type="button" data-action="set-status" data-value="dropped">Dropped</button>
         <button type="button" data-action="set-folder">Папка</button>
+        <button type="button" data-action="build-universe">Построить вселенную</button>
         <button type="button" class="danger" data-action="remove">Удалить</button>
       </div>
     </div>
+  `;
+}
+
+function renderRelatedCard(item) {
+  const entity = item.media_entities || {};
+  const title = resolveTitle(entity);
+  const status = STATUS_LABELS[item.status] || item.status || "Planned";
+
+  return `
+    <button
+      class="related-card"
+      type="button"
+      data-related-key="${escapeHtml(entity.canonical_key || "")}"
+      data-related-category="${escapeHtml(entity.category || item.category || "")}"
+    >
+      <div class="related-cover">
+        ${
+          entity.cover_url
+            ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" loading="lazy" />`
+            : `<div class="related-cover-fallback">?</div>`
+        }
+      </div>
+
+      <div class="related-meta">
+        <div class="related-title">${escapeHtml(clampText(title, 70))}</div>
+        <div class="related-badges">
+          <span>${escapeHtml(getCategoryLabel(state.language, entity.category))}</span>
+          ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
+          <span>${escapeHtml(status)}</span>
+        </div>
+      </div>
+    </button>
+  `;
+}
+
+function renderRelatedSection(entity, relatedItems = []) {
+  if (!entity?.id || !relatedItems.length) {
+    return "";
+  }
+
+  const universe = deriveUniverseInfo(entity);
+
+  return `
+    <section class="related-section">
+      <div class="related-head">
+        <div>
+          <div class="related-title-main">Связанные произведения</div>
+          <div class="related-subtitle">Вселенная: ${escapeHtml(universe.title)}</div>
+        </div>
+
+        <button class="related-open-btn" type="button" data-action="open-universe" data-universe-key="${escapeHtml(universe.universe_key)}">
+          Открыть
+        </button>
+      </div>
+
+      <div class="related-list">
+        ${relatedItems.slice(0, 8).map(renderRelatedCard).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -143,11 +210,19 @@ export async function renderCardPage(root, params = {}) {
   const userId = state.user?.id;
   let alreadyAdded = false;
   let userMedia = null;
+  let relatedItems = [];
 
   try {
     if (userId && entity.id) {
       alreadyAdded = await isAlreadyInUserLibrary(userId, entity.id);
       userMedia = await getUserMediaByEntityId(userId, entity.id);
+
+      if (userMedia?.id) {
+        relatedItems = await getRelatedItemsForEntity({
+          userId,
+          entityId: entity.id
+        }).catch(() => []);
+      }
     }
   } catch (error) {
     console.warn("Library check skipped:", error);
@@ -273,7 +348,8 @@ export async function renderCardPage(root, params = {}) {
         pointer-events: none;
       }
 
-      .description-block {
+      .description-block,
+      .related-section {
         background: var(--surface);
         border: 1px solid var(--border-soft);
         border-radius: 18px;
@@ -334,7 +410,7 @@ export async function renderCardPage(root, params = {}) {
         top: calc(100% + 8px);
         right: 0;
         z-index: 60;
-        width: 190px;
+        width: 220px;
         padding: 6px;
         border-radius: 14px;
         border: 1px solid var(--border);
@@ -365,6 +441,94 @@ export async function renderCardPage(root, params = {}) {
         color: var(--danger);
       }
 
+      .related-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .related-title-main {
+        color: var(--text);
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .related-subtitle {
+        color: var(--text-soft);
+        font-size: 13px;
+        margin-top: 4px;
+      }
+
+      .related-open-btn {
+        padding: 9px 13px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--text);
+        font-weight: 700;
+      }
+
+      .related-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+      }
+
+      .related-card {
+        text-align: left;
+        color: var(--text);
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-soft);
+        border-radius: 16px;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .related-cover {
+        width: 100%;
+        aspect-ratio: 2 / 3;
+        border-radius: 12px;
+        background: var(--bg-soft);
+        overflow: hidden;
+      }
+
+      .related-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .related-cover-fallback {
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--text-soft);
+      }
+
+      .related-title {
+        font-size: 14px;
+        line-height: 1.35;
+        font-weight: 800;
+      }
+
+      .related-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 6px;
+      }
+
+      .related-badges span {
+        font-size: 11px;
+        color: var(--text-soft);
+        background: var(--bg-soft);
+        padding: 3px 7px;
+        border-radius: 999px;
+      }
+
       @media (max-width: 640px) {
         .card-header {
           flex-direction: column;
@@ -377,6 +541,10 @@ export async function renderCardPage(root, params = {}) {
 
         .meta {
           padding-right: 0;
+        }
+
+        .related-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
     </style>
@@ -420,6 +588,8 @@ export async function renderCardPage(root, params = {}) {
           </div>
         </div>
       </div>
+
+      ${renderRelatedSection(entity, relatedItems)}
 
       <div class="description-block">
         <div class="description-title">Описание</div>
@@ -496,6 +666,38 @@ export async function renderCardPage(root, params = {}) {
     }
   });
 
+  root.querySelector('[data-action="build-universe"]')?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!userId || !entity.id) return;
+
+    try {
+      statusNode.className = "card-status";
+      statusNode.textContent = "Строим вселенную…";
+
+      const result = await buildUniverseForEntity({
+        userId,
+        entityId: entity.id
+      });
+
+      statusNode.className = "card-status success";
+      statusNode.textContent = "Вселенная обновлена";
+
+      menu?.classList.remove("is-open");
+
+      if (result?.universe?.universe_key) {
+        navigate("/universe", {
+          id: result.universe.universe_key
+        });
+      }
+    } catch (error) {
+      console.error("Build universe error:", error);
+      statusNode.className = "card-status error";
+      statusNode.textContent = "Не удалось построить вселенную";
+    }
+  });
+
   root.querySelector('[data-action="remove"]')?.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -512,6 +714,30 @@ export async function renderCardPage(root, params = {}) {
       statusNode.className = "card-status error";
       statusNode.textContent = "Не удалось удалить";
     }
+  });
+
+  root.querySelectorAll("[data-related-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.relatedKey || "";
+      const category = button.dataset.relatedCategory || "";
+
+      if (!key) return;
+
+      navigate("/card", {
+        key,
+        category
+      });
+    });
+  });
+
+  root.querySelector('[data-action="open-universe"]')?.addEventListener("click", () => {
+    const universeKey = root.querySelector('[data-action="open-universe"]')?.dataset.universeKey || "";
+
+    if (!universeKey) return;
+
+    navigate("/universe", {
+      id: universeKey
+    });
   });
 
   addBtn?.addEventListener("click", async () => {
