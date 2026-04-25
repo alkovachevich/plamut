@@ -31,6 +31,7 @@ const searchModalRoot = document.getElementById("search-modal-root");
 const authModalRoot = document.getElementById("auth-modal-root");
 
 let initialized = false;
+let authHydrated = false;
 let authSubscription = null;
 
 let lastHeaderSignature = null;
@@ -72,6 +73,17 @@ function renderFatalAppError(message) {
           ${String(message || "Application error")}
         </div>
       </div>
+    </div>
+  `;
+}
+
+function renderAppLoading() {
+  mainRoot.innerHTML = `
+    <div style="
+      padding:24px;
+      color:var(--text-soft);
+    ">
+      Загрузка профиля...
     </div>
   `;
 }
@@ -140,10 +152,7 @@ async function ensureUserProfile(user) {
 }
 
 async function applyAuthenticatedUser(user) {
-  if (!user?.id) {
-    logoutUser();
-    return;
-  }
+  if (!user?.id) return;
 
   const profile = await ensureUserProfile(user);
 
@@ -161,14 +170,15 @@ async function hydrateAuthStateSafely() {
     const session = await getCurrentSession();
     const user = session?.user || null;
 
-    if (!user) {
+    if (user?.id) {
+      await applyAuthenticatedUser(user);
+    } else {
       logoutUser();
-      return;
     }
-
-    await applyAuthenticatedUser(user);
   } catch (error) {
     console.error("Auth hydration skipped:", error);
+  } finally {
+    authHydrated = true;
   }
 }
 
@@ -183,9 +193,14 @@ function bindAuthListenerSafely() {
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (event === "SIGNED_OUT" || !session?.user) {
+        if (event === "SIGNED_OUT") {
           logoutUser();
           closeAuthModal();
+          renderApp();
+          return;
+        }
+
+        if (!session?.user) {
           return;
         }
 
@@ -194,10 +209,13 @@ function bindAuthListenerSafely() {
         if (
           event === "SIGNED_IN" ||
           event === "TOKEN_REFRESHED" ||
-          event === "USER_UPDATED"
+          event === "USER_UPDATED" ||
+          event === "INITIAL_SESSION"
         ) {
           closeAuthModal();
         }
+
+        renderApp();
       } catch (error) {
         console.error("Auth state change error:", error);
       }
@@ -214,7 +232,8 @@ function getHeaderSignature() {
     userId: state.user?.id || null,
     displayName: state.user?.display_name || "",
     username: state.user?.username || "",
-    avatarUrl: state.user?.avatar_url || ""
+    avatarUrl: state.user?.avatar_url || "",
+    authHydrated
   });
 }
 
@@ -226,7 +245,8 @@ function getSidebarSignature() {
     username: state.user?.username || "",
     avatarUrl: state.user?.avatar_url || "",
     language: state.language,
-    theme: state.theme
+    theme: state.theme,
+    authHydrated
   });
 }
 
@@ -250,11 +270,17 @@ function getRouteSignature() {
     routeParams: state.routeParams,
     userId: state.user?.id || null,
     language: state.language,
-    theme: state.theme
+    theme: state.theme,
+    authHydrated
   });
 }
 
 function renderRouteSafely() {
+  if (!authHydrated) {
+    renderAppLoading();
+    return;
+  }
+
   const route = state.route;
   const params = state.routeParams || {};
 
@@ -363,6 +389,8 @@ async function init() {
 
   subscribe(renderApp);
 
+  bindAuthListenerSafely();
+
   try {
     initRouter();
   } catch (error) {
@@ -371,8 +399,9 @@ async function init() {
 
   renderApp();
 
-  bindAuthListenerSafely();
-  hydrateAuthStateSafely();
+  await hydrateAuthStateSafely();
+
+  renderApp();
 }
 
 init();
