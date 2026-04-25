@@ -1,5 +1,7 @@
-import { getSupabaseClient } from "../lib/supabase-client.js";
+import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
+
+const UNIVERSE_FUNCTION_NAME = "plamut-universe-normalize";
 
 const USER_MEDIA_SELECT = `
   id,
@@ -257,11 +259,15 @@ async function fetchUserLibrary(userId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("user_media")
-    .select(USER_MEDIA_SELECT)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+  const { data, error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .select(USER_MEDIA_SELECT)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }),
+    "Загрузка библиотеки",
+    30000
+  );
 
   if (error) throw error;
 
@@ -273,12 +279,16 @@ async function fetchUserLibraryEntryByEntityId(userId, entityId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("user_media")
-    .select(USER_MEDIA_SELECT)
-    .eq("user_id", userId)
-    .eq("entity_id", entityId)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .select(USER_MEDIA_SELECT)
+      .eq("user_id", userId)
+      .eq("entity_id", entityId)
+      .maybeSingle(),
+    "Загрузка элемента библиотеки",
+    30000
+  );
 
   if (error) throw error;
 
@@ -290,11 +300,15 @@ async function fetchSavedRelations(entityId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("media_relations")
-    .select("*")
-    .eq("from_entity_id", entityId)
-    .order("confidence", { ascending: false });
+  const { data, error } = await withTimeout(
+    supabase
+      .from("media_relations")
+      .select("*")
+      .eq("from_entity_id", entityId)
+      .order("confidence", { ascending: false }),
+    "Загрузка связей",
+    30000
+  );
 
   if (error) throw error;
 
@@ -304,21 +318,25 @@ async function fetchSavedRelations(entityId) {
 async function upsertUniverseGroup({ universe_key, title, description = "", cover_url = "", source = "system", metadata_json = {} }) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("universe_groups")
-    .upsert(
-      {
-        universe_key,
-        title,
-        description,
-        cover_url,
-        source,
-        metadata_json
-      },
-      { onConflict: "universe_key" }
-    )
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("universe_groups")
+      .upsert(
+        {
+          universe_key,
+          title,
+          description,
+          cover_url,
+          source,
+          metadata_json
+        },
+        { onConflict: "universe_key" }
+      )
+      .select()
+      .single(),
+    "Сохранение группы вселенной",
+    30000
+  );
 
   if (error) throw error;
 
@@ -342,10 +360,14 @@ async function upsertUniverseMembers(universeKey, items = [], orderMap = new Map
 
   if (!rows.length) return [];
 
-  const { data, error } = await supabase
-    .from("universe_members")
-    .upsert(rows, { onConflict: "universe_key,entity_id" })
-    .select();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("universe_members")
+      .upsert(rows, { onConflict: "universe_key,entity_id" })
+      .select(),
+    "Сохранение участников вселенной",
+    30000
+  );
 
   if (error) throw error;
 
@@ -371,10 +393,14 @@ async function upsertMediaRelations(rows = []) {
 
   if (!cleanRows.length) return [];
 
-  const { data, error } = await supabase
-    .from("media_relations")
-    .upsert(cleanRows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
-    .select();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("media_relations")
+      .upsert(cleanRows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
+      .select(),
+    "Сохранение связей",
+    30000
+  );
 
   if (error) throw error;
 
@@ -386,12 +412,16 @@ async function upsertRelationCandidates(rows = []) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("relation_candidates")
-    .upsert(rows, {
-      onConflict: "owner_user_id,seed_entity_id,target_entity_id,relation_type,source"
-    })
-    .select();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("relation_candidates")
+      .upsert(rows, {
+        onConflict: "owner_user_id,seed_entity_id,target_entity_id,relation_type,source"
+      })
+      .select(),
+    "Сохранение кандидатов связей",
+    30000
+  );
 
   if (error) {
     console.warn("Relation candidates save skipped:", error);
@@ -418,10 +448,14 @@ async function markRelationsStatus(entityId, status, universeKey = null) {
     payload.universe_key = universeKey;
   }
 
-  const { error } = await supabase
-    .from("media_entities")
-    .update(payload)
-    .eq("id", entityId);
+  const { error } = await withTimeout(
+    supabase
+      .from("media_entities")
+      .update(payload)
+      .eq("id", entityId),
+    "Обновление статуса связей",
+    30000
+  ).catch((error) => ({ error }));
 
   if (error) {
     console.warn("markRelationsStatus skipped:", error);
@@ -528,12 +562,16 @@ async function normalizeWithEdgeFunction({ seedEntity, universeInfo, candidateRo
   const supabase = getSupabaseClient();
 
   try {
-    const { data, error } = await supabase.functions.invoke("plamut-universe-normalize", {
-      body: buildNormalizePayload({
-        seedEntity,
-        candidateRows
-      })
-    });
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke(UNIVERSE_FUNCTION_NAME, {
+        body: buildNormalizePayload({
+          seedEntity,
+          candidateRows
+        })
+      }),
+      "Нормализация вселенной",
+      45000
+    );
 
     if (error) {
       throw error;
@@ -727,11 +765,11 @@ export async function buildUniverseForEntity({ userId, entityId }) {
 export async function getRelatedItemsForEntity({ userId, entityId }) {
   if (!userId || !entityId) return [];
 
-  const seedEntry = await fetchUserLibraryEntryByEntityId(userId, entityId);
+  const seedEntry = await fetchUserLibraryEntryByEntityId(userId, entityId).catch(() => null);
   if (!seedEntry?.media_entities) return [];
 
   const savedRelations = await fetchSavedRelations(entityId).catch(() => []);
-  const libraryItems = await fetchUserLibrary(userId);
+  const libraryItems = await fetchUserLibrary(userId).catch(() => []);
 
   if (savedRelations.length) {
     const targetIds = new Set(savedRelations.map((rel) => rel.to_entity_id));
@@ -850,10 +888,14 @@ export async function getUniverseDetails({ userId, universeKey }) {
   let relations = [];
 
   if (entityIds.length) {
-    const { data, error } = await supabase
-      .from("media_relations")
-      .select("*")
-      .in("from_entity_id", entityIds);
+    const { data, error } = await withTimeout(
+      supabase
+        .from("media_relations")
+        .select("*")
+        .in("from_entity_id", entityIds),
+      "Загрузка связей вселенной",
+      30000
+    ).catch((error) => ({ data: [], error }));
 
     if (!error) {
       relations = safeArray(data).filter((rel) => entityIds.includes(rel.to_entity_id));
