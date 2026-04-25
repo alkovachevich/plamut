@@ -30,8 +30,9 @@ const sidebarRoot = document.getElementById("sidebar-root");
 const searchModalRoot = document.getElementById("search-modal-root");
 const authModalRoot = document.getElementById("auth-modal-root");
 
+const CACHED_USER_KEY = "plamut_cached_user";
+
 let initialized = false;
-let authHydrated = false;
 let authSubscription = null;
 
 let lastHeaderSignature = null;
@@ -77,19 +78,50 @@ function renderFatalAppError(message) {
   `;
 }
 
-function renderAppLoading() {
-  mainRoot.innerHTML = `
-    <div style="
-      padding:24px;
-      color:var(--text-soft);
-    ">
-      Загрузка профиля...
-    </div>
-  `;
-}
-
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", state.theme || "dark");
+}
+
+function readCachedUser() {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    return parsed?.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(user) {
+  try {
+    if (!user?.id) {
+      localStorage.removeItem(CACHED_USER_KEY);
+      return;
+    }
+
+    localStorage.setItem(
+      CACHED_USER_KEY,
+      JSON.stringify({
+        id: user.id,
+        email: user.email || null,
+        username: user.username || null,
+        display_name: user.display_name || "User",
+        avatar_url: user.avatar_url || null
+      })
+    );
+  } catch (error) {
+    console.warn("Cached user save skipped:", error);
+  }
+}
+
+function clearCachedUser() {
+  try {
+    localStorage.removeItem(CACHED_USER_KEY);
+  } catch (error) {
+    console.warn("Cached user clear skipped:", error);
+  }
 }
 
 function buildUsername(user) {
@@ -152,17 +184,24 @@ async function ensureUserProfile(user) {
 }
 
 async function applyAuthenticatedUser(user) {
-  if (!user?.id) return;
+  if (!user?.id) {
+    logoutUser();
+    clearCachedUser();
+    return;
+  }
 
   const profile = await ensureUserProfile(user);
 
-  setUser({
+  const normalizedUser = {
     id: user.id,
     email: user.email || null,
     username: profile?.username || buildUsername(user),
     display_name: profile?.display_name || buildDisplayName(user, profile),
     avatar_url: profile?.avatar_url || buildAvatarUrl(user, profile)
-  });
+  };
+
+  setUser(normalizedUser);
+  writeCachedUser(normalizedUser);
 }
 
 async function hydrateAuthStateSafely() {
@@ -170,15 +209,15 @@ async function hydrateAuthStateSafely() {
     const session = await getCurrentSession();
     const user = session?.user || null;
 
-    if (user?.id) {
-      await applyAuthenticatedUser(user);
-    } else {
+    if (!user) {
       logoutUser();
+      clearCachedUser();
+      return;
     }
+
+    await applyAuthenticatedUser(user);
   } catch (error) {
     console.error("Auth hydration skipped:", error);
-  } finally {
-    authHydrated = true;
   }
 }
 
@@ -193,14 +232,10 @@ function bindAuthListenerSafely() {
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (event === "SIGNED_OUT") {
+        if (event === "SIGNED_OUT" || !session?.user) {
           logoutUser();
+          clearCachedUser();
           closeAuthModal();
-          renderApp();
-          return;
-        }
-
-        if (!session?.user) {
           return;
         }
 
@@ -214,8 +249,6 @@ function bindAuthListenerSafely() {
         ) {
           closeAuthModal();
         }
-
-        renderApp();
       } catch (error) {
         console.error("Auth state change error:", error);
       }
@@ -232,8 +265,7 @@ function getHeaderSignature() {
     userId: state.user?.id || null,
     displayName: state.user?.display_name || "",
     username: state.user?.username || "",
-    avatarUrl: state.user?.avatar_url || "",
-    authHydrated
+    avatarUrl: state.user?.avatar_url || ""
   });
 }
 
@@ -245,8 +277,7 @@ function getSidebarSignature() {
     username: state.user?.username || "",
     avatarUrl: state.user?.avatar_url || "",
     language: state.language,
-    theme: state.theme,
-    authHydrated
+    theme: state.theme
   });
 }
 
@@ -270,17 +301,11 @@ function getRouteSignature() {
     routeParams: state.routeParams,
     userId: state.user?.id || null,
     language: state.language,
-    theme: state.theme,
-    authHydrated
+    theme: state.theme
   });
 }
 
 function renderRouteSafely() {
-  if (!authHydrated) {
-    renderAppLoading();
-    return;
-  }
-
   const route = state.route;
   const params = state.routeParams || {};
 
@@ -387,9 +412,12 @@ async function init() {
     return;
   }
 
-  subscribe(renderApp);
+  const cachedUser = readCachedUser();
+  if (cachedUser?.id) {
+    setUser(cachedUser);
+  }
 
-  bindAuthListenerSafely();
+  subscribe(renderApp);
 
   try {
     initRouter();
@@ -397,11 +425,10 @@ async function init() {
     console.error("Router init error:", error);
   }
 
+  bindAuthListenerSafely();
   renderApp();
 
-  await hydrateAuthStateSafely();
-
-  renderApp();
+  hydrateAuthStateSafely();
 }
 
 init();
