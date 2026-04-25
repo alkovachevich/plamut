@@ -8,7 +8,6 @@ import { navigate } from "../router.js";
 import {
   signInWithEmail,
   signUpWithEmail,
-  getCurrentUser,
   fetchUserProfile,
   upsertUserProfile
 } from "../lib/supabase-client.js";
@@ -23,13 +22,7 @@ function escapeHtml(value = "") {
 }
 
 function renderError(message = "") {
-  if (!message) return "";
-  return `<div class="auth-error">${escapeHtml(message)}</div>`;
-}
-
-function renderNote(message = "") {
-  if (!message) return "";
-  return `<div class="auth-note">${escapeHtml(message)}</div>`;
+  return message ? `<div class="auth-error">${escapeHtml(message)}</div>` : "";
 }
 
 function getSubmitLabel(mode) {
@@ -47,13 +40,7 @@ function getSwitchLabel(mode) {
 }
 
 function buildUsername(user) {
-  const source =
-    user?.user_metadata?.username ||
-    user?.user_metadata?.preferred_username ||
-    user?.user_metadata?.full_name ||
-    user?.user_metadata?.name ||
-    user?.email?.split("@")[0] ||
-    "user";
+  const source = user?.email?.split("@")[0] || "user";
 
   return (
     String(source)
@@ -65,68 +52,49 @@ function buildUsername(user) {
   );
 }
 
-function buildDisplayName(user, profile = null) {
-  return (
-    profile?.display_name ||
-    user?.user_metadata?.display_name ||
-    user?.user_metadata?.full_name ||
-    user?.user_metadata?.name ||
-    user?.email?.split("@")[0] ||
-    "User"
-  );
+function buildDisplayName(user) {
+  return user?.email?.split("@")[0] || "User";
 }
 
-function buildAvatarUrl(user, profile = null) {
-  return (
-    profile?.avatar_url ||
-    user?.user_metadata?.avatar_url ||
-    user?.user_metadata?.picture ||
-    null
-  );
-}
-
-async function ensureProfile(user) {
-  if (!user?.id) return null;
-
-  const existing = await fetchUserProfile(user.id);
-
-  const payload = {
-    id: user.id,
-    username: existing?.username || buildUsername(user),
-    display_name: existing?.display_name || buildDisplayName(user, existing),
-    avatar_url: existing?.avatar_url || buildAvatarUrl(user, existing)
-  };
-
-  return await upsertUserProfile(payload);
-}
-
-async function applyUserToStateFromAuth() {
-  const authUser = await getCurrentUser();
-
-  if (!authUser?.id) {
-    return null;
-  }
-
-  let profile = null;
+async function syncProfileWithoutBlocking(user) {
+  if (!user?.id) return;
 
   try {
-    profile = await ensureProfile(authUser);
+    const existing = await fetchUserProfile(user.id);
+
+    const payload = {
+      id: user.id,
+      username: existing?.username || buildUsername(user),
+      display_name: existing?.display_name || buildDisplayName(user),
+      avatar_url: existing?.avatar_url || null
+    };
+
+    const profile = await upsertUserProfile(payload);
+
+    setUser({
+      id: user.id,
+      email: user.email || null,
+      username: profile?.username || payload.username,
+      display_name: profile?.display_name || payload.display_name,
+      avatar_url: profile?.avatar_url || null
+    });
   } catch (error) {
-    console.error("Profile upsert error:", error);
+    console.error("Profile sync error:", error);
   }
+}
+
+function applyAuthUserImmediately(user) {
+  if (!user?.id) return;
 
   setUser({
-    id: authUser.id,
-    email: authUser.email || null,
-    username: profile?.username || buildUsername(authUser),
-    display_name: profile?.display_name || buildDisplayName(authUser, profile),
-    avatar_url: profile?.avatar_url || buildAvatarUrl(authUser, profile)
+    id: user.id,
+    email: user.email || null,
+    username: buildUsername(user),
+    display_name: buildDisplayName(user),
+    avatar_url: null
   });
 
-  return {
-    authUser,
-    profile
-  };
+  syncProfileWithoutBlocking(user);
 }
 
 export function renderAuthModal(root) {
@@ -161,11 +129,6 @@ export function renderAuthModal(root) {
         border-radius: 24px;
         padding: 22px;
         box-shadow: var(--shadow);
-        transition: transform 0.2s ease;
-      }
-
-      .auth-overlay.is-open .auth-panel {
-        transform: translate(-50%, -50%) scale(1);
       }
 
       .auth-title {
@@ -202,7 +165,6 @@ export function renderAuthModal(root) {
 
       .auth-button:disabled {
         opacity: 0.7;
-        cursor: default;
       }
 
       .auth-switch {
@@ -219,12 +181,6 @@ export function renderAuthModal(root) {
         line-height: 1.45;
       }
 
-      .auth-note {
-        color: var(--text-soft);
-        font-size: 13px;
-        line-height: 1.5;
-      }
-
       .auth-close {
         position: absolute;
         right: 12px;
@@ -239,9 +195,7 @@ export function renderAuthModal(root) {
       <div class="auth-panel">
         <button class="auth-close" data-close type="button">✕</button>
 
-        <div class="auth-title">
-          ${getTitle(mode)}
-        </div>
+        <div class="auth-title">${getTitle(mode)}</div>
 
         <form class="auth-form">
           <input class="auth-input" name="email" type="email" placeholder="Email" required />
@@ -268,22 +222,21 @@ export function renderAuthModal(root) {
 
   root.querySelector("[data-close]")?.addEventListener("click", closeAuthModal);
 
-  overlay?.addEventListener("click", (e) => {
-    if (e.target === overlay) closeAuthModal();
+  overlay?.addEventListener("click", (event) => {
+    if (event.target === overlay) {
+      closeAuthModal();
+    }
   });
 
   root.querySelector("[data-switch]")?.addEventListener("click", () => {
     setAuthMode(mode === "login" ? "register" : "login");
   });
 
-  form?.addEventListener("submit", async (e) => {
-    e.preventDefault();
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
 
-    const emailInput = form.querySelector('input[name="email"]');
-    const passwordInput = form.querySelector('input[name="password"]');
-
-    const email = emailInput?.value?.trim() || "";
-    const password = passwordInput?.value || "";
+    const email = form.querySelector('input[name="email"]')?.value?.trim() || "";
+    const password = form.querySelector('input[name="password"]')?.value || "";
 
     messageBox.innerHTML = "";
 
@@ -296,41 +249,26 @@ export function renderAuthModal(root) {
       submitButton.disabled = true;
       submitButton.textContent = mode === "login" ? "Входим..." : "Создаём...";
 
-      if (mode === "login") {
-        await signInWithEmail(email, password);
+      const result =
+        mode === "login"
+          ? await signInWithEmail(email, password)
+          : await signUpWithEmail(email, password);
 
-        const result = await applyUserToStateFromAuth();
-        if (!result?.authUser?.id) {
-          throw new Error("Не удалось получить пользователя после входа.");
-        }
+      const user = result?.user || result?.session?.user || null;
 
-        closeAuthModal();
-        navigate("/");
-        return;
-      }
-
-      const signUpResult = await signUpWithEmail(email, password);
-      const authUser = signUpResult?.user || null;
-      const hasSession = Boolean(signUpResult?.session);
-
-      if (authUser?.id && hasSession) {
-        await applyUserToStateFromAuth();
-        closeAuthModal();
-        navigate("/");
-        return;
-      }
-
-      if (authUser?.id && !hasSession) {
-        messageBox.innerHTML = renderNote(
-          "Аккаунт создан. Проверь почту и подтверди email, если письмо было отправлено."
+      if (!user?.id) {
+        throw new Error(
+          mode === "login"
+            ? "Не удалось войти."
+            : "Аккаунт создан. Проверь email, если включено подтверждение почты."
         );
-        submitButton.disabled = false;
-        submitButton.textContent = getSubmitLabel(mode);
-        return;
       }
 
-      throw new Error("Не удалось завершить регистрацию.");
+      applyAuthUserImmediately(user);
+      closeAuthModal();
+      navigate("/");
     } catch (error) {
+      console.error("Auth submit error:", error);
       messageBox.innerHTML = renderError(error.message || "Ошибка авторизации");
       submitButton.disabled = false;
       submitButton.textContent = getSubmitLabel(mode);
