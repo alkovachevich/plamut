@@ -80,6 +80,13 @@ function openLibraryCoverUrlFromOlid(olid) {
   return olid ? `https://covers.openlibrary.org/b/olid/${encodeURIComponent(olid)}-L.jpg` : "";
 }
 
+function wikimediaFileUrl(filename = "") {
+  const clean = String(filename || "").trim();
+  if (!clean) return "";
+
+  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(clean)}`;
+}
+
 function normalizeOpenLibraryWorkKey(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -111,7 +118,122 @@ async function fetchOpenLibraryWorkCover(workKey) {
   }
 }
 
-async function resolveBookCoverFromExternalIds(entity = {}) {
+async function fetchOpenLibraryCoverByTitle(entity = {}) {
+  const titles = [
+    entity.title_primary,
+    entity.title_ru,
+    entity.title_en,
+    entity.original_title
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const title of titles) {
+    try {
+      const url = new URL("https://openlibrary.org/search.json");
+      url.searchParams.set("title", title);
+      url.searchParams.set("limit", "10");
+      url.searchParams.set("fields", "key,title,first_publish_year,cover_i,isbn,edition_key");
+
+      const response = await fetch(url.toString(), {
+        headers: { Accept: "application/json" }
+      });
+
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      const docs = safeArray(payload?.docs);
+
+      const exact = docs.find((doc) => {
+        const docTitle = String(doc?.title || "").toLowerCase().trim();
+        const currentTitle = title.toLowerCase().trim();
+        return doc?.cover_i && docTitle === currentTitle;
+      });
+
+      const withCover = exact || docs.find((doc) => doc?.cover_i);
+
+      if (withCover?.cover_i) {
+        return openLibraryCoverUrlFromId(withCover.cover_i);
+      }
+
+      const isbn = safeArray(withCover?.isbn).find(Boolean);
+      if (isbn) {
+        return openLibraryCoverUrlFromIsbn(isbn);
+      }
+
+      const editionKey = safeArray(withCover?.edition_key).find(Boolean);
+      if (editionKey) {
+        return openLibraryCoverUrlFromOlid(editionKey);
+      }
+    } catch (error) {
+      console.warn("Open Library title cover skipped:", error);
+    }
+  }
+
+  return "";
+}
+
+async function fetchWikidataCoverByTitle(entity = {}) {
+  const title = entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || "";
+  if (!title) return "";
+
+  try {
+    const searchUrl = new URL("https://www.wikidata.org/w/api.php");
+    searchUrl.searchParams.set("action", "wbsearchentities");
+    searchUrl.searchParams.set("format", "json");
+    searchUrl.searchParams.set("language", "ru");
+    searchUrl.searchParams.set("uselang", "ru");
+    searchUrl.searchParams.set("type", "item");
+    searchUrl.searchParams.set("origin", "*");
+    searchUrl.searchParams.set("limit", "5");
+    searchUrl.searchParams.set("search", title);
+
+    const searchResponse = await fetch(searchUrl.toString(), {
+      headers: { Accept: "application/json" }
+    });
+
+    if (!searchResponse.ok) return "";
+
+    const searchPayload = await searchResponse.json();
+    const ids = safeArray(searchPayload?.search)
+      .map((item) => item.id)
+      .filter(Boolean);
+
+    if (!ids.length) return "";
+
+    const detailsUrl = new URL("https://www.wikidata.org/w/api.php");
+    detailsUrl.searchParams.set("action", "wbgetentities");
+    detailsUrl.searchParams.set("format", "json");
+    detailsUrl.searchParams.set("props", "claims");
+    detailsUrl.searchParams.set("origin", "*");
+    detailsUrl.searchParams.set("ids", ids.join("|"));
+
+    const detailsResponse = await fetch(detailsUrl.toString(), {
+      headers: { Accept: "application/json" }
+    });
+
+    if (!detailsResponse.ok) return "";
+
+    const detailsPayload = await detailsResponse.json();
+    const entities = detailsPayload?.entities || {};
+
+    for (const id of ids) {
+      const image = safeArray(entities?.[id]?.claims?.P18)
+        .map((claim) => claim?.mainsnak?.datavalue?.value)
+        .find(Boolean);
+
+      if (image) {
+        return wikimediaFileUrl(image);
+      }
+    }
+  } catch (error) {
+    console.warn("Wikidata title cover skipped:", error);
+  }
+
+  return "";
+}
+
+async function resolveBookCover(entity = {}) {
   if (entity.cover_url) return entity.cover_url;
 
   const externalIds = entity.external_ids || {};
@@ -123,13 +245,23 @@ async function resolveBookCoverFromExternalIds(entity = {}) {
   if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
   if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
   if (ia) return openLibraryCoverUrlFromOlid(ia);
-  if (work) return await fetchOpenLibraryWorkCover(work);
+  if (work) {
+    const cover = await fetchOpenLibraryWorkCover(work);
+    if (cover) return cover;
+  }
 
   const canonicalKey = entity.canonical_key || "";
   if (canonicalKey.startsWith("books:openlibrary:")) {
     const possibleWork = canonicalKey.replace("books:openlibrary:", "");
-    return await fetchOpenLibraryWorkCover(possibleWork);
+    const cover = await fetchOpenLibraryWorkCover(possibleWork);
+    if (cover) return cover;
   }
+
+  const coverByTitle = await fetchOpenLibraryCoverByTitle(entity);
+  if (coverByTitle) return coverByTitle;
+
+  const wikidataCover = await fetchWikidataCoverByTitle(entity);
+  if (wikidataCover) return wikidataCover;
 
   return "";
 }
@@ -146,7 +278,7 @@ async function fixMissingBookCovers(items = []) {
     if (entity.category !== "books") continue;
     if (entity.cover_url) continue;
 
-    const newCover = await resolveBookCoverFromExternalIds(entity);
+    const newCover = await resolveBookCover(entity);
     if (!newCover) continue;
 
     try {
