@@ -57,6 +57,14 @@ function resolveDescription(entity = {}) {
   return entity.description_ru || entity.description_en || "";
 }
 
+function slugify(value = "") {
+  return normalizeString(value)
+    .replace(/[^a-z0-9а-яё]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
 function compact(value = "") {
   return normalizeString(value).replace(/\s+/g, " ").trim();
 }
@@ -85,6 +93,8 @@ function firstUsefulWords(title = "") {
     "le",
     "книга",
     "book",
+    "роман",
+    "novel",
     "том",
     "volume",
     "часть",
@@ -117,6 +127,7 @@ function knownUniverseKeyFromTitle(title = "") {
     ["мстители", "marvel", "Marvel"],
     ["star wars", "star-wars", "Star Wars"],
     ["звездные войны", "star-wars", "Звёздные войны"],
+    ["звёздные войны", "star-wars", "Звёздные войны"],
     ["lord of the rings", "middle-earth", "Middle-earth"],
     ["властелин колец", "middle-earth", "Средиземье"],
     ["hobbit", "middle-earth", "Middle-earth"],
@@ -148,7 +159,7 @@ export function deriveUniverseInfo(entity = {}) {
     const fallback = entity.canonical_key || `entity-${entity.id || Date.now()}`;
 
     return {
-      universe_key: fallback.replace(/[^a-z0-9а-яё-]+/gi, "-").toLowerCase(),
+      universe_key: slugify(fallback),
       title: resolveTitle(entity)
     };
   }
@@ -158,7 +169,7 @@ export function deriveUniverseInfo(entity = {}) {
     .join(" ");
 
   return {
-    universe_key: words.join("-").replace(/[^a-z0-9а-яё-]+/gi, "-").toLowerCase(),
+    universe_key: slugify(words.join("-")),
     title: universeTitle
   };
 }
@@ -274,7 +285,23 @@ async function fetchUserLibraryEntryByEntityId(userId, entityId) {
   return data || null;
 }
 
-async function upsertUniverseGroup({ universe_key, title, description = "", cover_url = "" }) {
+async function fetchSavedRelations(entityId) {
+  if (!entityId) return [];
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("media_relations")
+    .select("*")
+    .eq("from_entity_id", entityId)
+    .order("confidence", { ascending: false });
+
+  if (error) throw error;
+
+  return safeArray(data);
+}
+
+async function upsertUniverseGroup({ universe_key, title, description = "", cover_url = "", source = "system", metadata_json = {} }) {
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
@@ -285,8 +312,8 @@ async function upsertUniverseGroup({ universe_key, title, description = "", cove
         title,
         description,
         cover_url,
-        source: "library",
-        metadata_json: {}
+        source,
+        metadata_json
       },
       { onConflict: "universe_key" }
     )
@@ -298,15 +325,20 @@ async function upsertUniverseGroup({ universe_key, title, description = "", cove
   return data;
 }
 
-async function upsertUniverseMembers(universeKey, items = []) {
+async function upsertUniverseMembers(universeKey, items = [], orderMap = new Map()) {
   const supabase = getSupabaseClient();
 
-  const rows = sortUniverseItems(items).map((item, index) => ({
-    universe_key: universeKey,
-    entity_id: item.media_entities.id,
-    role: "member",
-    sort_order: index
-  }));
+  const rows = sortUniverseItems(items).map((item, fallbackIndex) => {
+    const entityId = item.media_entities.id;
+    const order = orderMap.has(entityId) ? orderMap.get(entityId) : fallbackIndex;
+
+    return {
+      universe_key: universeKey,
+      entity_id: entityId,
+      role: "member",
+      sort_order: Number.isFinite(Number(order)) ? Number(order) : fallbackIndex
+    };
+  });
 
   if (!rows.length) return [];
 
@@ -320,53 +352,28 @@ async function upsertUniverseMembers(universeKey, items = []) {
   return data || [];
 }
 
-async function upsertMediaRelations(seedEntity, items = []) {
+async function upsertMediaRelations(rows = []) {
+  if (!rows.length) return [];
+
   const supabase = getSupabaseClient();
 
-  if (!seedEntity?.id) return [];
+  const cleanRows = rows
+    .filter((row) => row.from_entity_id && row.to_entity_id && row.from_entity_id !== row.to_entity_id)
+    .map((row, index) => ({
+      from_entity_id: row.from_entity_id,
+      to_entity_id: row.to_entity_id,
+      relation_type: row.relation_type || "related_work",
+      source: row.source || "openai",
+      confidence: Number(row.confidence || 0.65),
+      sort_order: Number(row.sort_order || index),
+      metadata_json: row.metadata_json || {}
+    }));
 
-  const rows = [];
-
-  for (const item of items) {
-    const target = item.media_entities;
-
-    if (!target?.id || target.id === seedEntity.id) continue;
-
-    const relationType = relationTypeBetween(seedEntity, target);
-    const confidence = scoreRelation(seedEntity, target);
-
-    rows.push({
-      from_entity_id: seedEntity.id,
-      to_entity_id: target.id,
-      relation_type: relationType,
-      source: "library",
-      confidence,
-      sort_order: Number(target.year || 0),
-      metadata_json: {
-        title: resolveTitle(target),
-        category: target.category
-      }
-    });
-
-    rows.push({
-      from_entity_id: target.id,
-      to_entity_id: seedEntity.id,
-      relation_type: relationType === "adaptation" ? "source_material" : relationType,
-      source: "library",
-      confidence,
-      sort_order: Number(seedEntity.year || 0),
-      metadata_json: {
-        title: resolveTitle(seedEntity),
-        category: seedEntity.category
-      }
-    });
-  }
-
-  if (!rows.length) return [];
+  if (!cleanRows.length) return [];
 
   const { data, error } = await supabase
     .from("media_relations")
-    .upsert(rows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
+    .upsert(cleanRows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
     .select();
 
   if (error) throw error;
@@ -374,20 +381,50 @@ async function upsertMediaRelations(seedEntity, items = []) {
   return data || [];
 }
 
-async function markRelationsBuilt(entityId, universeKey) {
+async function upsertRelationCandidates(rows = []) {
+  if (!rows.length) return [];
+
   const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("relation_candidates")
+    .upsert(rows, {
+      onConflict: "owner_user_id,seed_entity_id,target_entity_id,relation_type,source"
+    })
+    .select();
+
+  if (error) {
+    console.warn("Relation candidates save skipped:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+async function markRelationsStatus(entityId, status, universeKey = null) {
+  if (!entityId) return;
+
+  const supabase = getSupabaseClient();
+
+  const payload = {
+    relations_status: status
+  };
+
+  if (status === "ready") {
+    payload.relations_built_at = new Date().toISOString();
+  }
+
+  if (universeKey) {
+    payload.universe_key = universeKey;
+  }
 
   const { error } = await supabase
     .from("media_entities")
-    .update({
-      universe_key: universeKey,
-      relations_status: "ready",
-      relations_built_at: new Date().toISOString()
-    })
+    .update(payload)
     .eq("id", entityId);
 
   if (error) {
-    console.warn("markRelationsBuilt skipped:", error);
+    console.warn("markRelationsStatus skipped:", error);
   }
 }
 
@@ -409,6 +446,191 @@ function getUniverseItemsForSeed(seedEntity, libraryItems = []) {
   });
 }
 
+function buildCandidateRows({ userId, seedEntity, items = [] }) {
+  if (!userId || !seedEntity?.id) return [];
+
+  return items
+    .filter((item) => item.media_entities?.id && item.media_entities.id !== seedEntity.id)
+    .map((item) => {
+      const target = item.media_entities;
+      const relationType = relationTypeBetween(seedEntity, target);
+      const confidence = scoreRelation(seedEntity, target);
+
+      return {
+        owner_user_id: userId,
+        seed_entity_id: seedEntity.id,
+        target_entity_id: target.id,
+        seed_canonical_key: seedEntity.canonical_key || null,
+        target_canonical_key: target.canonical_key || null,
+        relation_type: relationType,
+        source: "library",
+        status: "suggested",
+        confidence,
+        candidate_payload: {
+          seed_title: resolveTitle(seedEntity),
+          seed_category: seedEntity.category,
+          target_title: resolveTitle(target),
+          target_category: target.category,
+          target_year: target.year || null,
+          reason: sharedExternalId(seedEntity, target) ? "shared_external_id" : "same_universe_key"
+        }
+      };
+    });
+}
+
+function buildNormalizePayload({ seedEntity, candidateRows = [] }) {
+  return {
+    seed: {
+      id: seedEntity.id,
+      title: resolveTitle(seedEntity),
+      category: seedEntity.category,
+      year: seedEntity.year || null,
+      canonical_key: seedEntity.canonical_key || "",
+      external_ids: seedEntity.external_ids || {}
+    },
+    candidates: candidateRows.map((row) => ({
+      seed_entity_id: row.seed_entity_id,
+      target_entity_id: row.target_entity_id,
+      seed_title: row.candidate_payload?.seed_title || "",
+      target_title: row.candidate_payload?.target_title || "",
+      seed_category: row.candidate_payload?.seed_category || "",
+      target_category: row.candidate_payload?.target_category || "",
+      relation_type: row.relation_type,
+      source: row.source,
+      confidence: row.confidence,
+      payload: row.candidate_payload || {}
+    }))
+  };
+}
+
+function fallbackNormalize({ seedEntity, universeInfo, candidateRows = [] }) {
+  return {
+    universe_title: universeInfo.title || resolveTitle(seedEntity),
+    universe_key: universeInfo.universe_key || slugify(resolveTitle(seedEntity)),
+    relations: candidateRows
+      .filter((row) => row.target_entity_id)
+      .map((row, index) => ({
+        seed_entity_id: row.seed_entity_id,
+        target_entity_id: row.target_entity_id,
+        relation_type: row.relation_type || "related_work",
+        confidence: row.confidence || 0.55,
+        order_hint: index,
+        reason: "Локальная связь по библиотеке и названию вселенной"
+      }))
+  };
+}
+
+async function normalizeWithEdgeFunction({ seedEntity, universeInfo, candidateRows = [] }) {
+  if (!candidateRows.length) {
+    return fallbackNormalize({ seedEntity, universeInfo, candidateRows });
+  }
+
+  const supabase = getSupabaseClient();
+
+  try {
+    const { data, error } = await supabase.functions.invoke("plamut-universe-normalize", {
+      body: buildNormalizePayload({
+        seedEntity,
+        candidateRows
+      })
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || !Array.isArray(data.relations)) {
+      throw new Error("Invalid normalize response");
+    }
+
+    return {
+      universe_title: data.universe_title || universeInfo.title || resolveTitle(seedEntity),
+      universe_key: data.universe_key || universeInfo.universe_key,
+      relations: data.relations
+    };
+  } catch (error) {
+    console.warn("OpenAI universe normalize fallback used:", error);
+
+    return fallbackNormalize({
+      seedEntity,
+      universeInfo,
+      candidateRows
+    });
+  }
+}
+
+function buildRelationRowsFromNormalized({ seedEntity, normalized, candidateRows = [] }) {
+  const candidateByTarget = new Map(
+    candidateRows.map((row) => [Number(row.target_entity_id), row])
+  );
+
+  const rows = [];
+
+  safeArray(normalized.relations).forEach((relation, index) => {
+    const targetId = Number(relation.target_entity_id);
+    const seedId = Number(relation.seed_entity_id || seedEntity.id);
+
+    if (!targetId || !seedId || targetId === seedId) return;
+
+    const candidate = candidateByTarget.get(targetId);
+    const relationType = relation.relation_type || candidate?.relation_type || "related_work";
+    const confidence = Math.max(0, Math.min(1, Number(relation.confidence || candidate?.confidence || 0.65)));
+    const orderHint = relation.order_hint ?? index;
+
+    rows.push({
+      from_entity_id: seedId,
+      to_entity_id: targetId,
+      relation_type: relationType,
+      source: "openai",
+      confidence,
+      sort_order: Number.isFinite(Number(orderHint)) ? Number(orderHint) : index,
+      metadata_json: {
+        reason: relation.reason || "",
+        normalized_by: "plamut-universe-normalize",
+        candidate_source: candidate?.source || "unknown"
+      }
+    });
+
+    const reverseType =
+      relationType === "adaptation"
+        ? "source_material"
+        : relationType === "source_material"
+          ? "adaptation"
+          : relationType;
+
+    rows.push({
+      from_entity_id: targetId,
+      to_entity_id: seedId,
+      relation_type: reverseType,
+      source: "openai",
+      confidence,
+      sort_order: Number(seedEntity.year || 0),
+      metadata_json: {
+        reason: relation.reason || "",
+        normalized_by: "plamut-universe-normalize",
+        candidate_source: candidate?.source || "unknown"
+      }
+    });
+  });
+
+  return rows;
+}
+
+function buildOrderMapFromNormalized(normalized = {}) {
+  const map = new Map();
+
+  safeArray(normalized.relations).forEach((relation, index) => {
+    const targetId = Number(relation.target_entity_id);
+    const order = relation.order_hint ?? index;
+
+    if (targetId && Number.isFinite(Number(order))) {
+      map.set(targetId, Number(order));
+    }
+  });
+
+  return map;
+}
+
 export async function buildUniverseForEntity({ userId, entityId }) {
   if (!userId || !entityId) {
     return {
@@ -418,54 +640,108 @@ export async function buildUniverseForEntity({ userId, entityId }) {
     };
   }
 
-  const seedEntry = await fetchUserLibraryEntryByEntityId(userId, entityId);
+  await markRelationsStatus(entityId, "building");
 
-  if (!seedEntry?.media_entities) {
+  try {
+    const seedEntry = await fetchUserLibraryEntryByEntityId(userId, entityId);
+
+    if (!seedEntry?.media_entities) {
+      await markRelationsStatus(entityId, "failed");
+
+      return {
+        universe: null,
+        items: [],
+        relations: []
+      };
+    }
+
+    const seedEntity = seedEntry.media_entities;
+    const libraryItems = await fetchUserLibrary(userId);
+    const universeInfo = deriveUniverseInfo(seedEntity);
+    const universeItems = getUniverseItemsForSeed(seedEntity, libraryItems);
+    const sortedItems = sortUniverseItems(universeItems);
+
+    const candidateRows = buildCandidateRows({
+      userId,
+      seedEntity,
+      items: sortedItems
+    });
+
+    await upsertRelationCandidates(candidateRows);
+
+    const normalized = await normalizeWithEdgeFunction({
+      seedEntity,
+      universeInfo,
+      candidateRows
+    });
+
+    const finalUniverseKey = slugify(normalized.universe_key || universeInfo.universe_key);
+    const finalUniverseTitle = clean(normalized.universe_title) || universeInfo.title || resolveTitle(seedEntity);
+    const cover = sortedItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url || "";
+    const description = resolveDescription(seedEntity);
+
+    const universe = await upsertUniverseGroup({
+      universe_key: finalUniverseKey,
+      title: finalUniverseTitle,
+      description,
+      cover_url: cover,
+      source: "openai",
+      metadata_json: {
+        seed_entity_id: seedEntity.id,
+        normalized: true
+      }
+    });
+
+    const relationRows = buildRelationRowsFromNormalized({
+      seedEntity,
+      normalized,
+      candidateRows
+    });
+
+    const savedRelations = await upsertMediaRelations(relationRows);
+
+    const orderMap = buildOrderMapFromNormalized(normalized);
+    orderMap.set(seedEntity.id, -1);
+
+    await upsertUniverseMembers(finalUniverseKey, sortedItems, orderMap);
+
+    await Promise.all(
+      sortedItems.map((item) =>
+        markRelationsStatus(item.media_entities.id, "ready", finalUniverseKey)
+      )
+    );
+
     return {
-      universe: null,
-      items: [],
-      relations: []
+      universe,
+      items: sortedItems,
+      relations: savedRelations
     };
+  } catch (error) {
+    console.error("buildUniverseForEntity error:", error);
+    await markRelationsStatus(entityId, "failed");
+
+    throw error;
   }
-
-  const seedEntity = seedEntry.media_entities;
-  const libraryItems = await fetchUserLibrary(userId);
-  const universeInfo = deriveUniverseInfo(seedEntity);
-  const universeItems = getUniverseItemsForSeed(seedEntity, libraryItems);
-
-  const sortedItems = sortUniverseItems(universeItems);
-  const cover = sortedItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url || "";
-  const description = resolveDescription(seedEntity);
-
-  const universe = await upsertUniverseGroup({
-    universe_key: universeInfo.universe_key,
-    title: universeInfo.title,
-    description,
-    cover_url: cover
-  });
-
-  await upsertUniverseMembers(universeInfo.universe_key, sortedItems);
-  const relations = await upsertMediaRelations(seedEntity, sortedItems);
-
-  await Promise.all(
-    sortedItems.map((item) =>
-      markRelationsBuilt(item.media_entities.id, universeInfo.universe_key)
-    )
-  );
-
-  return {
-    universe,
-    items: sortedItems,
-    relations
-  };
 }
 
 export async function getRelatedItemsForEntity({ userId, entityId }) {
   if (!userId || !entityId) return [];
 
-  const built = await buildUniverseForEntity({ userId, entityId });
+  const seedEntry = await fetchUserLibraryEntryByEntityId(userId, entityId);
+  if (!seedEntry?.media_entities) return [];
 
-  return built.items.filter((item) => item.media_entities?.id !== entityId);
+  const savedRelations = await fetchSavedRelations(entityId).catch(() => []);
+  const libraryItems = await fetchUserLibrary(userId);
+
+  if (savedRelations.length) {
+    const targetIds = new Set(savedRelations.map((rel) => rel.to_entity_id));
+
+    return libraryItems.filter((item) => targetIds.has(item.media_entities?.id));
+  }
+
+  const localItems = getUniverseItemsForSeed(seedEntry.media_entities, libraryItems);
+
+  return localItems.filter((item) => item.media_entities?.id !== entityId);
 }
 
 export async function getUserUniverses(userId) {
@@ -476,7 +752,12 @@ export async function getUserUniverses(userId) {
 
   for (const item of libraryItems) {
     const entity = item.media_entities;
-    const info = deriveUniverseInfo(entity);
+    const info = entity.universe_key
+      ? {
+          universe_key: entity.universe_key,
+          title: deriveUniverseInfo(entity).title
+        }
+      : deriveUniverseInfo(entity);
 
     if (!grouped.has(info.universe_key)) {
       grouped.set(info.universe_key, {
@@ -524,7 +805,11 @@ export async function getUserUniverses(userId) {
         universe_key: universe.universe_key,
         title: universe.title,
         description: universe.description,
-        cover_url: universe.cover_url
+        cover_url: universe.cover_url,
+        source: "library",
+        metadata_json: {
+          auto_cached: true
+        }
       });
 
       await upsertUniverseMembers(universe.universe_key, universe.items);
@@ -556,20 +841,39 @@ export async function getUniverseDetails({ userId, universeKey }) {
     };
   }
 
-  const relations = [];
+  const supabase = getSupabaseClient();
 
-  for (const item of localUniverse.items) {
-    const entity = item.media_entities;
-    const related = localUniverse.items.filter((candidate) => candidate.media_entities.id !== entity.id);
+  const entityIds = localUniverse.items
+    .map((item) => item.media_entities?.id)
+    .filter(Boolean);
 
-    related.forEach((candidate) => {
-      relations.push({
-        from_entity_id: entity.id,
-        to_entity_id: candidate.media_entities.id,
-        relation_type: relationTypeBetween(entity, candidate.media_entities),
-        confidence: scoreRelation(entity, candidate.media_entities)
+  let relations = [];
+
+  if (entityIds.length) {
+    const { data, error } = await supabase
+      .from("media_relations")
+      .select("*")
+      .in("from_entity_id", entityIds);
+
+    if (!error) {
+      relations = safeArray(data).filter((rel) => entityIds.includes(rel.to_entity_id));
+    }
+  }
+
+  if (!relations.length) {
+    for (const item of localUniverse.items) {
+      const entity = item.media_entities;
+      const related = localUniverse.items.filter((candidate) => candidate.media_entities.id !== entity.id);
+
+      related.forEach((candidate) => {
+        relations.push({
+          from_entity_id: entity.id,
+          to_entity_id: candidate.media_entities.id,
+          relation_type: relationTypeBetween(entity, candidate.media_entities),
+          confidence: scoreRelation(entity, candidate.media_entities)
+        });
       });
-    });
+    }
   }
 
   return {
