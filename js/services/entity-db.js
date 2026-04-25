@@ -1,21 +1,12 @@
-import { getSupabaseClient } from "../lib/supabase-client.js";
+import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
 
 const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 const USER_MEDIA_TABLE = "user_media";
 
-/* =========================
-   NORMALIZATION
-========================= */
-
 function cleanText(value = "") {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function cleanNullableText(value = "") {
-  const result = cleanText(value);
-  return result || "";
 }
 
 function normalizeYear(value) {
@@ -28,6 +19,7 @@ function normalizeJson(value, fallback = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return fallback;
   }
+
   return value;
 }
 
@@ -39,13 +31,18 @@ function normalizeArray(value) {
   );
 }
 
+function extractPrimarySourceFromCanonicalKey(canonicalKey = "") {
+  const parts = String(canonicalKey).split(":").filter(Boolean);
+  return parts[1] || "manual";
+}
+
 function buildTitlePrimary(entity = {}) {
   return (
     cleanText(entity.title_primary) ||
     cleanText(entity.title) ||
-    cleanText(entity.original_title) ||
     cleanText(entity.title_ru) ||
     cleanText(entity.title_en) ||
+    cleanText(entity.original_title) ||
     ""
   );
 }
@@ -60,32 +57,11 @@ function buildOriginalTitle(entity = {}) {
   );
 }
 
-function buildDescriptionRu(entity = {}) {
-  return cleanNullableText(entity.description_ru || entity.description || "");
-}
-
-function buildDescriptionEn(entity = {}) {
-  return cleanNullableText(entity.description_en || "");
-}
-
-function buildPrimarySource(entity = {}) {
-  return (
-    cleanText(entity.primary_source) ||
-    extractPrimarySourceFromCanonicalKey(entity.canonical_key) ||
-    "unknown"
-  );
-}
-
-function extractPrimarySourceFromCanonicalKey(canonicalKey = "") {
-  const parts = String(canonicalKey).split(":").filter(Boolean);
-  return parts[1] || "";
-}
-
 export function normalizeEntity(entity = {}) {
   const canonicalKey = cleanText(entity.canonical_key);
 
   if (!canonicalKey) {
-    throw new Error("normalizeEntity: canonical_key is required");
+    throw new Error("У сущности нет canonical_key");
   }
 
   const category =
@@ -94,30 +70,32 @@ export function normalizeEntity(entity = {}) {
     "";
 
   if (!category) {
-    throw new Error("normalizeEntity: category is required");
+    throw new Error("У сущности нет category");
   }
 
   const titlePrimary = buildTitlePrimary(entity);
 
   if (!titlePrimary) {
-    throw new Error("normalizeEntity: title_primary/title is required");
+    throw new Error("У сущности нет названия");
   }
 
   return {
     canonical_key: canonicalKey,
     category,
-    primary_source: buildPrimarySource(entity),
+    primary_source:
+      cleanText(entity.primary_source) ||
+      extractPrimarySourceFromCanonicalKey(canonicalKey),
 
     title_primary: titlePrimary,
-    title_ru: cleanNullableText(entity.title_ru),
-    title_en: cleanNullableText(entity.title_en),
+    title_ru: cleanText(entity.title_ru),
+    title_en: cleanText(entity.title_en),
     original_title: buildOriginalTitle(entity),
 
     year: normalizeYear(entity.year),
-    cover_url: cleanNullableText(entity.cover_url),
+    cover_url: cleanText(entity.cover_url),
 
-    description_ru: buildDescriptionRu(entity),
-    description_en: buildDescriptionEn(entity),
+    description_ru: cleanText(entity.description_ru || entity.description || ""),
+    description_en: cleanText(entity.description_en || ""),
 
     external_ids: normalizeJson(entity.external_ids, {}),
     meta: normalizeJson(entity.meta, {}),
@@ -133,21 +111,20 @@ export function normalizeEntity(entity = {}) {
   };
 }
 
-/* =========================
-   ENTITY FETCH
-========================= */
-
 export async function getEntityByCanonicalKey(canonicalKey) {
   const key = cleanText(canonicalKey);
   if (!key) return null;
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from(MEDIA_ENTITIES_TABLE)
-    .select("*")
-    .eq("canonical_key", key)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .select("*")
+      .eq("canonical_key", key)
+      .maybeSingle(),
+    "Загрузка карточки из БД"
+  );
 
   if (error) {
     throw error;
@@ -155,10 +132,6 @@ export async function getEntityByCanonicalKey(canonicalKey) {
 
   return data || null;
 }
-
-/* =========================
-   ALIASES
-========================= */
 
 function buildAliasRows(entityId, aliases = [], source = "entity") {
   const normalizedSource = cleanText(source) || "entity";
@@ -192,12 +165,13 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from(ENTITY_ALIASES_TABLE)
-    .upsert(rows, {
-      onConflict: "entity_id,alias_normalized"
-    })
-    .select("*");
+  const { data, error } = await withTimeout(
+    supabase
+      .from(ENTITY_ALIASES_TABLE)
+      .upsert(rows, { onConflict: "entity_id,alias_normalized" })
+      .select("*"),
+    "Сохранение алиасов"
+  );
 
   if (error) {
     throw error;
@@ -206,11 +180,7 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
   return data || [];
 }
 
-/* =========================
-   ENTITY SAVE
-========================= */
-
-function buildEntityInsertPayload(entity) {
+function buildEntityPayload(entity) {
   return {
     canonical_key: entity.canonical_key,
     category: entity.category,
@@ -236,8 +206,7 @@ function mergeEntityPayload(existing, incoming) {
   return {
     canonical_key: incoming.canonical_key,
     category: incoming.category || existing?.category || "",
-    primary_source:
-      incoming.primary_source || existing?.primary_source || "unknown",
+    primary_source: incoming.primary_source || existing?.primary_source || "manual",
 
     title_primary: incoming.title_primary || existing?.title_primary || "",
     title_ru: incoming.title_ru || existing?.title_ru || "",
@@ -265,31 +234,28 @@ export async function saveEntityIfMissing(inputEntity) {
   const entity = normalizeEntity(inputEntity);
   const supabase = getSupabaseClient();
 
-  const existing = await getEntityByCanonicalKey(entity.canonical_key);
-  const payload = buildEntityInsertPayload(
-    existing ? mergeEntityPayload(existing, entity) : entity
-  );
+  const existing = await getEntityByCanonicalKey(entity.canonical_key).catch(() => null);
+  const payload = buildEntityPayload(existing ? mergeEntityPayload(existing, entity) : entity);
 
-  const { data, error } = await supabase
-    .from(MEDIA_ENTITIES_TABLE)
-    .upsert(payload, {
-      onConflict: "canonical_key"
-    })
-    .select("*")
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .upsert(payload, { onConflict: "canonical_key" })
+      .select("*")
+      .single(),
+    "Сохранение сущности"
+  );
 
   if (error) {
     throw error;
   }
 
-  await saveAliases(data.id, entity.aliases, entity.primary_source);
+  await saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
+    console.warn("Aliases save skipped:", error);
+  });
 
   return data;
 }
-
-/* =========================
-   USER LIBRARY
-========================= */
 
 export async function getUserLibraryEntry(userId, entityId) {
   const cleanUserId = cleanText(userId);
@@ -300,12 +266,15 @@ export async function getUserLibraryEntry(userId, entityId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from(USER_MEDIA_TABLE)
-    .select("*")
-    .eq("user_id", cleanUserId)
-    .eq("entity_id", entityId)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(USER_MEDIA_TABLE)
+      .select("*")
+      .eq("user_id", cleanUserId)
+      .eq("entity_id", entityId)
+      .maybeSingle(),
+    "Проверка библиотеки"
+  );
 
   if (error) {
     throw error;
@@ -328,16 +297,16 @@ export async function addToUserLibrary({
   const cleanUserId = cleanText(userId);
 
   if (!cleanUserId) {
-    throw new Error("addToUserLibrary: userId is required");
+    throw new Error("Пользователь не найден");
   }
 
   if (!entity || typeof entity !== "object") {
-    throw new Error("addToUserLibrary: entity is required");
+    throw new Error("Не передана карточка для добавления");
   }
 
   const savedEntity = await saveEntityIfMissing(entity);
-
   const existingEntry = await getUserLibraryEntry(cleanUserId, savedEntity.id);
+
   if (existingEntry) {
     return {
       added: false,
@@ -357,11 +326,14 @@ export async function addToUserLibrary({
     folder_name: cleanText(folderName) || null
   };
 
-  const { data, error } = await supabase
-    .from(USER_MEDIA_TABLE)
-    .insert(insertPayload)
-    .select("*")
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(USER_MEDIA_TABLE)
+      .insert(insertPayload)
+      .select("*")
+      .single(),
+    "Добавление в библиотеку"
+  );
 
   if (error) {
     throw error;
