@@ -56,6 +56,46 @@ function renderCard(universe) {
 
 function renderGuest(root) {
   root.innerHTML = `
+    <style>
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .title {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text);
+      }
+
+      .empty-state {
+        padding: 28px;
+        border-radius: 20px;
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        color: var(--text-soft);
+      }
+
+      .empty-title {
+        color: var(--text);
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .login-btn {
+        width: fit-content;
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+      }
+    </style>
+
     <section class="page">
       <div class="title">Вселенные</div>
 
@@ -254,7 +294,6 @@ export async function renderUniversesPage(root) {
 
   try {
     const universes = await getUserUniverses(userId);
-
     const container = root.querySelector(".page");
 
     if (!universes.length) {
@@ -269,7 +308,7 @@ export async function renderUniversesPage(root) {
         <div class="empty-state">
           <div class="empty-title">Пока нет вселенных</div>
           <div class="empty-text">
-            Вселенные появятся, когда в библиотеке будут произведения с общим миром или серией.
+            Вселенные появятся после построения связей через карточку произведения.
           </div>
         </div>
       `;
