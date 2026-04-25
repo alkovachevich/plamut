@@ -1,4 +1,4 @@
-import { SEARCH_LIMITS } from "../config.js";
+import { SEARCH_LIMITS, TMDB_API_KEY, API_ENDPOINTS } from "../config.js";
 import { normalizeString, compactString, uniqueArray, safeArray } from "../utils.js";
 import { addToUserLibrary } from "./entity-db.js";
 
@@ -21,9 +21,27 @@ function dedupeByCanonicalKey(items = []) {
 
   for (const item of items) {
     if (!item?.canonical_key) continue;
+
     if (!map.has(item.canonical_key)) {
       map.set(item.canonical_key, item);
+      continue;
     }
+
+    const existing = map.get(item.canonical_key);
+
+    map.set(item.canonical_key, {
+      ...existing,
+      ...item,
+      cover_url: existing.cover_url || item.cover_url || "",
+      description_ru: existing.description_ru || item.description_ru || "",
+      description_en: existing.description_en || item.description_en || "",
+      aliases: uniqueArray([...safeArray(existing.aliases), ...safeArray(item.aliases)]),
+      external_ids: {
+        ...(existing.external_ids || {}),
+        ...(item.external_ids || {})
+      },
+      score: Math.max(existing.score || 0, item.score || 0)
+    });
   }
 
   return [...map.values()];
@@ -57,22 +75,76 @@ function groupItems(items = []) {
   return groups;
 }
 
-function buildBookCoverFromOpenLibrary(doc = {}) {
-  if (doc?.cover_i) {
-    return `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-  }
-  return "";
-}
-
 function safeNumberYear(value) {
   if (value === null || value === undefined || value === "") return null;
   const year = Number(value);
   return Number.isFinite(year) ? year : null;
 }
 
+function openLibraryCoverUrlFromId(coverId) {
+  return coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "";
+}
+
+function openLibraryCoverUrlFromIsbn(isbn) {
+  return isbn ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg` : "";
+}
+
 /* =========================
    BOOKS
 ========================= */
+
+async function fetchOpenLibraryByTitle(query) {
+  const url = new URL("https://openlibrary.org/search.json");
+  url.searchParams.set("title", query);
+  url.searchParams.set("limit", "20");
+
+  const response = await fetch(url.toString(), {
+    headers: { Accept: "application/json" }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Open Library failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload?.docs || [];
+}
+
+function mapOpenLibraryDoc(doc) {
+  const workKey = typeof doc?.key === "string" ? doc.key : "";
+  const normalizedWorkKey = workKey.startsWith("/works/")
+    ? workKey.replace("/works/", "")
+    : workKey;
+
+  const isbn = safeArray(doc?.isbn)[0] || "";
+  const coverFromId = openLibraryCoverUrlFromId(doc?.cover_i);
+  const coverFromIsbn = openLibraryCoverUrlFromIsbn(isbn);
+
+  return {
+    canonical_key: normalizedWorkKey
+      ? `books:openlibrary:${normalizedWorkKey}`
+      : `books:openlibrary:search:${compactString(doc?.title || "unknown")}`,
+    category: "books",
+    primary_source: "openlibrary",
+    title: doc?.title || "",
+    original_title: doc?.title || "",
+    year: doc?.first_publish_year || null,
+    cover_url: coverFromId || coverFromIsbn || "",
+    description_ru: "",
+    description_en: "",
+    aliases: uniqueArray([
+      doc?.title,
+      ...safeArray(doc?.alternative_title),
+      ...(doc?.subtitle ? [doc.subtitle] : []),
+      ...safeArray(doc?.author_name)
+    ]),
+    external_ids: {
+      openlibrary_work: normalizedWorkKey || null,
+      isbn: uniqueArray([...safeArray(doc?.isbn).slice(0, 8)])
+    },
+    score: 0
+  };
+}
 
 async function fetchWikidataCandidates(query) {
   const url = new URL("https://www.wikidata.org/w/api.php");
@@ -90,7 +162,7 @@ async function fetchWikidataCandidates(query) {
   });
 
   if (!response.ok) {
-    throw new Error(`Wikidata search failed: ${response.status}`);
+    throw new Error(`Wikidata failed: ${response.status}`);
   }
 
   const payload = await response.json();
@@ -121,9 +193,7 @@ async function fetchWikidataEntityDetails(ids = []) {
 }
 
 function extractYearFromWikidataClaims(claims = {}) {
-  const publicationClaims = safeArray(claims.P577);
-
-  for (const claim of publicationClaims) {
+  for (const claim of safeArray(claims.P577)) {
     const value = claim?.mainsnak?.datavalue?.value?.time;
     if (typeof value === "string") {
       const match = value.match(/[+-](\d{4})-/);
@@ -135,42 +205,38 @@ function extractYearFromWikidataClaims(claims = {}) {
 }
 
 function extractOpenLibraryWorkIdFromClaims(claims = {}) {
-  const values = safeArray(claims.P648).map(
-    (claim) => claim?.mainsnak?.datavalue?.value
+  return (
+    safeArray(claims.P648)
+      .map((claim) => claim?.mainsnak?.datavalue?.value)
+      .find(Boolean) || null
   );
-  return values.find(Boolean) || null;
 }
 
 function extractIsbnValuesFromClaims(claims = {}) {
-  const isbn10 = safeArray(claims.P957).map(
-    (claim) => claim?.mainsnak?.datavalue?.value
-  );
-
-  const isbn13 = safeArray(claims.P212).map(
-    (claim) => claim?.mainsnak?.datavalue?.value
-  );
-
-  return uniqueArray([...isbn10, ...isbn13]);
+  return uniqueArray([
+    ...safeArray(claims.P957).map((claim) => claim?.mainsnak?.datavalue?.value),
+    ...safeArray(claims.P212).map((claim) => claim?.mainsnak?.datavalue?.value)
+  ]);
 }
 
-function mapWikidataBookEntity(searchItem, entityDetails) {
-  const labels = entityDetails?.labels || {};
-  const aliases = entityDetails?.aliases || {};
-  const claims = entityDetails?.claims || {};
-  const descriptions = entityDetails?.descriptions || {};
+function mapWikidataBookEntity(searchItem, details) {
+  const labels = details?.labels || {};
+  const aliases = details?.aliases || {};
+  const claims = details?.claims || {};
+  const descriptions = details?.descriptions || {};
 
   const titleRu = labels?.ru?.value || "";
   const titleEn = labels?.en?.value || "";
-  const originalTitle = titleRu || titleEn || searchItem?.label || "";
+  const isbns = extractIsbnValuesFromClaims(claims);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
     category: "books",
     primary_source: "wikidata",
     title: titleRu || titleEn || searchItem?.label || "",
-    original_title: originalTitle,
+    original_title: titleEn || titleRu || searchItem?.label || "",
     year: extractYearFromWikidataClaims(claims),
-    cover_url: "",
+    cover_url: openLibraryCoverUrlFromIsbn(isbns[0]),
     description_ru: descriptions?.ru?.value || "",
     description_en: descriptions?.en?.value || "",
     aliases: uniqueArray([
@@ -184,138 +250,10 @@ function mapWikidataBookEntity(searchItem, entityDetails) {
     external_ids: {
       wikidata: searchItem.id,
       openlibrary_work: extractOpenLibraryWorkIdFromClaims(claims),
-      isbn: extractIsbnValuesFromClaims(claims)
+      isbn: isbns
     },
     score: 0
   };
-}
-
-async function fetchOpenLibraryByTitle(query) {
-  const url = new URL("https://openlibrary.org/search.json");
-  url.searchParams.set("title", query);
-  url.searchParams.set("limit", "12");
-
-  const response = await fetch(url.toString(), {
-    headers: { Accept: "application/json" }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Open Library title search failed: ${response.status}`);
-  }
-
-  const payload = await response.json();
-  return payload?.docs || [];
-}
-
-async function fetchOpenLibraryByIsbn(isbnList = []) {
-  const clean = isbnList.filter(Boolean).slice(0, 5);
-  if (!clean.length) return [];
-
-  const docs = [];
-
-  for (const isbn of clean) {
-    const url = new URL("https://openlibrary.org/search.json");
-    url.searchParams.set("isbn", isbn);
-    url.searchParams.set("limit", "3");
-
-    const response = await fetch(url.toString(), {
-      headers: { Accept: "application/json" }
-    });
-
-    if (!response.ok) continue;
-
-    const payload = await response.json();
-    docs.push(...safeArray(payload?.docs));
-  }
-
-  return docs;
-}
-
-function mapOpenLibraryDoc(doc) {
-  const workKey = typeof doc?.key === "string" ? doc.key : "";
-  const normalizedWorkKey = workKey.startsWith("/works/")
-    ? workKey.replace("/works/", "")
-    : workKey;
-
-  return {
-    canonical_key: normalizedWorkKey
-      ? `books:openlibrary:${normalizedWorkKey}`
-      : `books:openlibrary:search:${compactString(doc?.title || "unknown")}`,
-    category: "books",
-    primary_source: "openlibrary",
-    title: doc?.title || "",
-    original_title: doc?.title || "",
-    year: doc?.first_publish_year || null,
-    cover_url: buildBookCoverFromOpenLibrary(doc),
-    description_ru: "",
-    description_en: "",
-    aliases: uniqueArray([
-      doc?.title,
-      ...safeArray(doc?.alternative_title),
-      ...(doc?.subtitle ? [doc.subtitle] : [])
-    ]),
-    external_ids: {
-      openlibrary_work: normalizedWorkKey || null,
-      isbn: uniqueArray([...safeArray(doc?.isbn).slice(0, 5)])
-    },
-    score: 0
-  };
-}
-
-function intersects(a = [], b = []) {
-  const setB = new Set(b.filter(Boolean));
-  return a.some((value) => setB.has(value));
-}
-
-function findBestOpenLibraryMatchForBook(item, openLibraryItems = []) {
-  const itemTitle = compactString(item.title || item.original_title || "");
-  const itemYear = item.year || null;
-  const itemWork = item?.external_ids?.openlibrary_work || null;
-  const itemIsbns = safeArray(item?.external_ids?.isbn);
-
-  for (const candidate of openLibraryItems) {
-    const candidateTitle = compactString(candidate.title || candidate.original_title || "");
-    const candidateYear = candidate.year || null;
-    const candidateWork = candidate?.external_ids?.openlibrary_work || null;
-    const candidateIsbns = safeArray(candidate?.external_ids?.isbn);
-
-    if (itemWork && candidateWork && itemWork === candidateWork) {
-      return candidate;
-    }
-
-    if (itemIsbns.length && candidateIsbns.length && intersects(itemIsbns, candidateIsbns)) {
-      return candidate;
-    }
-
-    if (itemTitle && candidateTitle && itemTitle === candidateTitle) {
-      if (!itemYear || !candidateYear || itemYear === candidateYear) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
-}
-
-function enrichBookItems(wikidataItems = [], openLibraryItems = []) {
-  return wikidataItems.map((item) => {
-    const match = findBestOpenLibraryMatchForBook(item, openLibraryItems);
-
-    if (!match) return item;
-
-    return {
-      ...item,
-      cover_url: item.cover_url || match.cover_url || "",
-      aliases: uniqueArray([
-        ...safeArray(item.aliases),
-        ...safeArray(match.aliases)
-      ]),
-      external_ids: {
-        ...(match.external_ids || {}),
-        ...(item.external_ids || {})
-      }
-    };
-  });
 }
 
 function scoreBookResult(query, item) {
@@ -328,26 +266,45 @@ function scoreBookResult(query, item) {
   if (title === q) score += 120;
   if (aliases.includes(q)) score += 100;
   if (title.startsWith(q)) score += 40;
-
-  for (const alias of aliases) {
-    if (alias.startsWith(q)) {
-      score += 35;
-      break;
-    }
-  }
-
-  for (const alias of aliases) {
-    if (alias.includes(q)) {
-      score += 20;
-      break;
-    }
-  }
-
-  if (item.primary_source === "wikidata") score += 20;
-  if (item.cover_url) score += 10;
+  if (aliases.some((alias) => alias.startsWith(q))) score += 35;
+  if (aliases.some((alias) => alias.includes(q))) score += 20;
+  if (item.cover_url) score += 25;
+  if (item.primary_source === "openlibrary") score += 12;
   if (item.year) score += 4;
 
   return score;
+}
+
+function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
+  return wikidataItems.map((item) => {
+    const itemTitle = compactString(item.title || item.original_title || "");
+    const itemIsbns = safeArray(item.external_ids?.isbn);
+    const itemWork = item.external_ids?.openlibrary_work || "";
+
+    const match = openLibraryItems.find((candidate) => {
+      const candidateTitle = compactString(candidate.title || candidate.original_title || "");
+      const candidateIsbns = safeArray(candidate.external_ids?.isbn);
+      const candidateWork = candidate.external_ids?.openlibrary_work || "";
+
+      if (itemWork && candidateWork && itemWork === candidateWork) return true;
+      if (itemIsbns.some((isbn) => candidateIsbns.includes(isbn))) return true;
+      if (itemTitle && candidateTitle && itemTitle === candidateTitle) return true;
+
+      return false;
+    });
+
+    if (!match) return item;
+
+    return {
+      ...item,
+      cover_url: item.cover_url || match.cover_url || "",
+      aliases: uniqueArray([...safeArray(item.aliases), ...safeArray(match.aliases)]),
+      external_ids: {
+        ...(match.external_ids || {}),
+        ...(item.external_ids || {})
+      }
+    };
+  });
 }
 
 async function searchBooks(query) {
@@ -357,38 +314,33 @@ async function searchBooks(query) {
     return [];
   }
 
+  const [olResult, wdResult] = await Promise.allSettled([
+    fetchOpenLibraryByTitle(cleanQuery),
+    fetchWikidataCandidates(cleanQuery)
+  ]);
+
+  const openLibraryItems =
+    olResult.status === "fulfilled"
+      ? safeArray(olResult.value).map(mapOpenLibraryDoc)
+      : [];
+
   let wikidataItems = [];
-  let openLibraryItems = [];
 
-  try {
-    const wikidataCandidates = await fetchWikidataCandidates(cleanQuery);
-    const wikidataIds = wikidataCandidates.map((item) => item.id).filter(Boolean);
-    const wikidataDetails = await fetchWikidataEntityDetails(wikidataIds);
+  if (wdResult.status === "fulfilled") {
+    const ids = safeArray(wdResult.value)
+      .map((item) => item.id)
+      .filter(Boolean);
 
-    wikidataItems = wikidataCandidates.map((candidate) =>
-      mapWikidataBookEntity(candidate, wikidataDetails[candidate.id] || {})
+    const detailsResult = await fetchWikidataEntityDetails(ids).catch(() => ({}));
+
+    wikidataItems = safeArray(wdResult.value).map((candidate) =>
+      mapWikidataBookEntity(candidate, detailsResult[candidate.id] || {})
     );
-  } catch (error) {
-    console.warn("Wikidata books search error:", error);
   }
 
-  try {
-    const wikidataIsbns = uniqueArray(
-      wikidataItems.flatMap((item) => safeArray(item?.external_ids?.isbn))
-    );
+  const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
 
-    const [byTitle, byIsbn] = await Promise.all([
-      fetchOpenLibraryByTitle(cleanQuery),
-      fetchOpenLibraryByIsbn(wikidataIsbns)
-    ]);
-
-    openLibraryItems = [...byTitle, ...byIsbn].map(mapOpenLibraryDoc);
-    wikidataItems = enrichBookItems(wikidataItems, openLibraryItems);
-  } catch (error) {
-    console.warn("Open Library books search error:", error);
-  }
-
-  return dedupeByCanonicalKey([...wikidataItems, ...openLibraryItems])
+  return dedupeByCanonicalKey([...openLibraryItems, ...enrichedWikidata])
     .map((item) => ({
       ...item,
       score: scoreBookResult(cleanQuery, item)
@@ -435,33 +387,19 @@ function mapTmdbItem(item = {}) {
     description_en: "",
     aliases: uniqueArray([title, originalTitle]),
     external_ids: { tmdb: item.id },
-    score: 0
+    score: item.poster_path ? 20 : 0
   };
-}
-
-function scoreMovieLike(query, item) {
-  const q = compactString(query);
-  const title = compactString(item.title || "");
-  const original = compactString(item.original_title || "");
-
-  let score = 0;
-  if (title === q || original === q) score += 120;
-  if (title.startsWith(q) || original.startsWith(q)) score += 40;
-  if (title.includes(q) || original.includes(q)) score += 20;
-  if (item.cover_url) score += 8;
-  if (item.year) score += 4;
-
-  return score;
 }
 
 async function searchMoviesAndSeries(query) {
   const cleanQuery = normalizeQuery(query);
+
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
   }
 
   const url = new URL("https://api.themoviedb.org/3/search/multi");
-  url.searchParams.set("api_key", "fc8eab333882a74fe8c8a633e4676d98");
+  url.searchParams.set("api_key", TMDB_API_KEY);
   url.searchParams.set("query", cleanQuery);
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("language", "ru-RU");
@@ -472,7 +410,7 @@ async function searchMoviesAndSeries(query) {
   });
 
   if (!response.ok) {
-    throw new Error(`TMDB search failed: ${response.status}`);
+    throw new Error(`TMDB failed: ${response.status}`);
   }
 
   const payload = await response.json();
@@ -480,11 +418,6 @@ async function searchMoviesAndSeries(query) {
   return safeArray(payload?.results)
     .filter((item) => item?.media_type === "movie" || item?.media_type === "tv")
     .map(mapTmdbItem)
-    .map((item) => ({
-      ...item,
-      score: scoreMovieLike(cleanQuery, item)
-    }))
-    .sort((a, b) => b.score - a.score)
     .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
 }
 
@@ -499,7 +432,6 @@ function buildAniListGraphqlBody(query, type) {
         Page(page: 1, perPage: 12) {
           media(search: $search, type: $type) {
             id
-            type
             title {
               romaji
               english
@@ -553,33 +485,18 @@ function mapAniListItem(item = {}, category = "anime") {
       item?.title?.romaji
     ]),
     external_ids: { anilist: item.id },
-    score: 0
+    score: item?.coverImage?.large ? 20 : 0
   };
-}
-
-function scoreAnimeLike(query, item) {
-  const q = compactString(query);
-  const title = compactString(item.title || "");
-  const original = compactString(item.original_title || "");
-  const aliases = safeArray(item.aliases).map(compactString);
-
-  let score = 0;
-  if (title === q || original === q || aliases.includes(q)) score += 120;
-  if (title.startsWith(q) || original.startsWith(q)) score += 40;
-  if (title.includes(q) || original.includes(q)) score += 20;
-  if (item.cover_url) score += 8;
-  if (item.year) score += 4;
-
-  return score;
 }
 
 async function searchAnimeOrManga(query, category = "anime") {
   const cleanQuery = normalizeQuery(query);
+
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
   }
 
-  const response = await fetch("https://graphql.anilist.co", {
+  const response = await fetch(API_ENDPOINTS.ANILIST, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -589,18 +506,13 @@ async function searchAnimeOrManga(query, category = "anime") {
   });
 
   if (!response.ok) {
-    throw new Error(`AniList search failed: ${response.status}`);
+    throw new Error(`AniList failed: ${response.status}`);
   }
 
   const payload = await response.json();
 
   return safeArray(payload?.data?.Page?.media)
     .map((item) => mapAniListItem(item, category))
-    .map((item) => ({
-      ...item,
-      score: scoreAnimeLike(cleanQuery, item)
-    }))
-    .sort((a, b) => b.score - a.score)
     .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
 }
 
@@ -622,17 +534,12 @@ export async function runGlobalSearch(query) {
     searchAnimeOrManga(cleanQuery, "manga")
   ]);
 
-  const books = settled[0].status === "fulfilled" ? settled[0].value : [];
-  const moviesAndSeries = settled[1].status === "fulfilled" ? settled[1].value : [];
-  const anime = settled[2].status === "fulfilled" ? settled[2].value : [];
-  const manga = settled[3].status === "fulfilled" ? settled[3].value : [];
-
   return groupItems(
     dedupeByCanonicalKey([
-      ...books,
-      ...moviesAndSeries,
-      ...anime,
-      ...manga
+      ...(settled[0].status === "fulfilled" ? settled[0].value : []),
+      ...(settled[1].status === "fulfilled" ? settled[1].value : []),
+      ...(settled[2].status === "fulfilled" ? settled[2].value : []),
+      ...(settled[3].status === "fulfilled" ? settled[3].value : [])
     ])
   );
 }
@@ -644,11 +551,11 @@ export async function runCategorySearch(query, category) {
 
 export async function addSearchResultDirectlyToLibrary({ userId, item }) {
   if (!userId) {
-    throw new Error("User is required");
+    throw new Error("Нужно войти в аккаунт");
   }
 
   if (!item?.canonical_key) {
-    throw new Error("Search item is invalid");
+    throw new Error("Некорректная карточка");
   }
 
   return await addToUserLibrary({
