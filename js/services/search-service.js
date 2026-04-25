@@ -89,6 +89,44 @@ function openLibraryCoverUrlFromIsbn(isbn) {
   return isbn ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg` : "";
 }
 
+function openLibraryCoverUrlFromOlid(olid) {
+  return olid ? `https://covers.openlibrary.org/b/olid/${encodeURIComponent(olid)}-L.jpg` : "";
+}
+
+function normalizeOpenLibraryWorkKey(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("/works/")) {
+    return raw.replace("/works/", "");
+  }
+
+  return raw;
+}
+
+function buildOpenLibraryCover(doc = {}) {
+  if (doc.cover_i) {
+    return openLibraryCoverUrlFromId(doc.cover_i);
+  }
+
+  const isbn = safeArray(doc?.isbn)[0] || "";
+  if (isbn) {
+    return openLibraryCoverUrlFromIsbn(isbn);
+  }
+
+  const editionKey = safeArray(doc?.edition_key)[0] || "";
+  if (editionKey) {
+    return openLibraryCoverUrlFromOlid(editionKey);
+  }
+
+  const ia = safeArray(doc?.ia)[0] || "";
+  if (ia) {
+    return openLibraryCoverUrlFromOlid(ia);
+  }
+
+  return "";
+}
+
 /* =========================
    BOOKS
 ========================= */
@@ -97,6 +135,18 @@ async function fetchOpenLibraryByTitle(query) {
   const url = new URL("https://openlibrary.org/search.json");
   url.searchParams.set("title", query);
   url.searchParams.set("limit", "20");
+  url.searchParams.set("fields", [
+    "key",
+    "title",
+    "subtitle",
+    "alternative_title",
+    "author_name",
+    "first_publish_year",
+    "cover_i",
+    "isbn",
+    "edition_key",
+    "ia"
+  ].join(","));
 
   const response = await fetch(url.toString(), {
     headers: { Accept: "application/json" }
@@ -110,15 +160,54 @@ async function fetchOpenLibraryByTitle(query) {
   return payload?.docs || [];
 }
 
+async function fetchOpenLibraryWorkCover(workKey) {
+  const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
+  if (!normalizedWorkKey) return "";
+
+  try {
+    const response = await fetch(`https://openlibrary.org/works/${encodeURIComponent(normalizedWorkKey)}.json`, {
+      headers: { Accept: "application/json" }
+    });
+
+    if (!response.ok) return "";
+
+    const payload = await response.json();
+    const coverId = safeArray(payload?.covers).find(Boolean);
+
+    return coverId ? openLibraryCoverUrlFromId(coverId) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function enrichOpenLibraryItemsWithWorkCovers(items = []) {
+  const result = [];
+
+  for (const item of items) {
+    if (item.cover_url) {
+      result.push(item);
+      continue;
+    }
+
+    const work = item.external_ids?.openlibrary_work || "";
+    const cover = await fetchOpenLibraryWorkCover(work);
+
+    result.push({
+      ...item,
+      cover_url: cover || item.cover_url || ""
+    });
+  }
+
+  return result;
+}
+
 function mapOpenLibraryDoc(doc) {
   const workKey = typeof doc?.key === "string" ? doc.key : "";
-  const normalizedWorkKey = workKey.startsWith("/works/")
-    ? workKey.replace("/works/", "")
-    : workKey;
+  const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
 
-  const isbn = safeArray(doc?.isbn)[0] || "";
-  const coverFromId = openLibraryCoverUrlFromId(doc?.cover_i);
-  const coverFromIsbn = openLibraryCoverUrlFromIsbn(isbn);
+  const isbnList = uniqueArray([...safeArray(doc?.isbn).slice(0, 12)]);
+  const editionKeys = uniqueArray([...safeArray(doc?.edition_key).slice(0, 12)]);
+  const iaKeys = uniqueArray([...safeArray(doc?.ia).slice(0, 8)]);
 
   return {
     canonical_key: normalizedWorkKey
@@ -129,7 +218,7 @@ function mapOpenLibraryDoc(doc) {
     title: doc?.title || "",
     original_title: doc?.title || "",
     year: doc?.first_publish_year || null,
-    cover_url: coverFromId || coverFromIsbn || "",
+    cover_url: buildOpenLibraryCover(doc),
     description_ru: "",
     description_en: "",
     aliases: uniqueArray([
@@ -140,7 +229,9 @@ function mapOpenLibraryDoc(doc) {
     ]),
     external_ids: {
       openlibrary_work: normalizedWorkKey || null,
-      isbn: uniqueArray([...safeArray(doc?.isbn).slice(0, 8)])
+      isbn: isbnList,
+      edition_key: editionKeys,
+      ia: iaKeys
     },
     score: 0
   };
@@ -216,7 +307,7 @@ function extractIsbnValuesFromClaims(claims = {}) {
   return uniqueArray([
     ...safeArray(claims.P957).map((claim) => claim?.mainsnak?.datavalue?.value),
     ...safeArray(claims.P212).map((claim) => claim?.mainsnak?.datavalue?.value)
-  ]);
+  ].filter(Boolean));
 }
 
 function mapWikidataBookEntity(searchItem, details) {
@@ -228,6 +319,7 @@ function mapWikidataBookEntity(searchItem, details) {
   const titleRu = labels?.ru?.value || "";
   const titleEn = labels?.en?.value || "";
   const isbns = extractIsbnValuesFromClaims(claims);
+  const openLibraryWork = extractOpenLibraryWorkIdFromClaims(claims);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
@@ -249,7 +341,7 @@ function mapWikidataBookEntity(searchItem, details) {
     ]),
     external_ids: {
       wikidata: searchItem.id,
-      openlibrary_work: extractOpenLibraryWorkIdFromClaims(claims),
+      openlibrary_work: openLibraryWork,
       isbn: isbns
     },
     score: 0
@@ -268,7 +360,7 @@ function scoreBookResult(query, item) {
   if (title.startsWith(q)) score += 40;
   if (aliases.some((alias) => alias.startsWith(q))) score += 35;
   if (aliases.some((alias) => alias.includes(q))) score += 20;
-  if (item.cover_url) score += 25;
+  if (item.cover_url) score += 30;
   if (item.primary_source === "openlibrary") score += 12;
   if (item.year) score += 4;
 
@@ -319,10 +411,12 @@ async function searchBooks(query) {
     fetchWikidataCandidates(cleanQuery)
   ]);
 
-  const openLibraryItems =
+  let openLibraryItems =
     olResult.status === "fulfilled"
       ? safeArray(olResult.value).map(mapOpenLibraryDoc)
       : [];
+
+  openLibraryItems = await enrichOpenLibraryItemsWithWorkCovers(openLibraryItems);
 
   let wikidataItems = [];
 
