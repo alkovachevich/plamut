@@ -75,6 +75,7 @@ export const state = {
 
   searchQuery: "",
   searchResults: null,
+  searchContextCategory: null,
 
   theme: localStorage.getItem(LOCAL_STORAGE_KEYS.THEME) || DEFAULT_THEME,
   language: localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE) || DEFAULT_LANGUAGE,
@@ -172,16 +173,20 @@ export function closeSidebar() {
   setState({ sidebarOpen: false });
 }
 
-export function openSearchModal(initialQuery = "") {
+export function openSearchModal(initialQuery = "", options = {}) {
+  const contextCategory = typeof options.category === "string" ? options.category : null;
+
   setState({
     searchModalOpen: true,
-    searchQuery: initialQuery
+    searchQuery: initialQuery,
+    searchContextCategory: contextCategory || null
   });
 }
 
 export function closeSearchModal() {
   setState({
-    searchModalOpen: false
+    searchModalOpen: false,
+    searchContextCategory: null
   });
 }
 
