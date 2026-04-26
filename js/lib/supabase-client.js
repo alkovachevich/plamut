@@ -2,7 +2,8 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
 
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 45000;
+const AUTH_TIMEOUT_MS = 60000;
 
 function createClient() {
   if (!window.supabase) {
@@ -14,7 +15,13 @@ function createClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storage: window.localStorage
+      storage: window.localStorage,
+      flowType: "pkce"
+    },
+    global: {
+      headers: {
+        "X-Client-Info": "plamut-web"
+      }
     }
   });
 }
@@ -25,6 +32,10 @@ export function getSupabaseClient() {
   }
 
   return client;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -41,29 +52,64 @@ export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT
   });
 }
 
+export async function withRetry(factory, label = "Запрос", options = {}) {
+  const retries = Number.isFinite(Number(options.retries)) ? Number(options.retries) : 1;
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS;
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Number(options.delayMs) : 700;
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await withTimeout(factory(), label, timeoutMs);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < retries) {
+        await sleep(delayMs * (attempt + 1));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export async function getCurrentSession() {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase.auth.getSession(),
-    "Получение session",
-    30000
-  );
+  try {
+    const { data, error } = await withRetry(
+      () => supabase.auth.getSession(),
+      "Получение session",
+      {
+        retries: 2,
+        timeoutMs: AUTH_TIMEOUT_MS,
+        delayMs: 700
+      }
+    );
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+
+    return data?.session || null;
+  } catch (error) {
+    console.warn("getCurrentSession skipped:", error);
+    return null;
   }
-
-  return data?.session || null;
 }
 
 export async function getCurrentUser() {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase.auth.getUser(),
+  const { data, error } = await withRetry(
+    () => supabase.auth.getUser(),
     "Получение пользователя",
-    30000
+    {
+      retries: 2,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -76,10 +122,14 @@ export async function getCurrentUser() {
 export async function signInWithEmail(email, password) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase.auth.signInWithPassword({ email, password }),
+  const { data, error } = await withRetry(
+    () => supabase.auth.signInWithPassword({ email, password }),
     "Вход",
-    30000
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -92,10 +142,14 @@ export async function signInWithEmail(email, password) {
 export async function signUpWithEmail(email, password) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase.auth.signUp({ email, password }),
+  const { data, error } = await withRetry(
+    () => supabase.auth.signUp({ email, password }),
     "Регистрация",
-    30000
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -108,10 +162,14 @@ export async function signUpWithEmail(email, password) {
 export async function signOut() {
   const supabase = getSupabaseClient();
 
-  const { error } = await withTimeout(
-    supabase.auth.signOut(),
+  const { error } = await withRetry(
+    () => supabase.auth.signOut(),
     "Выход",
-    30000
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -126,14 +184,19 @@ export async function fetchUserProfile(userId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .maybeSingle(),
+  const { data, error } = await withRetry(
+    () =>
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle(),
     "Загрузка профиля",
-    30000
+    {
+      retries: 1,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -141,6 +204,15 @@ export async function fetchUserProfile(userId) {
   }
 
   return data || null;
+}
+
+export async function fetchUserProfileSafe(userId) {
+  try {
+    return await fetchUserProfile(userId);
+  } catch (error) {
+    console.warn("fetchUserProfileSafe skipped:", error);
+    return null;
+  }
 }
 
 export async function upsertUserProfile(profile) {
@@ -165,14 +237,19 @@ export async function upsertUserProfile(profile) {
     }
   });
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from("profiles")
-      .upsert(payload, { onConflict: "id" })
-      .select()
-      .single(),
+  const { data, error } = await withRetry(
+    () =>
+      supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" })
+        .select()
+        .single(),
     "Сохранение профиля",
-    30000
+    {
+      retries: 1,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -182,6 +259,15 @@ export async function upsertUserProfile(profile) {
   return data;
 }
 
+export async function upsertUserProfileSafe(profile) {
+  try {
+    return await upsertUserProfile(profile);
+  } catch (error) {
+    console.warn("upsertUserProfileSafe skipped:", error);
+    return null;
+  }
+}
+
 export async function updateUserPassword(newPassword) {
   if (!newPassword || newPassword.length < 6) {
     throw new Error("Пароль должен содержать минимум 6 символов");
@@ -189,10 +275,14 @@ export async function updateUserPassword(newPassword) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase.auth.updateUser({ password: newPassword }),
+  const { data, error } = await withRetry(
+    () => supabase.auth.updateUser({ password: newPassword }),
     "Смена пароля",
-    30000
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
   );
 
   if (error) {
@@ -228,15 +318,20 @@ export async function uploadAvatarImage(userId, file) {
   const safeName = sanitizeFilename(file.name || `avatar.${extension}`);
   const path = `${userId}/${Date.now()}-${safeName}`;
 
-  const { error: uploadError } = await withTimeout(
-    supabase.storage
-      .from("avatars")
-      .upload(path, file, {
-        cacheControl: "3600",
-        upsert: false
-      }),
+  const { error: uploadError } = await withRetry(
+    () =>
+      supabase.storage
+        .from("avatars")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false
+        }),
     "Загрузка аватара",
-    45000
+    {
+      retries: 1,
+      timeoutMs: 60000,
+      delayMs: 1000
+    }
   );
 
   if (uploadError) {
