@@ -15,36 +15,54 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const EDGE_FUNCTION_NAME = "plamut-universe-normalize";
 
 const RELATION_LABELS = {
-  direct_sequel: "Прямое продолжение",
-  direct_prequel: "Прямой приквел",
+  related_work: "Связанное",
+  same_universe: "Одна вселенная",
   adaptation: "Экранизация",
   source_material: "Источник",
+  sequel: "Продолжение",
+  prequel: "Приквел",
   spin_off: "Спинофф",
-  same_universe: "Одна вселенная",
+  remake: "Ремейк",
+  reboot: "Перезапуск",
+  chronology_next: "Следующее по хронологии",
+  chronology_previous: "Предыдущее по хронологии",
+  direct_sequel: "Прямое продолжение",
+  direct_prequel: "Прямой приквел",
   book_series: "Серия книг",
   release_order: "Порядок выхода",
   story_chronology: "Хронология событий",
-  related_work: "Связанное",
-  alternate_version: "Альтернативная версия",
-  reboot: "Перезапуск",
-  remake: "Ремейк"
+  alternate_version: "Альтернативная версия"
 };
 
 const RELATION_TYPES = new Set([
-  "direct_sequel",
-  "direct_prequel",
+  "related_work",
+  "same_universe",
   "adaptation",
   "source_material",
+  "sequel",
+  "prequel",
   "spin_off",
-  "same_universe",
+  "remake",
+  "reboot",
+  "chronology_next",
+  "chronology_previous",
+  "direct_sequel",
+  "direct_prequel",
   "book_series",
   "release_order",
   "story_chronology",
-  "related_work",
-  "alternate_version",
-  "reboot",
-  "remake"
+  "alternate_version"
 ]);
+
+
+const LEGACY_RELATION_FALLBACK_MAP = {
+  direct_sequel: "sequel",
+  direct_prequel: "prequel",
+  release_order: "related_work",
+  story_chronology: "related_work",
+  book_series: "related_work",
+  alternate_version: "related_work"
+};
 
 const ALLOWED_DB_SOURCES = new Set([
   "library",
@@ -91,6 +109,11 @@ function resolveDescription(entity = {}) {
 function normalizeRelationType(type = "") {
   const cleanType = cleanLower(type);
   return RELATION_TYPES.has(cleanType) ? cleanType : "related_work";
+}
+
+function toLegacyRelationType(type = "") {
+  const normalized = normalizeRelationType(type);
+  return LEGACY_RELATION_FALLBACK_MAP[normalized] || normalized;
 }
 
 function normalizeRelationSource(source = "") {
@@ -719,18 +742,54 @@ async function upsertMediaRelations(rows = []) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from("media_relations")
-      .upsert(uniqueRows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
-      .select(),
-    "Сохранение связей",
-    DEFAULT_TIMEOUT_MS
-  );
+  const tryUpsert = async (payloadRows = []) => {
+    const { data, error } = await withTimeout(
+      supabase
+        .from("media_relations")
+        .upsert(payloadRows, { onConflict: "from_entity_id,to_entity_id,relation_type" })
+        .select(),
+      "Сохранение связей",
+      DEFAULT_TIMEOUT_MS
+    );
 
-  if (error) throw error;
+    if (error) throw error;
+    return data || [];
+  };
 
-  return data || [];
+  try {
+    return await tryUpsert(uniqueRows);
+  } catch (error) {
+    const message = String(error?.message || "").toLowerCase();
+    const code = String(error?.code || "");
+
+    const isCheckConstraint = message.includes("relation_type_check") || code === "23514";
+
+    if (!isCheckConstraint) {
+      console.warn("upsertMediaRelations skipped:", error);
+      return [];
+    }
+
+    const legacyRows = uniqueRows.map((row) => ({
+      ...row,
+      relation_type: toLegacyRelationType(row.relation_type)
+    }));
+
+    const uniqueLegacyRows = Array.from(
+      new Map(
+        legacyRows.map((row) => [
+          `${row.from_entity_id}:${row.to_entity_id}:${row.relation_type}`,
+          row
+        ])
+      ).values()
+    );
+
+    try {
+      return await tryUpsert(uniqueLegacyRows);
+    } catch (legacyError) {
+      console.warn("upsertMediaRelations legacy fallback skipped:", legacyError);
+      return [];
+    }
+  }
 }
 
 async function markRelationsStatus(entityId, status, universeKey = null) {
