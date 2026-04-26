@@ -29,7 +29,9 @@ import {
   getSupabaseClient,
   getCurrentSession,
   fetchUserProfileSafe,
-  upsertUserProfileSafe
+  upsertUserProfileSafe,
+  setCachedSession,
+  clearCachedSession
 } from "./lib/supabase-client.js";
 
 const headerRoot = document.getElementById("app-header");
@@ -50,33 +52,13 @@ let lastAuthModalSignature = null;
 let lastRouteSignature = null;
 
 function hasRequiredRoots() {
-  return Boolean(
-    headerRoot &&
-      mainRoot &&
-      sidebarRoot &&
-      searchModalRoot &&
-      authModalRoot
-  );
+  return Boolean(headerRoot && mainRoot && sidebarRoot && searchModalRoot && authModalRoot);
 }
 
 function renderFatalAppError(message) {
   document.body.innerHTML = `
-    <div style="
-      min-height:100vh;
-      display:grid;
-      place-items:center;
-      padding:24px;
-      background:#111318;
-      color:#f3f5f8;
-      font-family:system-ui,-apple-system,sans-serif;
-    ">
-      <div style="
-        width:min(100%,560px);
-        background:#181b22;
-        border:1px solid #343c49;
-        border-radius:20px;
-        padding:24px;
-      ">
+    <div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#111318;color:#f3f5f8;font-family:system-ui,-apple-system,sans-serif;">
+      <div style="width:min(100%,560px);background:#181b22;border:1px solid #343c49;border-radius:20px;padding:24px;">
         <div style="font-size:22px;font-weight:800;margin-bottom:10px;">Plamut</div>
         <div style="font-size:15px;line-height:1.5;color:#c3cad5;">
           ${String(message || "Application error")}
@@ -185,11 +167,11 @@ function applyProfilePreferences(profile = null) {
   const nextTheme = normalizeTheme(profile?.preferred_theme || state.theme);
   const nextLanguage = normalizeLanguage(profile?.preferred_language || state.language);
 
-  if (nextTheme && nextTheme !== state.theme) {
+  if (nextTheme !== state.theme) {
     setTheme(nextTheme);
   }
 
-  if (nextLanguage && nextLanguage !== state.language) {
+  if (nextLanguage !== state.language) {
     setLanguage(nextLanguage);
   }
 }
@@ -217,10 +199,11 @@ async function applyAuthenticatedUser(user) {
   if (!user?.id) {
     logoutUser();
     clearCachedUser();
+    clearCachedSession();
     return;
   }
 
-  const cachedBeforeProfile = {
+  const fastUser = {
     id: user.id,
     email: user.email || null,
     username: buildUsername(user),
@@ -230,19 +213,19 @@ async function applyAuthenticatedUser(user) {
     preferred_language: normalizeLanguage(state.language)
   };
 
-  setUser(cachedBeforeProfile);
-  writeCachedUser(cachedBeforeProfile);
+  setUser(fastUser);
+  writeCachedUser(fastUser);
 
   const profile = await ensureUserProfile(user);
 
   const normalizedUser = {
     id: user.id,
     email: user.email || null,
-    username: profile?.username || cachedBeforeProfile.username,
-    display_name: profile?.display_name || cachedBeforeProfile.display_name,
-    avatar_url: profile?.avatar_url || cachedBeforeProfile.avatar_url,
-    preferred_theme: normalizeTheme(profile?.preferred_theme || cachedBeforeProfile.preferred_theme),
-    preferred_language: normalizeLanguage(profile?.preferred_language || cachedBeforeProfile.preferred_language)
+    username: profile?.username || fastUser.username,
+    display_name: profile?.display_name || fastUser.display_name,
+    avatar_url: profile?.avatar_url || fastUser.avatar_url,
+    preferred_theme: normalizeTheme(profile?.preferred_theme || fastUser.preferred_theme),
+    preferred_language: normalizeLanguage(profile?.preferred_language || fastUser.preferred_language)
   };
 
   applyProfilePreferences(normalizedUser);
@@ -253,9 +236,8 @@ async function applyAuthenticatedUser(user) {
 async function hydrateAuthStateSafely() {
   try {
     const session = await getCurrentSession();
-    const user = session?.user || null;
 
-    if (!user) {
+    if (!session?.user) {
       const cachedUser = readCachedUser();
 
       if (cachedUser?.id) {
@@ -270,7 +252,8 @@ async function hydrateAuthStateSafely() {
       return;
     }
 
-    await applyAuthenticatedUser(user);
+    setCachedSession(session);
+    await applyAuthenticatedUser(session.user);
   } catch (error) {
     console.warn("Auth hydration skipped:", error);
 
@@ -298,16 +281,17 @@ function bindAuthListenerSafely() {
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
+        setCachedSession(session || null);
+
         if (event === "SIGNED_OUT") {
           logoutUser();
           clearCachedUser();
+          clearCachedSession();
           closeAuthModal();
           return;
         }
 
-        if (!session?.user) {
-          return;
-        }
+        if (!session?.user) return;
 
         await applyAuthenticatedUser(session.user);
 
@@ -416,13 +400,7 @@ function renderRouteSafely() {
     console.error("Route render error:", error);
 
     mainRoot.innerHTML = `
-      <div style="
-        padding:24px;
-        border:1px solid var(--border);
-        border-radius:18px;
-        background:var(--surface);
-        color:var(--text-soft);
-      ">
+      <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
         Не удалось открыть страницу. Вернись на главную.
       </div>
     `;
