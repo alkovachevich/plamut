@@ -6,6 +6,38 @@ const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 const USER_MEDIA_TABLE = "user_media";
 
+const DEFAULT_TIMEOUT_MS = 12000;
+
+const USER_MEDIA_WITH_ENTITY_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at,
+  media_entities (
+    id,
+    canonical_key,
+    category,
+    primary_source,
+    title_primary,
+    title_ru,
+    title_en,
+    original_title,
+    year,
+    cover_url,
+    description_ru,
+    description_en,
+    external_ids,
+    meta,
+    universe_key,
+    relations_built_at,
+    relations_status
+  )
+`;
+
 function cleanText(value = "") {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
 }
@@ -61,10 +93,7 @@ function buildOriginalTitle(entity = {}) {
 
 function buildExternalIds(entity = {}) {
   const externalIds = normalizeJson(entity.external_ids, {});
-
-  const result = {
-    ...externalIds
-  };
+  const result = { ...externalIds };
 
   if (result.openlibrary_work) {
     result.openlibrary_work = normalizeOpenLibraryWork(result.openlibrary_work);
@@ -86,13 +115,17 @@ function buildCanonicalKey(entity = {}) {
   if (category && ids.imdb) return `${category}:imdb:${ids.imdb}`.toLowerCase();
   if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
   if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
+
   if (category && ids.openlibrary_work) {
     return `${category}:openlibrary:${ids.openlibrary_work}`.toLowerCase();
   }
 
   const title = normalizeString(
     buildTitlePrimary(entity) || buildOriginalTitle(entity)
-  ).replace(/[^a-z0-9а-яё]+/gi, "-");
+  )
+    .replace(/[^a-z0-9а-яё]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 
   const year = normalizeYear(entity.year);
 
@@ -160,103 +193,6 @@ export function normalizeEntity(entity = {}) {
   };
 }
 
-export async function getEntityByCanonicalKey(canonicalKey) {
-  const key = cleanText(canonicalKey).toLowerCase();
-  if (!key) return null;
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select("*")
-      .eq("canonical_key", key)
-      .maybeSingle(),
-    "Загрузка карточки из БД"
-  );
-
-  if (error) throw error;
-
-  return data || null;
-}
-
-async function findDuplicateEntity(entity = {}) {
-  const supabase = getSupabaseClient();
-  const ids = entity.external_ids || {};
-
-  const possibleKeys = [
-    entity.canonical_key,
-    ids.wikidata ? `${entity.category}:wikidata:${ids.wikidata}` : "",
-    ids.tmdb ? `${entity.category}:tmdb:${ids.tmdb}` : "",
-    ids.imdb ? `${entity.category}:imdb:${ids.imdb}` : "",
-    ids.anilist ? `${entity.category}:anilist:${ids.anilist}` : "",
-    ids.mal ? `${entity.category}:mal:${ids.mal}` : "",
-    ids.openlibrary_work ? `${entity.category}:openlibrary:${ids.openlibrary_work}` : ""
-  ]
-    .map((key) => cleanText(key).toLowerCase())
-    .filter(Boolean);
-
-  if (possibleKeys.length) {
-    const { data, error } = await withTimeout(
-      supabase
-        .from(MEDIA_ENTITIES_TABLE)
-        .select("*")
-        .in("canonical_key", uniqueArray(possibleKeys))
-        .limit(1),
-      "Поиск дубля сущности"
-    );
-
-    if (!error && data?.[0]) return data[0];
-  }
-
-  return null;
-}
-
-function buildAliasRows(entityId, aliases = [], source = "entity") {
-  const normalizedSource = cleanText(source) || "entity";
-
-  return normalizeArray(aliases)
-    .map((alias) => {
-      const aliasNormalized = normalizeString(alias);
-      if (!aliasNormalized) return null;
-
-      return {
-        entity_id: entityId,
-        alias,
-        alias_normalized: aliasNormalized,
-        source: normalizedSource
-      };
-    })
-    .filter(Boolean);
-}
-
-export async function saveAliases(entityId, aliases = [], source = "entity") {
-  if (!entityId) {
-    throw new Error("saveAliases: entityId is required");
-  }
-
-  const rows = buildAliasRows(entityId, aliases, source);
-
-  if (!rows.length) return [];
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(ENTITY_ALIASES_TABLE)
-      .upsert(rows, { onConflict: "entity_id,alias_normalized" })
-      .select("*"),
-    "Сохранение алиасов"
-  );
-
-  if (error) {
-    console.warn("Aliases save skipped:", error);
-    return [];
-  }
-
-  return data || [];
-}
-
 function buildEntityPayload(entity) {
   return {
     canonical_key: entity.canonical_key,
@@ -308,6 +244,115 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
   };
 }
 
+function possibleCanonicalKeys(entity = {}) {
+  const ids = entity.external_ids || {};
+
+  return uniqueArray(
+    [
+      entity.canonical_key,
+      ids.wikidata ? `${entity.category}:wikidata:${ids.wikidata}` : "",
+      ids.tmdb ? `${entity.category}:tmdb:${ids.tmdb}` : "",
+      ids.imdb ? `${entity.category}:imdb:${ids.imdb}` : "",
+      ids.anilist ? `${entity.category}:anilist:${ids.anilist}` : "",
+      ids.mal ? `${entity.category}:mal:${ids.mal}` : "",
+      ids.openlibrary_work ? `${entity.category}:openlibrary:${ids.openlibrary_work}` : ""
+    ]
+      .map((key) => cleanText(key).toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+export async function getEntityByCanonicalKey(canonicalKey) {
+  const key = cleanText(canonicalKey).toLowerCase();
+  if (!key) return null;
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .select("*")
+      .eq("canonical_key", key)
+      .maybeSingle(),
+    "Загрузка карточки из БД",
+    DEFAULT_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return data || null;
+}
+
+async function findDuplicateEntity(entity = {}) {
+  const keys = possibleCanonicalKeys(entity);
+  if (!keys.length) return null;
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .select("*")
+      .in("canonical_key", keys)
+      .limit(1),
+    "Поиск дубля сущности",
+    DEFAULT_TIMEOUT_MS
+  ).catch((error) => ({ data: [], error }));
+
+  if (error) {
+    console.warn("findDuplicateEntity skipped:", error);
+    return null;
+  }
+
+  return data?.[0] || null;
+}
+
+function buildAliasRows(entityId, aliases = [], source = "entity") {
+  const normalizedSource = cleanText(source) || "entity";
+
+  return normalizeArray(aliases)
+    .map((alias) => {
+      const aliasNormalized = normalizeString(alias);
+      if (!aliasNormalized) return null;
+
+      return {
+        entity_id: entityId,
+        alias,
+        alias_normalized: aliasNormalized,
+        source: normalizedSource
+      };
+    })
+    .filter(Boolean);
+}
+
+export async function saveAliases(entityId, aliases = [], source = "entity") {
+  if (!entityId) {
+    throw new Error("saveAliases: entityId is required");
+  }
+
+  const rows = buildAliasRows(entityId, aliases, source);
+
+  if (!rows.length) return [];
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(ENTITY_ALIASES_TABLE)
+      .upsert(rows, { onConflict: "entity_id,alias_normalized" })
+      .select("*"),
+    "Сохранение алиасов",
+    DEFAULT_TIMEOUT_MS
+  ).catch((error) => ({ data: [], error }));
+
+  if (error) {
+    console.warn("Aliases save skipped:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
 export async function saveEntityIfMissing(inputEntity) {
   const entity = normalizeEntity(inputEntity);
   const supabase = getSupabaseClient();
@@ -332,12 +377,15 @@ export async function saveEntityIfMissing(inputEntity) {
       .upsert(payload, { onConflict: "canonical_key" })
       .select("*")
       .single(),
-    "Сохранение сущности"
+    "Сохранение сущности",
+    DEFAULT_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  await saveAliases(data.id, entity.aliases, entity.primary_source);
+  saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
+    console.warn("saveEntityIfMissing aliases skipped:", error);
+  });
 
   return data;
 }
@@ -352,11 +400,12 @@ export async function getUserLibraryEntry(userId, entityId) {
   const { data, error } = await withTimeout(
     supabase
       .from(USER_MEDIA_TABLE)
-      .select("*")
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .eq("user_id", cleanUserId)
       .eq("entity_id", entityId)
       .maybeSingle(),
-    "Проверка библиотеки"
+    "Проверка библиотеки",
+    DEFAULT_TIMEOUT_MS
   );
 
   if (error) throw error;
@@ -389,15 +438,14 @@ export async function addToUserLibrary({
   const existingEntry = await getUserLibraryEntry(cleanUserId, savedEntity.id);
 
   if (existingEntry) {
-    updateCachedLibraryItem(cleanUserId, {
-      ...existingEntry,
-      media_entities: savedEntity
+    updateCachedLibraryItem(cleanUserId, existingEntry, {
+      category: existingEntry.category || savedEntity.category
     });
 
     return {
       added: false,
       alreadyExists: true,
-      entity: savedEntity,
+      entity: existingEntry.media_entities || savedEntity,
       userMedia: existingEntry
     };
   }
@@ -416,22 +464,22 @@ export async function addToUserLibrary({
     supabase
       .from(USER_MEDIA_TABLE)
       .insert(insertPayload)
-      .select("*")
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .single(),
-    "Добавление в библиотеку"
+    "Добавление в библиотеку",
+    DEFAULT_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  updateCachedLibraryItem(cleanUserId, {
-    ...data,
-    media_entities: savedEntity
+  updateCachedLibraryItem(cleanUserId, data, {
+    category: data.category || savedEntity.category
   });
 
   return {
     added: true,
     alreadyExists: false,
-    entity: savedEntity,
+    entity: data.media_entities || savedEntity,
     userMedia: data
   };
 }
