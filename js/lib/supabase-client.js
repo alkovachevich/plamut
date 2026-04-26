@@ -115,26 +115,29 @@ export async function getCurrentSession() {
     return sessionPromise;
   }
 
-  const supabase = getSupabaseClient();
+  sessionPromise = (async () => {
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await withTimeout(
+        supabase.auth.getSession(),
+        "Получение сессии",
+        SESSION_TIMEOUT_MS
+      );
 
-  sessionPromise = withTimeout(
-    supabase.auth.getSession(),
-    "Получение сессии",
-    SESSION_TIMEOUT_MS
-  )
-    .then(({ data, error }) => {
-      if (error) throw error;
+      if (error) {
+        console.warn("getCurrentSession: auth.getSession returned error", error);
+        return cachedSession || null;
+      }
 
       cachedSession = data?.session || null;
       return cachedSession;
-    })
-    .catch((error) => {
+    } catch (error) {
       console.warn("getCurrentSession skipped:", error);
       return cachedSession || null;
-    })
-    .finally(() => {
+    } finally {
       sessionPromise = null;
-    });
+    }
+  })();
 
   return sessionPromise;
 }
