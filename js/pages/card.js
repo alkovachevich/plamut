@@ -124,11 +124,12 @@ function buildFallbackEntity(params = {}) {
     original_title: key,
     year: null,
     cover_url: "",
-    description_ru: "Не удалось быстро загрузить данные из базы. Обнови страницу или открой карточку позже.",
+    description_ru: "Не удалось быстро загрузить данные из базы. Обнови страницу или открой карточку через поиск.",
     description_en: "",
     external_ids: {},
     meta: {},
-    relations_status: "unknown"
+    relations_status: "unknown",
+    __fallback: true
   };
 }
 
@@ -136,11 +137,17 @@ async function loadEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
+  console.log("CARD: load entity start", { key, userId, params });
+
   const cachedEntity = getCachedEntityByKey(userId, key);
-  if (cachedEntity?.canonical_key) return cachedEntity;
+  if (cachedEntity?.canonical_key) {
+    console.log("CARD: entity from cache", cachedEntity);
+    return cachedEntity;
+  }
 
   const temp = getTemporaryCardItem();
   if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
+    console.log("CARD: entity from temp", temp);
     return temp;
   }
 
@@ -154,13 +161,15 @@ async function loadEntity(params = {}) {
     );
 
     if (fromDb) {
+      console.log("CARD: entity from DB", fromDb);
       clearTemporaryCardItem();
       return fromDb;
     }
   } catch (error) {
-    console.warn("DB card load skipped:", error);
+    console.warn("CARD: DB card load skipped", error);
   }
 
+  console.warn("CARD: fallback entity used", { key, params });
   return buildFallbackEntity(params);
 }
 
@@ -340,7 +349,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
               ${userMedia ? "В библиотеке" : "Добавить"}
             </button>
 
-            <button class="card-btn" type="button" data-action="build" ${entity.id ? "" : "disabled"}>
+            <button class="card-btn" type="button" data-action="build">
               Построить вселенную
             </button>
           </div>
@@ -486,7 +495,7 @@ async function hydrateUserMediaState(root, userId, entity) {
 
     return loaded || null;
   } catch (error) {
-    console.warn("Card user media load skipped:", error);
+    console.warn("CARD: user media load skipped", error);
     return null;
   }
 }
@@ -503,9 +512,64 @@ async function hydrateRelatedItems(root, userId, entity, userMedia) {
     renderRelated(root, relatedItems);
     return relatedItems;
   } catch (error) {
-    console.warn("Card related items skipped:", error);
+    console.warn("CARD: related items skipped", error);
     return [];
   }
+}
+
+async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
+  console.log("CARD BUILD: ensure entity saved start", {
+    userId,
+    entity,
+    userMedia
+  });
+
+  if (!userId) {
+    throw new Error("Нет пользователя");
+  }
+
+  if (entity?.__fallback) {
+    throw new Error("Карточка не загружена из БД. Открой её через поиск и попробуй снова.");
+  }
+
+  if (entity?.id && userMedia?.id) {
+    return {
+      entity,
+      userMedia
+    };
+  }
+
+  const result = await addToUserLibrary({
+    userId,
+    entity
+  });
+
+  const nextEntity = result?.entity || result?.userMedia?.media_entities || entity;
+  const nextUserMedia = result?.userMedia || userMedia || null;
+
+  console.log("CARD BUILD: addToUserLibrary result", {
+    result,
+    nextEntity,
+    nextUserMedia
+  });
+
+  if (!nextEntity?.id) {
+    throw new Error("Entity не получила id после сохранения");
+  }
+
+  if (!nextUserMedia?.id) {
+    throw new Error("User media не создан после сохранения");
+  }
+
+  updateCachedLibraryItem(userId, {
+    ...nextUserMedia,
+    media_entities: nextEntity
+  });
+
+  return {
+    entity: nextEntity,
+    userMedia: nextUserMedia
+  };
 }
 
 export async function renderCardPage(root, params = {}) {
@@ -519,12 +583,13 @@ export async function renderCardPage(root, params = {}) {
   }
 
   const userId = state.user?.id || "";
-  let userMedia = getCachedUserMedia(userId, entity);
+  let currentEntity = entity;
+  let userMedia = getCachedUserMedia(userId, currentEntity);
   let pollingTimer = null;
   let destroyed = false;
 
   renderCard(root, {
-    entity,
+    entity: currentEntity,
     userMedia,
     relatedItems: []
   });
@@ -533,27 +598,35 @@ export async function renderCardPage(root, params = {}) {
   const addButton = root.querySelector('[data-action="add"]');
   const buildButton = root.querySelector('[data-action="build"]');
 
-  if (!entity.id && statusNode) {
-    statusNode.textContent = "Карточка не загружена из БД. Действия временно недоступны.";
+  console.log("CARD: rendered", {
+    userId,
+    entity: currentEntity,
+    userMedia,
+    addButton: Boolean(addButton),
+    buildButton: Boolean(buildButton)
+  });
+
+  if (currentEntity.__fallback && statusNode) {
+    statusNode.textContent = "Карточка не загружена из БД. Открой её через поиск или обнови позже.";
   }
 
   bindRelated(root);
 
-  if (userId && entity.id) {
+  if (userId && currentEntity.id) {
     loadUserLibrary(userId, {
-      category: entity.category || "",
+      category: currentEntity.category || "",
       mode: "list",
       allowStale: true,
       backgroundRefresh: false
     }).catch(() => []);
 
-    hydrateUserMediaState(root, userId, entity).then((loadedUserMedia) => {
+    hydrateUserMediaState(root, userId, currentEntity).then((loadedUserMedia) => {
       if (destroyed) return;
 
       userMedia = loadedUserMedia || userMedia;
 
       if (userMedia?.id) {
-        hydrateRelatedItems(root, userId, entity, userMedia);
+        hydrateRelatedItems(root, userId, currentEntity, userMedia);
       }
     });
   }
@@ -570,6 +643,7 @@ export async function renderCardPage(root, params = {}) {
 
     if (!job?.id) return;
 
+    console.log("CARD BUILD: polling started", job);
     updateProgressUI(root, job);
 
     pollingTimer = setInterval(async () => {
@@ -578,10 +652,14 @@ export async function renderCardPage(root, params = {}) {
         return;
       }
 
-      const updated = await getUniverseBuildJob(job.id).catch(() => null);
+      const updated = await getUniverseBuildJob(job.id).catch((error) => {
+        console.warn("CARD BUILD: poll failed", error);
+        return null;
+      });
 
       if (!updated) return;
 
+      console.log("CARD BUILD: poll update", updated);
       updateProgressUI(root, updated);
 
       if (isFinished(updated)) {
@@ -612,14 +690,15 @@ export async function renderCardPage(root, params = {}) {
 
       const result = await addToUserLibrary({
         userId,
-        entity
+        entity: currentEntity
       });
 
       userMedia = result.userMedia || userMedia;
+      currentEntity = result.entity || result.userMedia?.media_entities || currentEntity;
 
       updateCachedLibraryItem(userId, {
         ...userMedia,
-        media_entities: result.entity || entity
+        media_entities: currentEntity
       });
 
       updateUserMediaUI(root, userMedia);
@@ -629,61 +708,69 @@ export async function renderCardPage(root, params = {}) {
         : "Добавлено в библиотеку";
 
       if (userMedia?.id) {
-        hydrateRelatedItems(root, userId, result.entity || entity, userMedia);
+        hydrateRelatedItems(root, userId, currentEntity, userMedia);
       }
     } catch (error) {
-      console.error("Add to library error:", error);
-      statusNode.textContent = "Ошибка добавления";
+      console.error("CARD: add to library error", error);
+      statusNode.textContent = error.message || "Ошибка добавления";
       addButton.disabled = false;
     }
   });
 
   buildButton?.addEventListener("click", async () => {
+    console.log("CARD BUILD: click", {
+      userId,
+      currentEntity,
+      userMedia
+    });
+
     if (!userId) {
       openAuthModal("login");
       return;
     }
 
-    if (!entity.id) {
-      statusNode.textContent = "Нельзя построить вселенную: карточка не загружена из БД.";
-      return;
-    }
-
     try {
       buildButton.disabled = true;
+      statusNode.textContent = "Сохраняем карточку…";
+
+      const saved = await ensureEntitySavedForBuild({
+        userId,
+        entity: currentEntity,
+        userMedia
+      });
+
+      currentEntity = saved.entity;
+      userMedia = saved.userMedia;
+
+      updateUserMediaUI(root, userMedia);
+
       statusNode.textContent = "Создаём задачу построения…";
 
-      let buildEntity = entity;
-
-      if (!userMedia?.id) {
-        const added = await addToUserLibrary({
-          userId,
-          entity
-        });
-
-        userMedia = added.userMedia || userMedia;
-        buildEntity = added.entity || entity;
-
-        updateCachedLibraryItem(userId, {
-          ...userMedia,
-          media_entities: buildEntity
-        });
-
-        updateUserMediaUI(root, userMedia);
-      }
+      console.log("CARD BUILD: creating job", {
+        userId,
+        entityId: currentEntity.id,
+        canonicalKey: currentEntity.canonical_key,
+        universeKey: currentEntity.universe_key
+      });
 
       const job = await createUniverseBuildJob({
         userId,
-        entityId: buildEntity.id,
-        canonicalKey: buildEntity.canonical_key || "",
-        universeKey: buildEntity.universe_key || ""
+        entityId: currentEntity.id,
+        canonicalKey: currentEntity.canonical_key || "",
+        universeKey: currentEntity.universe_key || ""
       });
+
+      console.log("CARD BUILD: job created", job);
 
       updateProgressUI(root, job);
       startPolling(job);
 
-      buildUniverseForJob(job, buildEntity)
+      statusNode.textContent = "Строим вселенную…";
+
+      buildUniverseForJob(job, currentEntity)
         .then((result) => {
+          console.log("CARD BUILD: build result", result);
+
           if (destroyed || !result?.universe_key) return;
 
           navigate("/universe", {
@@ -691,13 +778,13 @@ export async function renderCardPage(root, params = {}) {
           });
         })
         .catch((error) => {
-          console.error("Universe background build failed:", error);
-          if (statusNode) statusNode.textContent = "Ошибка построения вселенной";
+          console.error("CARD BUILD: build failed", error);
+          if (statusNode) statusNode.textContent = error.message || "Ошибка построения вселенной";
           if (buildButton) buildButton.disabled = false;
         });
     } catch (error) {
-      console.error("Build universe job error:", error);
-      statusNode.textContent = "Ошибка запуска построения";
+      console.error("CARD BUILD: start failed", error);
+      statusNode.textContent = error.message || "Ошибка запуска построения";
       buildButton.disabled = false;
     }
   });
