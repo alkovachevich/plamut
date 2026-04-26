@@ -201,7 +201,7 @@ export async function createUniverseBuildJob({
   const job = normalizeJob(data);
 
   if (!job?.id) {
-    console.error("createUniverseBuildJob invalid response:", data);
+    console.warn("createUniverseBuildJob invalid response:", data);
     throw new Error("Задача построения не была создана");
   }
 
