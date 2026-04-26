@@ -20,8 +20,8 @@ import { renderGuestPage } from "./pages/guest.js";
 import {
   getSupabaseClient,
   getCurrentSession,
-  fetchUserProfile,
-  upsertUserProfile
+  fetchUserProfileSafe,
+  upsertUserProfileSafe
 } from "./lib/supabase-client.js";
 
 const headerRoot = document.getElementById("app-header");
@@ -166,21 +166,18 @@ function buildAvatarUrl(user, profile = null) {
 async function ensureUserProfile(user) {
   if (!user?.id) return null;
 
-  try {
-    const existingProfile = await fetchUserProfile(user.id);
+  const existingProfile = await fetchUserProfileSafe(user.id);
 
-    const payload = {
-      id: user.id,
-      username: existingProfile?.username || buildUsername(user),
-      display_name: existingProfile?.display_name || buildDisplayName(user, existingProfile),
-      avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile)
-    };
+  const fallbackProfile = {
+    id: user.id,
+    username: existingProfile?.username || buildUsername(user),
+    display_name: existingProfile?.display_name || buildDisplayName(user, existingProfile),
+    avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile)
+  };
 
-    return await upsertUserProfile(payload);
-  } catch (error) {
-    console.error("ensureUserProfile error:", error);
-    return null;
-  }
+  const savedProfile = await upsertUserProfileSafe(fallbackProfile);
+
+  return savedProfile || fallbackProfile;
 }
 
 async function applyAuthenticatedUser(user) {
@@ -190,14 +187,25 @@ async function applyAuthenticatedUser(user) {
     return;
   }
 
+  const cachedBeforeProfile = {
+    id: user.id,
+    email: user.email || null,
+    username: buildUsername(user),
+    display_name: buildDisplayName(user),
+    avatar_url: buildAvatarUrl(user)
+  };
+
+  setUser(cachedBeforeProfile);
+  writeCachedUser(cachedBeforeProfile);
+
   const profile = await ensureUserProfile(user);
 
   const normalizedUser = {
     id: user.id,
     email: user.email || null,
-    username: profile?.username || buildUsername(user),
-    display_name: profile?.display_name || buildDisplayName(user, profile),
-    avatar_url: profile?.avatar_url || buildAvatarUrl(user, profile)
+    username: profile?.username || cachedBeforeProfile.username,
+    display_name: profile?.display_name || cachedBeforeProfile.display_name,
+    avatar_url: profile?.avatar_url || cachedBeforeProfile.avatar_url
   };
 
   setUser(normalizedUser);
@@ -210,14 +218,24 @@ async function hydrateAuthStateSafely() {
     const user = session?.user || null;
 
     if (!user) {
-      logoutUser();
-      clearCachedUser();
+      const cachedUser = readCachedUser();
+
+      if (cachedUser?.id) {
+        setUser(cachedUser);
+      }
+
       return;
     }
 
     await applyAuthenticatedUser(user);
   } catch (error) {
-    console.error("Auth hydration skipped:", error);
+    console.warn("Auth hydration skipped:", error);
+
+    const cachedUser = readCachedUser();
+
+    if (cachedUser?.id) {
+      setUser(cachedUser);
+    }
   }
 }
 
@@ -232,10 +250,14 @@ function bindAuthListenerSafely() {
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        if (event === "SIGNED_OUT" || !session?.user) {
+        if (event === "SIGNED_OUT") {
           logoutUser();
           clearCachedUser();
           closeAuthModal();
+          return;
+        }
+
+        if (!session?.user) {
           return;
         }
 
@@ -250,13 +272,13 @@ function bindAuthListenerSafely() {
           closeAuthModal();
         }
       } catch (error) {
-        console.error("Auth state change error:", error);
+        console.warn("Auth state change skipped:", error);
       }
     });
 
     authSubscription = data?.subscription || null;
   } catch (error) {
-    console.error("Auth listener skipped:", error);
+    console.warn("Auth listener skipped:", error);
   }
 }
 
