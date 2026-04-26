@@ -232,10 +232,50 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
     return left;
   };
 
+  const existingCategory = cleanText(existing.category).toLowerCase();
+  const incomingCategory = cleanText(incoming.category).toLowerCase();
+  const isBookExisting = existingCategory === "books";
+  const isBookIncoming = incomingCategory === "books";
+  const isBookEntity = isBookExisting || isBookIncoming;
+
+  const looksLikeScreenDescription = (value = "") => {
+    const text = cleanText(value).toLowerCase();
+    if (!text) return false;
+    return ["фильм", "film", "movie", "сериал", "tv series", "телесериал"].some((word) =>
+      text.includes(word)
+    );
+  };
+
+  const pickBookDescription = (a = "", b = "") => {
+    const left = cleanText(a);
+    const right = cleanText(b);
+
+    if (!left) return right;
+    if (!right) return left;
+
+    const leftNoise = looksLikeScreenDescription(left);
+    const rightNoise = looksLikeScreenDescription(right);
+
+    if (!leftNoise && rightNoise) return left;
+    if (leftNoise && !rightNoise) return right;
+
+    return right.length > left.length ? right : left;
+  };
+
+  const resolvedCategory =
+    isBookExisting ? "books" : existingCategory || incomingCategory || "";
+
+  const resolvedPrimarySource = isBookEntity
+    ? (cleanText(existing.primary_source).toLowerCase() === "openlibrary" ||
+      cleanText(incoming.primary_source).toLowerCase() === "openlibrary"
+      ? "openlibrary"
+      : incoming.primary_source || existing.primary_source || "manual")
+    : incoming.primary_source || existing.primary_source || "manual";
+
   return {
     canonical_key: existing.canonical_key || incoming.canonical_key,
-    category: existing.category || incoming.category || "",
-    primary_source: incoming.primary_source || existing.primary_source || "manual",
+    category: resolvedCategory,
+    primary_source: resolvedPrimarySource,
 
     title_primary: pickBetterText(existing.title_primary, incoming.title_primary),
     title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
@@ -245,8 +285,12 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
     year: incoming.year ?? existing.year ?? null,
     cover_url: pickBetterCover(existing.cover_url, incoming.cover_url),
 
-    description_ru: pickBetterText(existing.description_ru, incoming.description_ru),
-    description_en: pickBetterText(existing.description_en, incoming.description_en),
+    description_ru: isBookEntity
+      ? pickBookDescription(existing.description_ru, incoming.description_ru)
+      : pickBetterText(existing.description_ru, incoming.description_ru),
+    description_en: isBookEntity
+      ? pickBookDescription(existing.description_en, incoming.description_en)
+      : pickBetterText(existing.description_en, incoming.description_en),
 
     external_ids: {
       ...(existing.external_ids || {}),
