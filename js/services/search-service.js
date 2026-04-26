@@ -199,6 +199,28 @@ function pickBetterText(existingValue = "", incomingValue = "") {
   return b.length > a.length ? b : a;
 }
 
+function pickBooksDescription(existing = {}, incoming = {}, field = "description_ru") {
+  const existingText = String(existing?.[field] || "").trim();
+  const incomingText = String(incoming?.[field] || "").trim();
+
+  if (!existingText) return incomingText;
+  if (!incomingText) return existingText;
+
+  const existingNoise = hasBookScreenDescriptionNoise({ [field]: existingText });
+  const incomingNoise = hasBookScreenDescriptionNoise({ [field]: incomingText });
+
+  if (existingNoise && !incomingNoise) return incomingText;
+  if (!existingNoise && incomingNoise) return existingText;
+
+  const existingSource = String(existing?.primary_source || "").trim().toLowerCase();
+  const incomingSource = String(incoming?.primary_source || "").trim().toLowerCase();
+
+  if (existingSource === "openlibrary" && incomingSource !== "openlibrary") return existingText;
+  if (incomingSource === "openlibrary" && existingSource !== "openlibrary") return incomingText;
+
+  return incomingText.length > existingText.length ? incomingText : existingText;
+}
+
 function mergeItems(existing, incoming) {
   if (!existing?.category || !incoming?.category || existing.category !== incoming.category) {
     console.warn("merge conflict: category mismatch", existing?.canonical_key, incoming?.canonical_key);
@@ -229,8 +251,14 @@ function mergeItems(existing, incoming) {
     original_title: pickBetterText(existing.original_title, incoming.original_title),
     year: existing.year || incoming.year || null,
     cover_url: existing.cover_url || incoming.cover_url || "",
-    description_ru: pickBetterText(existing.description_ru, incoming.description_ru),
-    description_en: pickBetterText(existing.description_en, incoming.description_en),
+    description_ru:
+      existing.category === "books"
+        ? pickBooksDescription(existing, incoming, "description_ru")
+        : pickBetterText(existing.description_ru, incoming.description_ru),
+    description_en:
+      existing.category === "books"
+        ? pickBooksDescription(existing, incoming, "description_en")
+        : pickBetterText(existing.description_en, incoming.description_en),
     aliases: uniqueArray([...safeArray(existing.aliases), ...safeArray(incoming.aliases)]),
     external_ids: {
       ...existingIds,
@@ -784,7 +812,7 @@ async function searchBooks(query) {
 
         if (!typeIds.length) {
           console.warn("filtered wikidata item: missing P31", candidate.id);
-          return { ...mapped, score: -120, meta: { ...(mapped.meta || {}), wikidata_p31_missing: true } };
+          return null;
         }
 
         if (!allowed) {
