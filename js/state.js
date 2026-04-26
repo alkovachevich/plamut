@@ -8,6 +8,8 @@ import {
 const listeners = new Set();
 
 const STORAGE_VERSION = 3;
+const ROUTE_STATE_KEY = "plamut_route_state_v1";
+const CATEGORY_VIEW_STATE_KEY = "plamut_category_view_state_v1";
 const TEMP_CARD_STORAGE_KEY = "plamut_temp_card_item_v3";
 const LAST_CARD_STORAGE_KEY = "plamut_last_card_item_v3";
 const OLD_CARD_STORAGE_KEYS = [
@@ -28,9 +30,43 @@ function cleanupOldStorage() {
 
 cleanupOldStorage();
 
+function readJsonStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  try {
+    if (value === null || value === undefined) {
+      localStorage.removeItem(key);
+      return;
+    }
+
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn("state: write storage skipped", error);
+  }
+}
+
+function normalizeRouteState(payload = {}) {
+  return {
+    route: typeof payload.route === "string" ? payload.route : "/",
+    routeParams: payload.routeParams && typeof payload.routeParams === "object" ? payload.routeParams : {}
+  };
+}
+
+const persistedRoute = normalizeRouteState(readJsonStorage(ROUTE_STATE_KEY, {}));
+const persistedCategoryViewState = readJsonStorage(CATEGORY_VIEW_STATE_KEY, {});
+
 export const state = {
-  route: "/",
-  routeParams: {},
+  route: persistedRoute.route || "/",
+  routeParams: persistedRoute.routeParams || {},
 
   sidebarOpen: false,
   searchModalOpen: false,
@@ -46,6 +82,7 @@ export const state = {
   user: { ...DEFAULT_USER },
 
   currentCategory: null,
+  categoryViewState: persistedCategoryViewState && typeof persistedCategoryViewState === "object" ? persistedCategoryViewState : {},
   currentItem: null,
   currentUniverse: null
 };
@@ -107,10 +144,14 @@ export function subscribe(listener) {
 }
 
 export function setRoute(route, params = {}) {
-  setState({
+  const next = {
     route,
-    routeParams: params
-  });
+    routeParams: params && typeof params === "object" ? params : {}
+  };
+
+  writeJsonStorage(ROUTE_STATE_KEY, next);
+
+  setState(next);
 }
 
 export function setTheme(theme) {
@@ -190,6 +231,30 @@ export function logoutUser() {
 
 export function setCurrentCategory(category) {
   setState({ currentCategory: category });
+}
+
+export function setCategoryViewState(category, patch = {}) {
+  const key = String(category || "").trim().toLowerCase();
+  if (!key) return;
+
+  const prev = state.categoryViewState?.[key] || {};
+  const next = {
+    ...state.categoryViewState,
+    [key]: {
+      ...prev,
+      ...patch
+    }
+  };
+
+  writeJsonStorage(CATEGORY_VIEW_STATE_KEY, next);
+  setState({ categoryViewState: next });
+}
+
+export function getCategoryViewState(category) {
+  const key = String(category || "").trim().toLowerCase();
+  if (!key) return null;
+
+  return state.categoryViewState?.[key] || null;
 }
 
 export function setCurrentItem(item) {
