@@ -57,6 +57,14 @@ function normalizeKey(value = "") {
   return clean(value).toLowerCase();
 }
 
+function isFallbackEntity(entity = {}) {
+  return Boolean(entity?.__fallback);
+}
+
+function isPersistableEntity(entity = {}) {
+  return Boolean(entity?.canonical_key && !isFallbackEntity(entity));
+}
+
 function resolveTitle(entity = {}) {
   return (
     entity.title_primary ||
@@ -79,9 +87,19 @@ function getCover(entity = {}) {
 }
 
 function normalizeStoredEntity(item = {}) {
+  if (!item || typeof item !== "object" || !item.canonical_key || item.__fallback) {
+    return null;
+  }
+
   return {
     ...item,
-    title_primary: item.title_primary || item.title || item.title_ru || item.title_en || item.original_title || "",
+    title_primary:
+      item.title_primary ||
+      item.title ||
+      item.title_ru ||
+      item.title_en ||
+      item.original_title ||
+      "",
     title_ru: item.title_ru || "",
     title_en: item.title_en || "",
     original_title: item.original_title || item.title || "",
@@ -139,7 +157,8 @@ function buildFallbackEntity(params = {}) {
     original_title: key,
     year: null,
     cover_url: "",
-    description_ru: "Не удалось быстро загрузить данные из базы. Открой карточку через поиск или попробуй позже.",
+    description_ru:
+      "Не удалось быстро загрузить данные из базы. Открой карточку через поиск или попробуй позже.",
     description_en: "",
     external_ids: {},
     meta: {},
@@ -153,18 +172,18 @@ function loadFastEntity(params = {}) {
   const userId = state.user?.id || "";
 
   const cachedEntity = getCachedEntityByKey(userId, key);
-  if (cachedEntity?.canonical_key) {
+  if (cachedEntity?.canonical_key && !cachedEntity.__fallback) {
     return cachedEntity;
   }
 
-  const temp = getTemporaryCardItem();
+  const temp = normalizeStoredEntity(getTemporaryCardItem());
   if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
-    return normalizeStoredEntity(temp);
+    return temp;
   }
 
-  const stored = getStoredCardItemByKey(key);
+  const stored = normalizeStoredEntity(getStoredCardItemByKey(key));
   if (stored?.canonical_key) {
-    return normalizeStoredEntity(stored);
+    return stored;
   }
 
   return null;
@@ -529,6 +548,10 @@ async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
     throw new Error("Нет пользователя");
   }
 
+  if (!entity || entity.__fallback) {
+    throw new Error("Карточка не загружена. Открой её через поиск или попробуй позже.");
+  }
+
   if (entity?.id && userMedia?.id) {
     return { entity, userMedia };
   }
@@ -576,6 +599,10 @@ function bindCardActions({
   const buildButton = root.querySelector('[data-action="build"]');
 
   let pollingTimer = null;
+
+  function setStatus(message = "") {
+    if (statusNode) statusNode.textContent = message;
+  }
 
   function stopPolling() {
     if (pollingTimer) {
@@ -630,7 +657,7 @@ function bindCardActions({
 
     try {
       addButton.disabled = true;
-      statusNode.textContent = "Добавляем…";
+      setStatus("Добавляем…");
 
       const result = await addToUserLibrary({
         userId,
@@ -648,19 +675,22 @@ function bindCardActions({
         media_entities: nextEntity
       });
 
-      setTemporaryCardItem(nextEntity);
+      if (isPersistableEntity(nextEntity)) {
+        setTemporaryCardItem(nextEntity);
+      }
+
       updateUserMediaUI(root, nextUserMedia);
 
-      statusNode.textContent = result.alreadyExists
+      setStatus(result.alreadyExists
         ? "Уже есть в библиотеке"
-        : "Добавлено в библиотеку";
+        : "Добавлено в библиотеку");
 
       if (nextUserMedia?.id) {
         hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
       }
     } catch (error) {
       console.error("CARD: add to library error", error);
-      statusNode.textContent = error.message || "Ошибка добавления";
+      setStatus(error.message || "Ошибка добавления");
       addButton.disabled = false;
     }
   });
@@ -673,7 +703,7 @@ function bindCardActions({
 
     try {
       buildButton.disabled = true;
-      statusNode.textContent = "Сохраняем карточку…";
+      setStatus("Сохраняем карточку…");
 
       const saved = await ensureEntitySavedForBuild({
         userId,
@@ -686,7 +716,12 @@ function bindCardActions({
 
       updateUserMediaUI(root, saved.userMedia);
 
-      statusNode.textContent = "Создаём задачу построения…";
+      if (saved.entity.universe_key && saved.entity.relations_status === "ready") {
+        navigate("/universe", { id: saved.entity.universe_key });
+        return;
+      }
+
+      setStatus("Создаём задачу построения…");
 
       const job = await createUniverseBuildJob({
         userId,
@@ -698,7 +733,7 @@ function bindCardActions({
       updateProgressUI(root, job);
       startPolling(job);
 
-      statusNode.textContent = "Строим вселенную…";
+      setStatus("Строим вселенную…");
 
       buildUniverseForJob(job, saved.entity)
         .then((result) => {
@@ -710,12 +745,12 @@ function bindCardActions({
         })
         .catch((error) => {
           console.error("CARD BUILD: build failed", error);
-          statusNode.textContent = error.message || "Ошибка построения вселенной";
+          setStatus(error.message || "Ошибка построения вселенной");
           buildButton.disabled = false;
         });
     } catch (error) {
       console.error("CARD BUILD: start failed", error);
-      statusNode.textContent = error.message || "Ошибка запуска построения";
+      setStatus(error.message || "Ошибка запуска построения");
       buildButton.disabled = false;
     }
   });
@@ -751,7 +786,9 @@ export async function renderCardPage(root, params = {}) {
     return;
   }
 
-  setTemporaryCardItem(currentEntity);
+  if (isPersistableEntity(currentEntity)) {
+    setTemporaryCardItem(currentEntity);
+  }
 
   renderCard(root, {
     entity: currentEntity,
@@ -760,9 +797,21 @@ export async function renderCardPage(root, params = {}) {
   });
 
   const statusNode = root.querySelector("[data-status]");
+  const buildButton = root.querySelector('[data-action="build"]');
 
-  if (!currentEntity.id && statusNode) {
-    statusNode.textContent = "Карточка открыта из локального кэша. При действии она будет сохранена в БД.";
+  if (currentEntity.__fallback) {
+    if (statusNode) {
+      statusNode.textContent = "Карточка не загружена из БД. Действия временно недоступны.";
+    }
+
+    if (buildButton) {
+      buildButton.disabled = true;
+    }
+  } else if (!currentEntity.id && statusNode) {
+    statusNode.textContent =
+      "Карточка открыта из локального кэша. При действии она будет сохранена в БД.";
+  } else if (currentEntity.universe_key && currentEntity.relations_status === "ready" && statusNode) {
+    statusNode.textContent = "Вселенная уже построена.";
   }
 
   bindRelated(root);
@@ -800,16 +849,24 @@ export async function renderCardPage(root, params = {}) {
     });
   }
 
-  if (key) {
+  if (key && !currentEntity.__fallback) {
     loadEntityFromDb(key)
       .then((dbEntity) => {
         if (destroyedRef.value || !dbEntity?.id) return;
 
         currentEntity = dbEntity;
-        setTemporaryCardItem(dbEntity);
+
+        if (isPersistableEntity(dbEntity)) {
+          setTemporaryCardItem(dbEntity);
+        }
 
         if (!userMedia) {
           userMedia = getCachedUserMedia(userId, dbEntity);
+        }
+
+        if (dbEntity.universe_key && dbEntity.relations_status === "ready") {
+          const status = root.querySelector("[data-status]");
+          if (status) status.textContent = "Вселенная уже построена.";
         }
       })
       .catch((error) => {
