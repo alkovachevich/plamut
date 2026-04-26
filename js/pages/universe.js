@@ -497,7 +497,7 @@ export async function renderUniversePage(root, params = {}) {
           </div>
         </div>
 
-        ${groupItemsByRelations(items, relations, Number(universe?.metadata_json?.seed_entity_id || 0) || items[0]?.media_entities?.id)
+        ${groupItemsByRelations(items, relations, Number(universe?.metadata_json?.seed_entity_id || 0))
           .map((group) => `
             <div class="section-title">${escapeHtml(group.title)}</div>
             <div class="timeline">
