@@ -52,7 +52,50 @@ export const state = {
 
 window.__PLAMUT_STATE__ = state;
 
+function hasPatchChanges(patch = {}) {
+  return Object.entries(patch).some(([key, value]) => state[key] !== value);
+}
+
+function sameStoredCard(a = null, b = null) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  return JSON.stringify({
+    id: a.id ?? null,
+    canonical_key: a.canonical_key || "",
+    category: a.category || "",
+    title_primary: a.title_primary || "",
+    title_ru: a.title_ru || "",
+    title_en: a.title_en || "",
+    original_title: a.original_title || "",
+    year: a.year ?? null,
+    cover_url: a.cover_url || "",
+    description_ru: a.description_ru || "",
+    description_en: a.description_en || "",
+    relations_status: a.relations_status || "",
+    universe_key: a.universe_key || ""
+  }) === JSON.stringify({
+    id: b.id ?? null,
+    canonical_key: b.canonical_key || "",
+    category: b.category || "",
+    title_primary: b.title_primary || "",
+    title_ru: b.title_ru || "",
+    title_en: b.title_en || "",
+    original_title: b.original_title || "",
+    year: b.year ?? null,
+    cover_url: b.cover_url || "",
+    description_ru: b.description_ru || "",
+    description_en: b.description_en || "",
+    relations_status: b.relations_status || "",
+    universe_key: b.universe_key || ""
+  });
+}
+
 export function setState(patch = {}) {
+  if (!patch || typeof patch !== "object" || !hasPatchChanges(patch)) {
+    return;
+  }
+
   Object.assign(state, patch);
   window.__PLAMUT_STATE__ = state;
   listeners.forEach((listener) => listener(state));
@@ -150,6 +193,7 @@ export function setCurrentCategory(category) {
 }
 
 export function setCurrentItem(item) {
+  if (sameStoredCard(state.currentItem, item)) return;
   setState({ currentItem: item });
 }
 
