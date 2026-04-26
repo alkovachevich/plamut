@@ -6,7 +6,7 @@ let cachedSession = null;
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const AUTH_TIMEOUT_MS = 12000;
-const SESSION_TIMEOUT_MS = 5000;
+const SESSION_TIMEOUT_MS = 4000;
 const STORAGE_TIMEOUT_MS = 60000;
 
 function createClient() {
@@ -57,6 +57,15 @@ function cleanPayload(payload = {}) {
   });
 
   return result;
+}
+
+export function setCachedSession(session) {
+  cachedSession = session || null;
+}
+
+export function clearCachedSession() {
+  cachedSession = null;
+  sessionPromise = null;
 }
 
 export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -130,11 +139,6 @@ export async function getCurrentSession() {
   return sessionPromise;
 }
 
-export function clearCachedSession() {
-  cachedSession = null;
-  sessionPromise = null;
-}
-
 export async function getCurrentUser() {
   const session = await getCurrentSession();
   return session?.user || null;
@@ -204,12 +208,6 @@ export async function fetchUserProfile(userId) {
   const cleanUserId = cleanText(userId);
   if (!cleanUserId) return null;
 
-  const session = await getCurrentSession();
-
-  if (!session?.user?.id) {
-    return null;
-  }
-
   const supabase = getSupabaseClient();
 
   const { data, error } = await withRetry(
@@ -244,16 +242,6 @@ export async function fetchUserProfileSafe(userId) {
 export async function upsertUserProfile(profile) {
   if (!profile?.id) {
     throw new Error("upsertUserProfile: profile.id is required");
-  }
-
-  const session = await getCurrentSession();
-
-  if (!session?.user?.id) {
-    throw new Error("Нужно войти в аккаунт");
-  }
-
-  if (session.user.id !== profile.id) {
-    throw new Error("Нельзя изменить чужой профиль");
   }
 
   const supabase = getSupabaseClient();
@@ -311,12 +299,6 @@ export async function updateUserPassword(newPassword) {
     throw new Error("Пароль должен содержать минимум 6 символов");
   }
 
-  const session = await getCurrentSession();
-
-  if (!session?.user?.id) {
-    throw new Error("Нужно войти в аккаунт");
-  }
-
   const supabase = getSupabaseClient();
 
   const { data, error } = await withRetry(
@@ -351,12 +333,6 @@ export async function uploadAvatarImage(userId, file) {
 
   if (!file) {
     throw new Error("Файл не выбран");
-  }
-
-  const session = await getCurrentSession();
-
-  if (!session?.user?.id || session.user.id !== cleanUserId) {
-    throw new Error("Нужно войти в аккаунт");
   }
 
   if (!String(file.type || "").startsWith("image/")) {
