@@ -2,9 +2,11 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
 let sessionPromise = null;
+let cachedSession = null;
 
 const DEFAULT_TIMEOUT_MS = 15000;
-const AUTH_TIMEOUT_MS = 30000;
+const AUTH_TIMEOUT_MS = 12000;
+const SESSION_TIMEOUT_MS = 5000;
 const STORAGE_TIMEOUT_MS = 60000;
 
 function createClient() {
@@ -96,28 +98,41 @@ export async function withRetry(factory, label = "Запрос", options = {}) {
 }
 
 export async function getCurrentSession() {
-  if (sessionPromise) return sessionPromise;
+  if (cachedSession?.user?.id) {
+    return cachedSession;
+  }
+
+  if (sessionPromise) {
+    return sessionPromise;
+  }
 
   const supabase = getSupabaseClient();
 
   sessionPromise = withTimeout(
     supabase.auth.getSession(),
     "Получение сессии",
-    AUTH_TIMEOUT_MS
+    SESSION_TIMEOUT_MS
   )
     .then(({ data, error }) => {
       if (error) throw error;
-      return data?.session || null;
+
+      cachedSession = data?.session || null;
+      return cachedSession;
     })
     .catch((error) => {
       console.warn("getCurrentSession skipped:", error);
-      return null;
+      return cachedSession || null;
     })
     .finally(() => {
       sessionPromise = null;
     });
 
   return sessionPromise;
+}
+
+export function clearCachedSession() {
+  cachedSession = null;
+  sessionPromise = null;
 }
 
 export async function getCurrentUser() {
@@ -140,6 +155,8 @@ export async function signInWithEmail(email, password) {
 
   if (error) throw error;
 
+  cachedSession = data?.session || null;
+
   return data;
 }
 
@@ -158,6 +175,8 @@ export async function signUpWithEmail(email, password) {
 
   if (error) throw error;
 
+  cachedSession = data?.session || null;
+
   return data;
 }
 
@@ -175,6 +194,8 @@ export async function signOut() {
   );
 
   if (error) throw error;
+
+  clearCachedSession();
 
   return true;
 }
