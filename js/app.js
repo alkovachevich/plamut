@@ -269,17 +269,6 @@ async function hydrateAuthStateSafely() {
     const session = await getCurrentSession();
 
     if (!session?.user) {
-      const cachedUser = readCachedUser();
-
-      if (cachedUser?.id) {
-        applyProfilePreferences(cachedUser);
-        setUserIfChanged({
-          ...cachedUser,
-          preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
-          preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
-        });
-      }
-
       return;
     }
 
@@ -287,17 +276,6 @@ async function hydrateAuthStateSafely() {
     await applyAuthenticatedUser(session.user);
   } catch (error) {
     console.warn("Auth hydration skipped:", error);
-
-    const cachedUser = readCachedUser();
-
-    if (cachedUser?.id) {
-      applyProfilePreferences(cachedUser);
-      setUserIfChanged({
-        ...cachedUser,
-        preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
-        preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
-      });
-    }
   }
 }
 
@@ -450,7 +428,7 @@ function renderRouteSafely() {
       .catch((error) => {
         if (token !== routeRenderToken) return;
 
-        console.error("Route render error:", error);
+        console.warn("Route render error:", error);
 
         mainRoot.innerHTML = `
           <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
@@ -459,7 +437,7 @@ function renderRouteSafely() {
         `;
       });
   } catch (error) {
-    console.error("Route render error:", error);
+    console.warn("Route render error:", error);
 
     mainRoot.innerHTML = `
       <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
@@ -508,7 +486,7 @@ function renderApp() {
       renderRouteSafely();
     }
   } catch (error) {
-    console.error("App render error:", error);
+    console.warn("App render error:", error);
     renderFatalAppError("Ошибка запуска интерфейса. Проверь console.");
   }
 }
@@ -522,29 +500,18 @@ async function init() {
     return;
   }
 
-  const cachedUser = readCachedUser();
-
-  if (cachedUser?.id) {
-    applyProfilePreferences(cachedUser);
-    setUserIfChanged({
-      ...cachedUser,
-      preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
-      preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
-    });
-  }
-
   subscribe(renderApp);
 
   try {
     initRouter();
   } catch (error) {
-    console.error("Router init error:", error);
+    console.warn("Router init error:", error);
   }
 
   bindAuthListenerSafely();
   renderApp();
 
-  hydrateAuthStateSafely();
+  Promise.resolve().then(() => hydrateAuthStateSafely());
 }
 
 init();
