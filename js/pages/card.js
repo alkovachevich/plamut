@@ -535,8 +535,17 @@ async function hydrateRelatedItems(root, userId, entity, userMedia) {
       entityId: entity.id
     });
 
-    renderRelated(root, relatedItems);
-    return relatedItems;
+    const filtered = relatedItems.filter((item) => {
+      const relatedEntity = item.media_entities || item;
+      if (!relatedEntity) return false;
+
+      if (Number(relatedEntity.id || 0) === Number(entity.id || 0)) return false;
+
+      return normalizeKey(relatedEntity.canonical_key || "") !== normalizeKey(entity.canonical_key || "");
+    });
+
+    renderRelated(root, filtered);
+    return filtered;
   } catch (error) {
     console.warn("CARD: related items skipped", error);
     return [];
