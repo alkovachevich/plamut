@@ -1,11 +1,13 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
 import { fetchJsonCached } from "./api-cache.js";
+import { TMDB_API_KEY, API_ENDPOINTS } from "../config.js";
 import {
   loadUserLibrary,
   getCachedLibrary,
   updateCachedLibraryItem
 } from "./library-cache.js";
+import { saveEntityIfMissing } from "./entity-db.js";
 import {
   updateUniverseBuildJob,
   UNIVERSE_JOB_STATUS
@@ -138,6 +140,20 @@ function normalizeConfidence(value, fallback = 0.65) {
 
 function normalizeWorkId(value = "") {
   return clean(value).replace("/works/", "");
+}
+
+function openLibraryCoverUrlFromId(coverId) {
+  return coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "";
+}
+
+function openLibraryCoverUrlFromIsbn(isbn) {
+  return isbn ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg` : "";
+}
+
+function wikimediaFileUrl(filename = "") {
+  const cleanName = clean(filename);
+  if (!cleanName) return "";
+  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(cleanName)}`;
 }
 
 function titleCandidates(entity = {}) {
@@ -299,6 +315,72 @@ function normalizeAiResult(payload = {}, seedEntity = {}) {
       resolveDescription(seedEntity)
   );
 
+  const aiEntities = safeArray(
+    payload?.deduped_entities ||
+      payload?.entities ||
+      payload?.universe_members ||
+      payload?.members
+  ).map((entity) => ({
+    entity_id: Number(entity.entity_id || entity.id) || null,
+    canonical_key: clean(entity.canonical_key || ""),
+    category: clean(entity.category || ""),
+    title_primary: clean(
+      entity.title_primary ||
+        entity.title ||
+        entity.name ||
+        entity.title_ru ||
+        entity.title_en
+    ),
+    title_ru: clean(entity.title_ru || ""),
+    title_en: clean(entity.title_en || ""),
+    original_title: clean(entity.original_title || ""),
+    year: Number.isFinite(Number(entity.year)) ? Number(entity.year) : null,
+    cover_url: clean(entity.cover_url || ""),
+    description_ru: clean(entity.description_ru || entity.description || ""),
+    description_en: clean(entity.description_en || ""),
+    external_ids: entity.external_ids || {},
+    confidence: normalizeConfidence(entity.confidence, 0.65)
+  }));
+
+  const directSequels = safeArray(
+    payload?.direct_sequels || payload?.direct_sequel || payload?.sequels
+  );
+  const directPrequels = safeArray(
+    payload?.direct_prequels || payload?.direct_prequel || payload?.prequels
+  );
+  const adaptations = safeArray(payload?.adaptations);
+  const sourceMaterial = safeArray(payload?.source_material || payload?.sources);
+  const spinOffs = safeArray(payload?.spin_offs || payload?.spinoffs);
+  const sameUniverse = safeArray(payload?.same_universe);
+  const bookSeries = safeArray(payload?.book_series);
+  const relatedWork = safeArray(payload?.related_work || payload?.related || []);
+
+  const relationGroups = {
+    direct_sequel: directSequels,
+    direct_prequel: directPrequels,
+    adaptation: adaptations,
+    source_material: sourceMaterial,
+    spin_off: spinOffs,
+    same_universe: sameUniverse,
+    book_series: bookSeries,
+    related_work: relatedWork
+  };
+
+  const groupedRelations = Object.entries(relationGroups).flatMap(([relationType, rows]) =>
+    safeArray(rows).map((entry, index) => ({
+      from_entity_id: Number(entry.from_entity_id || entry.from_id || seedEntity.id),
+      to_entity_id: Number(entry.to_entity_id || entry.to_id || entry.entity_id || entry.id),
+      relation_type: normalizeRelationType(relationType),
+      confidence: normalizeConfidence(entry.confidence, relationType === "related_work" ? 0.35 : 0.8),
+      sort_order: Number.isFinite(Number(entry.sort_order)) ? Number(entry.sort_order) : index,
+      source: "openai",
+      metadata_json: {
+        ...(entry.metadata_json || entry.metadata || {}),
+        reason: clean(entry.reason || entry.explanation || `group:${relationType}`)
+      }
+    }))
+  );
+
   const relations = safeArray(payload?.relations)
     .map((relation, index) => ({
       from_entity_id: Number(relation.from_entity_id || relation.from_id || seedEntity.id),
@@ -306,7 +388,7 @@ function normalizeAiResult(payload = {}, seedEntity = {}) {
       relation_type: normalizeRelationType(relation.relation_type || relation.type),
       confidence: normalizeConfidence(relation.confidence, 0.75),
       sort_order: Number.isFinite(Number(relation.sort_order)) ? Number(relation.sort_order) : index,
-      source: "wikidata",
+      source: "openai",
       metadata_json: {
         ...(relation.metadata_json || relation.metadata || {}),
         reason: clean(relation.reason || relation.explanation || "")
@@ -314,7 +396,22 @@ function normalizeAiResult(payload = {}, seedEntity = {}) {
     }))
     .filter((relation) => relation.from_entity_id && relation.to_entity_id);
 
-  const order = safeArray(payload?.release_order || payload?.story_chronology || payload?.order || payload?.chronology)
+  const releaseOrder = safeArray(payload?.release_order)
+    .map((entry, index) => ({
+      entity_id: Number(entry.entity_id || entry.id),
+      sort_order: Number.isFinite(Number(entry.sort_order)) ? Number(entry.sort_order) : index
+    }))
+    .filter((entry) => entry.entity_id);
+
+  const storyChronology = safeArray(payload?.story_chronology)
+    .map((entry, index) => ({
+      entity_id: Number(entry.entity_id || entry.id),
+      sort_order: Number.isFinite(Number(entry.sort_order)) ? Number(entry.sort_order) : index,
+      confidence: normalizeConfidence(entry.confidence, 0.5)
+    }))
+    .filter((entry) => entry.entity_id);
+
+  const fallbackOrder = safeArray(payload?.order || payload?.chronology)
     .map((entry, index) => ({
       entity_id: Number(entry.entity_id || entry.id),
       sort_order: Number.isFinite(Number(entry.sort_order)) ? Number(entry.sort_order) : index
@@ -327,22 +424,297 @@ function normalizeAiResult(payload = {}, seedEntity = {}) {
       title,
       description
     },
-    relations,
-    order
+    deduped_entities: aiEntities,
+    relations: [...relations, ...groupedRelations],
+    release_order: releaseOrder.length ? releaseOrder : fallbackOrder,
+    story_chronology: storyChronology
   };
 }
 
-async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelations }) {
+async function fetchWikidataEntityDetails(ids = []) {
+  const cleanIds = uniqueArray(safeArray(ids).map(clean).filter(Boolean));
+  if (!cleanIds.length) return {};
+
+  return fetchJsonCached(
+    "wikidata",
+    { type: "entities", ids: cleanIds },
+    async () => {
+      const url = new URL("https://www.wikidata.org/w/api.php");
+      url.searchParams.set("action", "wbgetentities");
+      url.searchParams.set("format", "json");
+      url.searchParams.set("props", "labels|aliases|claims|descriptions");
+      url.searchParams.set("languages", "ru|en");
+      url.searchParams.set("origin", "*");
+      url.searchParams.set("ids", cleanIds.join("|"));
+
+      const res = await fetch(url.toString());
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data?.entities || {};
+    },
+    { ttlMs: 1000 * 60 * 60 * 24 * 7 }
+  ).catch(() => ({}));
+}
+
+async function fetchTmdbPostersByIds(entries = []) {
+  if (!TMDB_API_KEY) return {};
+
+  const tasks = uniqueArray(
+    safeArray(entries)
+      .map((entry) => {
+        const id = Number(entry.id || entry.tmdb);
+        if (!id) return null;
+        const mediaType = entry.category === "series" ? "tv" : "movie";
+        return `${mediaType}:${id}`;
+      })
+      .filter(Boolean)
+  );
+
+  const results = await Promise.allSettled(
+    tasks.map(async (task) => {
+      const [mediaType, id] = task.split(":");
+      const url = new URL(`https://api.themoviedb.org/3/${mediaType}/${id}`);
+      url.searchParams.set("api_key", TMDB_API_KEY);
+      url.searchParams.set("language", "ru-RU");
+
+      const res = await fetch(url.toString());
+      if (!res.ok) return [task, ""];
+      const data = await res.json();
+      return [task, data?.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : ""];
+    })
+  );
+
+  return results.reduce((acc, row) => {
+    if (row.status === "fulfilled") {
+      const [key, value] = row.value;
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
+}
+
+async function fetchAniListCoversByIds(entries = []) {
+  const ids = uniqueArray(safeArray(entries).map((entry) => Number(entry.id || entry.anilist)).filter(Boolean));
+  if (!ids.length) return {};
+
+  const query = `
+    query ($id: Int) {
+      Media(id: $id) {
+        id
+        coverImage {
+          large
+          medium
+        }
+      }
+    }
+  `;
+
+  const results = await Promise.allSettled(
+    ids.map(async (id) => {
+      const res = await fetch(API_ENDPOINTS.ANILIST, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ query, variables: { id } })
+      });
+      if (!res.ok) return [id, ""];
+      const payload = await res.json();
+      const media = payload?.data?.Media;
+      return [id, media?.coverImage?.large || media?.coverImage?.medium || ""];
+    })
+  );
+
+  return results.reduce((acc, row) => {
+    if (row.status === "fulfilled") {
+      const [id, value] = row.value;
+      acc[id] = value;
+    }
+    return acc;
+  }, {});
+}
+
+async function fetchOpenLibraryWorkCovers(workIds = []) {
+  const ids = uniqueArray(safeArray(workIds).map(normalizeWorkId).filter(Boolean));
+  if (!ids.length) return {};
+
+  const results = await Promise.allSettled(
+    ids.map(async (id) => {
+      const res = await fetch(`https://openlibrary.org/works/${encodeURIComponent(id)}.json`);
+      if (!res.ok) return [id, ""];
+      const payload = await res.json();
+      const coverId = safeArray(payload?.covers)[0] || null;
+      return [id, openLibraryCoverUrlFromId(coverId)];
+    })
+  );
+
+  return results.reduce((acc, row) => {
+    if (row.status === "fulfilled") {
+      const [id, value] = row.value;
+      acc[id] = value;
+    }
+    return acc;
+  }, {});
+}
+
+function rankCandidate(item = {}, seedCategory = "") {
+  const ids = item.external_ids || {};
+  let score = 0;
+
+  if (ids.wikidata) score += 70;
+  if (ids.tmdb) score += 65;
+  if (ids.imdb) score += 55;
+  if (ids.openlibrary_work) score += 60;
+  if (safeArray(ids.isbn).length) score += 40;
+  if (ids.anilist) score += 60;
+  if (ids.mal) score += 45;
+  if (item.cover_url) score += 30;
+  if (item.category === seedCategory) score += 20;
+  if (item.category === "books" && ids.openlibrary_work) score += 10;
+
+  return score;
+}
+
+async function buildNormalizationContext({ seedEntity, items, localRelations, libraryItems = [] }) {
+  const candidateEntities = dedupeUniverseItems(preDedupeUniverseItems(seedEntity, items, 80))
+    .map((item) => item.media_entities || item);
+
+  const wikidataIds = candidateEntities
+    .map((entity) => entity.external_ids?.wikidata)
+    .filter(Boolean);
+  const wikidataDetails = await fetchWikidataEntityDetails(wikidataIds);
+
+  const tmdbEntries = candidateEntities
+    .filter((entity) => entity.external_ids?.tmdb && ["movies", "series"].includes(entity.category))
+    .map((entity) => ({ id: entity.external_ids.tmdb, category: entity.category }));
+  const tmdbPosters = await fetchTmdbPostersByIds(tmdbEntries);
+
+  const anilistEntries = candidateEntities
+    .filter((entity) => entity.external_ids?.anilist && ["anime", "manga"].includes(entity.category))
+    .map((entity) => ({ id: entity.external_ids.anilist }));
+  const anilistCovers = await fetchAniListCoversByIds(anilistEntries);
+
+  const openlibraryWorks = candidateEntities
+    .map((entity) => entity.external_ids?.openlibrary_work)
+    .filter(Boolean);
+  const openLibraryCovers = await fetchOpenLibraryWorkCovers(openlibraryWorks);
+
+  const enhancedCandidates = candidateEntities.map((entity) => {
+    const ids = entity.external_ids || {};
+    const workId = normalizeWorkId(ids.openlibrary_work || "");
+    const wikidataClaims = wikidataDetails?.[ids.wikidata]?.claims || {};
+    const p18Image = safeArray(wikidataClaims?.P18)
+      .map((claim) => claim?.mainsnak?.datavalue?.value)
+      .find(Boolean);
+
+    const openLibraryIsbnCover = safeArray(ids.isbn).map(openLibraryCoverUrlFromIsbn).find(Boolean) || "";
+    const openLibraryWorkCover = openLibraryCovers[workId] || "";
+    const tmdbCover = ids.tmdb ? tmdbPosters[`${entity.category === "series" ? "tv" : "movie"}:${ids.tmdb}`] || "" : "";
+    const anilistCover = ids.anilist ? anilistCovers[Number(ids.anilist)] || "" : "";
+
+    const fallbackCover =
+      entity.cover_url ||
+      (entity.category === "books" ? openLibraryIsbnCover || openLibraryWorkCover : "") ||
+      (["movies", "series"].includes(entity.category) ? tmdbCover : "") ||
+      (["anime", "manga"].includes(entity.category) ? anilistCover : "") ||
+      (p18Image ? wikimediaFileUrl(p18Image) : "");
+
+    return {
+      ...entity,
+      cover_url: fallbackCover,
+      meta: {
+        ...(entity.meta || {}),
+        ranking_score: rankCandidate({ ...entity, cover_url: fallbackCover }, seedEntity.category)
+      }
+    };
+  });
+
+  const sortedCandidates = [...enhancedCandidates]
+    .sort((a, b) => Number(b.meta?.ranking_score || 0) - Number(a.meta?.ranking_score || 0));
+
+  return {
+    sortedCandidates,
+    wikidataCandidates: safeArray(Object.values(wikidataDetails)).map((entity) => ({
+      id: entity.id,
+      labels: entity.labels || {},
+      descriptions: entity.descriptions || {},
+      claims: entity.claims || {}
+    })),
+    tmdbCandidates: tmdbEntries.map((entry) => ({
+      ...entry,
+      poster_url: tmdbPosters[`${entry.category === "series" ? "tv" : "movie"}:${entry.id}`] || ""
+    })),
+    openlibraryCandidates: openlibraryWorks.map((work) => ({
+      work_id: normalizeWorkId(work),
+      cover_url: openLibraryCovers[normalizeWorkId(work)] || ""
+    })),
+    anilistCandidates: anilistEntries.map((entry) => ({
+      id: Number(entry.id),
+      cover_url: anilistCovers[Number(entry.id)] || ""
+    })),
+    localRelations,
+    currentLibrary: libraryItems.map(itemToAiPayload)
+  };
+}
+
+async function fetchSavedMediaEntities(seedEntity = {}, items = []) {
   const supabase = getSupabaseClient();
+  const category = clean(seedEntity.category);
+  if (!category) return [];
+
+  const knownCanonical = uniqueArray(
+    [seedEntity, ...safeArray(items).map((item) => item.media_entities || item)]
+      .map((entity) => clean(entity?.canonical_key))
+      .filter(Boolean)
+  );
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from("media_entities")
+      .select("*")
+      .eq("category", category)
+      .order("updated_at", { ascending: false })
+      .limit(120),
+    "Загрузка сохраненных media_entities",
+    DEFAULT_TIMEOUT_MS
+  ).catch((err) => ({ data: [], error: err }));
+
+  if (error) {
+    console.warn("fetchSavedMediaEntities skipped:", error);
+    return [];
+  }
+
+  return dedupeUniverseItems(
+    safeArray(data)
+      .filter((entity) => knownCanonical.includes(entity.canonical_key) || sharedExternalId(seedEntity, entity))
+      .map((entity) => ({ media_entities: entity }))
+  ).map((row) => row.media_entities || row);
+}
+
+async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelations, libraryItems = [] }) {
+  const supabase = getSupabaseClient();
+  const context = await buildNormalizationContext({
+    seedEntity,
+    items,
+    localRelations,
+    libraryItems
+  });
+  const savedEntities = await fetchSavedMediaEntities(seedEntity, items);
 
   const payload = {
     seed: entityToAiPayload(seedEntity),
-    library_items: safeArray(items).map(itemToAiPayload),
-    wikidata_data: safeArray(localRelations),
-    local_relations: safeArray(localRelations),
+    candidate_entities: context.sortedCandidates.map(entityToAiPayload),
+    library_items: context.currentLibrary,
+    local_relations: safeArray(context.localRelations),
+    wikidata_candidates: context.wikidataCandidates,
+    tmdb_candidates: context.tmdbCandidates,
+    openlibrary_candidates: context.openlibraryCandidates,
+    anilist_candidates: context.anilistCandidates,
     existing_entities: safeArray(items).map((item) => item.media_entities || item),
+    saved_media_entities: savedEntities.map(entityToAiPayload),
     instruction:
-      "Normalize one media universe. Return JSON with universe, relations and chronology/order. Use only provided IDs. Do not invent unavailable entity IDs."
+      "Normalize one media universe. Return JSON with universe title+description, deduped_entities, relation groups, direct sequels/prequels, adaptations/source material, spin-offs, same universe, book_series, release_order, story_chronology, and low-confidence related_work for weak links. Use existing entity IDs when possible. Never invent entity IDs."
   };
 
   const { data, error } = await withTimeout(
@@ -1002,6 +1374,8 @@ function dedupeUniverseItems(items = []) {
       cleanLower(String(entity.external_ids?.tmdb || "")),
       cleanLower(String(entity.external_ids?.imdb || "")),
       cleanLower(entity.external_ids?.openlibrary_work),
+      cleanLower(String(entity.external_ids?.anilist || "")),
+      cleanLower(String(entity.external_ids?.mal || "")),
       ...safeArray(entity.external_ids?.isbn).map((isbn) => cleanLower(String(isbn)))
     ].find(Boolean) || `entity:${entity.id || Math.random()}`;
 
@@ -1032,6 +1406,65 @@ function dedupeUniverseItems(items = []) {
   });
 
   return Array.from(map.values());
+}
+
+async function resolveAiEntitiesToDb(aiEntities = [], existingItems = []) {
+  const known = new Map();
+
+  safeArray(existingItems).forEach((item) => {
+    const entity = item.media_entities || item;
+    if (entity?.id) {
+      known.set(Number(entity.id), entity);
+    }
+  });
+
+  const resolved = [];
+
+  for (const rawEntity of safeArray(aiEntities)) {
+    const input = {
+      canonical_key: rawEntity.canonical_key,
+      category: rawEntity.category,
+      title_primary: rawEntity.title_primary,
+      title_ru: rawEntity.title_ru,
+      title_en: rawEntity.title_en,
+      original_title: rawEntity.original_title,
+      year: rawEntity.year,
+      cover_url: rawEntity.cover_url,
+      description_ru: rawEntity.description_ru,
+      description_en: rawEntity.description_en,
+      external_ids: rawEntity.external_ids || {},
+      primary_source: "openai"
+    };
+
+    if (rawEntity.entity_id && known.has(Number(rawEntity.entity_id))) {
+      resolved.push(known.get(Number(rawEntity.entity_id)));
+      continue;
+    }
+
+    if (!input.canonical_key && !Object.keys(input.external_ids || {}).length) {
+      continue;
+    }
+
+    try {
+      const saved = await saveEntityIfMissing(input);
+      if (saved?.id) {
+        known.set(Number(saved.id), saved);
+        resolved.push(saved);
+      }
+    } catch (error) {
+      console.warn("resolveAiEntitiesToDb skipped entity:", rawEntity, error);
+    }
+  }
+
+  return dedupeUniverseItems(resolved.map((entity) => ({ media_entities: entity })))
+    .map((row) => row.media_entities || row);
+}
+
+function sanitizeAiRelations(relations = [], allowedEntityIds = new Set()) {
+  return safeArray(relations).filter((relation) => (
+    allowedEntityIds.has(Number(relation.from_entity_id)) &&
+    allowedEntityIds.has(Number(relation.to_entity_id))
+  ));
 }
 function buildOrderMap(aiOrder = [], fallbackItems = []) {
   const orderMap = new Map();
@@ -1175,7 +1608,8 @@ export async function buildUniverseForJob(job, entity) {
     const aiPayload = await invokeUniverseNormalizeFunction({
       seedEntity: entity,
       items: aiCandidates,
-      localRelations: localRelationRows
+      localRelations: localRelationRows,
+      libraryItems
     });
 
     const aiResult = aiPayload
@@ -1195,9 +1629,26 @@ export async function buildUniverseForJob(job, entity) {
       fallbackUniverse.title ||
       resolveTitle(entity);
 
-    const orderMap = buildOrderMap(aiResult?.order || [], allItems);
+    const aiResolvedEntities = await resolveAiEntitiesToDb(aiResult?.deduped_entities || [], allItems);
+    const aiResolvedItems = aiResolvedEntities.map((saved) => ({
+      id: null,
+      entity_id: saved.id,
+      category: saved.category,
+      status: "planned",
+      folder_name: null,
+      created_at: null,
+      media_entities: saved
+    }));
+
+    const mergedItems = dedupeUniverseItems([...allItems, ...aiResolvedItems]);
+    const allowedEntityIds = new Set(
+      mergedItems.map((item) => Number(item.media_entities?.id || item.entity_id || item.id)).filter(Boolean)
+    );
+
+    const releaseOrderSource = aiResult?.release_order || aiResult?.story_chronology || [];
+    const orderMap = buildOrderMap(releaseOrderSource, mergedItems);
     const cover =
-      allItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
+      mergedItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
       entity.cover_url ||
       "";
 
@@ -1220,21 +1671,21 @@ export async function buildUniverseForJob(job, entity) {
       }
     });
 
-    await upsertUniverseMembers(universeKey, allItems, orderMap);
+    await upsertUniverseMembers(universeKey, mergedItems, orderMap);
 
     await updateUniverseBuildJob(job.id, {
       progress_current: 8,
       progress_label: "Сохраняем связи"
     });
 
-    const aiRelations = safeArray(aiResult?.relations);
+    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds);
     const relationRows = aiRelations.length
       ? [...aiRelations, ...buildReverseAiRelations(aiRelations)]
       : localRelationRows;
 
     const savedRelations = await upsertMediaRelations(relationRows);
 
-    const sortedItems = sortUniverseItems(allItems, orderMap);
+    const sortedItems = sortUniverseItems(mergedItems, orderMap);
 
     await Promise.all(
       sortedItems.map((item) =>
@@ -1332,7 +1783,8 @@ export async function buildUniverseForEntity({ userId, entityId }) {
     const aiPayload = await invokeUniverseNormalizeFunction({
       seedEntity,
       items: aiCandidates,
-      localRelations: localRelationRows
+      localRelations: localRelationRows,
+      libraryItems
     });
 
     const aiResult = aiPayload
@@ -1346,8 +1798,24 @@ export async function buildUniverseForEntity({ userId, entityId }) {
         seedEntity.canonical_key
     );
 
-    const orderMap = buildOrderMap(aiResult?.order || [], universeItems);
-    const sortedItems = sortUniverseItems(universeItems, orderMap);
+    const aiResolvedEntities = await resolveAiEntitiesToDb(aiResult?.deduped_entities || [], universeItems);
+    const aiResolvedItems = aiResolvedEntities.map((saved) => ({
+      id: null,
+      entity_id: saved.id,
+      category: saved.category,
+      status: "planned",
+      folder_name: null,
+      created_at: null,
+      media_entities: saved
+    }));
+
+    const mergedItems = dedupeUniverseItems([...universeItems, ...aiResolvedItems]);
+    const allowedEntityIds = new Set(
+      mergedItems.map((item) => Number(item.media_entities?.id || item.entity_id || item.id)).filter(Boolean)
+    );
+
+    const orderMap = buildOrderMap(aiResult?.release_order || aiResult?.story_chronology || [], mergedItems);
+    const sortedItems = sortUniverseItems(mergedItems, orderMap);
     const cover =
       sortedItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
       "";
@@ -1366,7 +1834,7 @@ export async function buildUniverseForEntity({ userId, entityId }) {
 
     await upsertUniverseMembers(universeKey, sortedItems, orderMap);
 
-    const aiRelations = safeArray(aiResult?.relations);
+    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds);
     const relationRows = aiRelations.length
       ? [...aiRelations, ...buildReverseAiRelations(aiRelations)]
       : localRelationRows;
