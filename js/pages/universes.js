@@ -35,6 +35,7 @@ function renderUniverseCard(universe = {}) {
   const title = universe.title || "Без названия";
   const total = Number(universe.total || universe.items?.length || 0);
   const done = Number(universe.done || 0);
+  const source = universe.source || "";
 
   return `
     <button
@@ -53,6 +54,11 @@ function renderUniverseCard(universe = {}) {
           <div class="universe-meta">
             ${escapeHtml(String(total))} элементов · готово ${escapeHtml(String(done))}
           </div>
+          ${
+            source
+              ? `<div class="universe-source">${escapeHtml(source === "openai" ? "OpenAI + БД" : "БД")}</div>`
+              : ""
+          }
         </div>
 
         <div class="universe-progress">
@@ -184,10 +190,15 @@ function renderStyles() {
         word-break: break-word;
       }
 
-      .universe-meta {
+      .universe-meta,
+      .universe-source {
         color: var(--text-soft);
         font-size: 13px;
         line-height: 1.4;
+      }
+
+      .universe-source {
+        font-size: 12px;
       }
 
       .universe-progress {
@@ -338,14 +349,14 @@ function renderLoading(root) {
       <div class="universes-header">
         <div class="universes-title">Вселенные</div>
         <div class="universes-subtitle">
-          Связанные книги, фильмы, сериалы, аниме и манга из твоей библиотеки.
+          Читаем сохранённые вселенные из базы данных.
         </div>
       </div>
 
       <div class="universes-empty">
         <div class="universes-empty__title">Загружаем вселенные…</div>
         <div class="universes-empty__text">
-          Сначала читаем сохранённые данные, без лишнего ожидания внешних API.
+          Сначала используем готовые данные из БД, без повторного построения.
         </div>
       </div>
     </section>
@@ -360,14 +371,14 @@ function renderEmpty(root) {
       <div class="universes-header">
         <div class="universes-title">Вселенные</div>
         <div class="universes-subtitle">
-          Добавь несколько связанных произведений, например книгу и фильм одной серии.
+          Пока нет сохранённых вселенных. Построй первую вселенную из карточки произведения.
         </div>
       </div>
 
       <div class="universes-empty">
         <div class="universes-empty__title">Пока нет вселенных</div>
         <div class="universes-empty__text">
-          Открой карточку произведения и нажми “Построить вселенную”, либо добавь больше связанных элементов в библиотеку.
+          Открой карточку произведения и нажми “Построить вселенную”.
         </div>
         <div class="universes-empty__actions">
           <button class="universes-btn secondary" type="button" data-action="categories">
@@ -395,7 +406,7 @@ function renderError(root) {
       <div class="universes-empty">
         <div class="universes-empty__title">Ошибка загрузки</div>
         <div class="universes-empty__text">
-          Не удалось загрузить вселенные. Интерфейс не сломан, можно вернуться к категориям.
+          Не удалось загрузить вселенные. Можно вернуться к категориям.
         </div>
         <div class="universes-empty__actions">
           <button class="universes-btn secondary" type="button" data-action="categories">
@@ -449,7 +460,7 @@ export async function renderUniversesPage(root) {
         <div class="universes-header">
           <div class="universes-title">Вселенные</div>
           <div class="universes-subtitle">
-            Найдено ${escapeHtml(String(universes.length))} связанных групп.
+            Найдено ${escapeHtml(String(universes.length))} сохранённых групп.
           </div>
         </div>
 
