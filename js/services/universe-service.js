@@ -22,7 +22,10 @@ const RELATION_LABELS = {
   sequel: "Продолжение",
   prequel: "Приквел",
   spin_off: "Спинофф",
-  remake: "Ремейк"
+  remake: "Ремейк",
+  reboot: "Перезапуск",
+  chronology_next: "Следующее по хронологии",
+  chronology_previous: "Предыдущее по хронологии"
 };
 
 const RELATION_TYPES = new Set([
@@ -33,13 +36,17 @@ const RELATION_TYPES = new Set([
   "sequel",
   "prequel",
   "spin_off",
-  "remake"
+  "remake",
+  "reboot",
+  "chronology_next",
+  "chronology_previous"
 ]);
 
 const ALLOWED_DB_SOURCES = new Set([
   "library",
   "wikidata",
-  "user"
+  "user",
+  "openai"
 ]);
 
 function clean(value = "") {
@@ -90,7 +97,7 @@ function normalizeRelationSource(source = "") {
   }
 
   if (cleanSource === "openai" || cleanSource === "ai") {
-    return "wikidata";
+    return "openai";
   }
 
   return "wikidata";
@@ -891,6 +898,38 @@ async function saveWikidataEntities(items = [], fallbackCategory = "unknown") {
   return data || [];
 }
 
+
+function preDedupeUniverseItems(seedEntity, items = [], limit = 40) {
+  const map = new Map();
+
+  const seedKey = cleanLower(seedEntity?.canonical_key || "") || `id:${seedEntity?.id || "seed"}`;
+  map.set(seedKey, {
+    id: null,
+    entity_id: seedEntity?.id,
+    category: seedEntity?.category,
+    status: "planned",
+    folder_name: null,
+    created_at: null,
+    media_entities: seedEntity
+  });
+
+  safeArray(items).forEach((item) => {
+    const entity = item.media_entities || item;
+    if (!entity?.id && !entity?.canonical_key) return;
+
+    const canonicalKey = cleanLower(entity.canonical_key || "");
+    const key = canonicalKey || `id:${entity.id}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...item,
+        media_entities: entity
+      });
+    }
+  });
+
+  return Array.from(map.values()).slice(0, limit);
+}
 function buildOrderMap(aiOrder = [], fallbackItems = []) {
   const orderMap = new Map();
 
@@ -1028,9 +1067,11 @@ export async function buildUniverseForJob(job, entity) {
       progress_label: "Нормализуем через OpenAI"
     });
 
+    const aiCandidates = preDedupeUniverseItems(entity, allItems, 40);
+
     const aiPayload = await invokeUniverseNormalizeFunction({
       seedEntity: entity,
-      items: allItems,
+      items: aiCandidates,
       localRelations: localRelationRows
     });
 
@@ -1183,9 +1224,11 @@ export async function buildUniverseForEntity({ userId, entityId }) {
     const universeItems = getUniverseItemsForSeed(seedEntity, libraryItems);
     const localRelationRows = buildRelationRows(seedEntity, universeItems);
 
+    const aiCandidates = preDedupeUniverseItems(seedEntity, universeItems, 40);
+
     const aiPayload = await invokeUniverseNormalizeFunction({
       seedEntity,
-      items: universeItems,
+      items: aiCandidates,
       localRelations: localRelationRows
     });
 
