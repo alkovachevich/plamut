@@ -4,7 +4,10 @@ import {
   openAuthModal,
   openSearchModal,
   state,
-  setTemporaryCardItem
+  setTemporaryCardItem,
+  setCurrentCategory,
+  getCategoryViewState,
+  setCategoryViewState
 } from "../state.js";
 import { clampText, escapeHtml, safeArray } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
@@ -600,9 +603,10 @@ export async function renderCategoryPage(root, params = {}) {
     return;
   }
 
+  const savedViewState = getCategoryViewState(category) || {};
   let items = [];
-  let activeFolder = "all";
-  let activeSort = "recent";
+  let activeFolder = savedViewState.folder || "all";
+  let activeSort = savedViewState.sort || "recent";
   let isDestroyed = false;
 
   root.innerHTML = `
@@ -636,8 +640,21 @@ export async function renderCategoryPage(root, params = {}) {
   const contentRoot = root.querySelector("[data-content]");
   const sortSelect = root.querySelector("[data-sort]");
 
+  if (sortSelect) {
+    sortSelect.value = activeSort;
+  }
+
   function findItemById(userMediaId) {
     return items.find((item) => Number(item.id) === Number(userMediaId)) || null;
+  }
+
+  setCurrentCategory(category);
+
+  function persistViewState() {
+    setCategoryViewState(category, {
+      folder: activeFolder,
+      sort: activeSort
+    });
   }
 
   function renderList() {
@@ -659,6 +676,7 @@ export async function renderCategoryPage(root, params = {}) {
     foldersRoot.querySelectorAll("[data-folder]").forEach((button) => {
       button.addEventListener("click", () => {
         activeFolder = button.dataset.folder || "all";
+        persistViewState();
         renderList();
       });
     });
@@ -814,6 +832,7 @@ export async function renderCategoryPage(root, params = {}) {
 
   sortSelect?.addEventListener("change", () => {
     activeSort = sortSelect.value || "recent";
+    persistViewState();
     renderList();
   });
 
@@ -833,6 +852,12 @@ export async function renderCategoryPage(root, params = {}) {
 
     if (isDestroyed) return;
 
+    const existingFolders = new Set(uniqueFolders(items));
+    if (activeFolder !== "all" && !existingFolders.has(activeFolder)) {
+      activeFolder = "all";
+    }
+
+    persistViewState();
     renderList();
   } catch (error) {
     console.error("Category library load error:", error);
