@@ -220,7 +220,7 @@ export function renderAuthModal(root) {
 
       closeAuthModal();
     } catch (error) {
-      console.error("Auth submit error:", error);
+      console.warn("Auth submit error:", error);
       messageBox.innerHTML = renderError(error.message || "Ошибка авторизации");
       submitButton.disabled = false;
       submitButton.textContent = getSubmitLabel(mode);
