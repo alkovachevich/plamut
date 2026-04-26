@@ -5,7 +5,8 @@ import {
   state,
   openAuthModal,
   getTemporaryCardItem,
-  clearTemporaryCardItem
+  getStoredCardItemByKey,
+  setTemporaryCardItem
 } from "../state.js";
 
 import {
@@ -77,6 +78,20 @@ function getCover(entity = {}) {
   return cover;
 }
 
+function normalizeStoredEntity(item = {}) {
+  return {
+    ...item,
+    title_primary: item.title_primary || item.title || item.title_ru || item.title_en || item.original_title || "",
+    title_ru: item.title_ru || "",
+    title_en: item.title_en || "",
+    original_title: item.original_title || item.title || "",
+    description_ru: item.description_ru || item.description || "",
+    description_en: item.description_en || "",
+    external_ids: item.external_ids || {},
+    meta: item.meta || {}
+  };
+}
+
 function getCachedEntityByKey(userId, key) {
   if (!userId || !key) return null;
 
@@ -124,7 +139,7 @@ function buildFallbackEntity(params = {}) {
     original_title: key,
     year: null,
     cover_url: "",
-    description_ru: "Не удалось быстро загрузить данные из базы. Обнови страницу или открой карточку через поиск.",
+    description_ru: "Не удалось быстро загрузить данные из базы. Открой карточку через поиск или попробуй позже.",
     description_en: "",
     external_ids: {},
     meta: {},
@@ -133,44 +148,36 @@ function buildFallbackEntity(params = {}) {
   };
 }
 
-async function loadEntity(params = {}) {
+function loadFastEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
-  console.log("CARD: load entity start", { key, userId, params });
-
   const cachedEntity = getCachedEntityByKey(userId, key);
   if (cachedEntity?.canonical_key) {
-    console.log("CARD: entity from cache", cachedEntity);
     return cachedEntity;
   }
 
   const temp = getTemporaryCardItem();
   if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
-    console.log("CARD: entity from temp", temp);
-    return temp;
+    return normalizeStoredEntity(temp);
   }
 
+  const stored = getStoredCardItemByKey(key);
+  if (stored?.canonical_key) {
+    return normalizeStoredEntity(stored);
+  }
+
+  return null;
+}
+
+async function loadEntityFromDb(key) {
   if (!key) return null;
 
-  try {
-    const fromDb = await withTimeout(
-      getEntityByCanonicalKey(key),
-      "Загрузка карточки",
-      CARD_TIMEOUT_MS
-    );
-
-    if (fromDb) {
-      console.log("CARD: entity from DB", fromDb);
-      clearTemporaryCardItem();
-      return fromDb;
-    }
-  } catch (error) {
-    console.warn("CARD: DB card load skipped", error);
-  }
-
-  console.warn("CARD: fallback entity used", { key, params });
-  return buildFallbackEntity(params);
+  return withTimeout(
+    getEntityByCanonicalKey(key),
+    "Загрузка карточки",
+    CARD_TIMEOUT_MS
+  );
 }
 
 async function loadUserMedia(userId, entityId) {
@@ -518,25 +525,12 @@ async function hydrateRelatedItems(root, userId, entity, userMedia) {
 }
 
 async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
-  console.log("CARD BUILD: ensure entity saved start", {
-    userId,
-    entity,
-    userMedia
-  });
-
   if (!userId) {
     throw new Error("Нет пользователя");
   }
 
-  if (entity?.__fallback) {
-    throw new Error("Карточка не загружена из БД. Открой её через поиск и попробуй снова.");
-  }
-
   if (entity?.id && userMedia?.id) {
-    return {
-      entity,
-      userMedia
-    };
+    return { entity, userMedia };
   }
 
   const result = await addToUserLibrary({
@@ -547,18 +541,12 @@ async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
   const nextEntity = result?.entity || result?.userMedia?.media_entities || entity;
   const nextUserMedia = result?.userMedia || userMedia || null;
 
-  console.log("CARD BUILD: addToUserLibrary result", {
-    result,
-    nextEntity,
-    nextUserMedia
-  });
-
   if (!nextEntity?.id) {
-    throw new Error("Entity не получила id после сохранения");
+    throw new Error("Карточка не получила id после сохранения");
   }
 
   if (!nextUserMedia?.id) {
-    throw new Error("User media не создан после сохранения");
+    throw new Error("Элемент библиотеки не создан после сохранения");
   }
 
   updateCachedLibraryItem(userId, {
@@ -566,70 +554,28 @@ async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
     media_entities: nextEntity
   });
 
+  setTemporaryCardItem(nextEntity);
+
   return {
     entity: nextEntity,
     userMedia: nextUserMedia
   };
 }
 
-export async function renderCardPage(root, params = {}) {
-  renderLoading(root);
-
-  const entity = await loadEntity(params);
-
-  if (!entity) {
-    renderNotFound(root);
-    return;
-  }
-
-  const userId = state.user?.id || "";
-  let currentEntity = entity;
-  let userMedia = getCachedUserMedia(userId, currentEntity);
-  let pollingTimer = null;
-  let destroyed = false;
-
-  renderCard(root, {
-    entity: currentEntity,
-    userMedia,
-    relatedItems: []
-  });
-
+function bindCardActions({
+  root,
+  getEntity,
+  setEntity,
+  getUserMedia,
+  setUserMedia,
+  userId,
+  destroyedRef
+}) {
   const statusNode = root.querySelector("[data-status]");
   const addButton = root.querySelector('[data-action="add"]');
   const buildButton = root.querySelector('[data-action="build"]');
 
-  console.log("CARD: rendered", {
-    userId,
-    entity: currentEntity,
-    userMedia,
-    addButton: Boolean(addButton),
-    buildButton: Boolean(buildButton)
-  });
-
-  if (currentEntity.__fallback && statusNode) {
-    statusNode.textContent = "Карточка не загружена из БД. Открой её через поиск или обнови позже.";
-  }
-
-  bindRelated(root);
-
-  if (userId && currentEntity.id) {
-    loadUserLibrary(userId, {
-      category: currentEntity.category || "",
-      mode: "list",
-      allowStale: true,
-      backgroundRefresh: false
-    }).catch(() => []);
-
-    hydrateUserMediaState(root, userId, currentEntity).then((loadedUserMedia) => {
-      if (destroyed) return;
-
-      userMedia = loadedUserMedia || userMedia;
-
-      if (userMedia?.id) {
-        hydrateRelatedItems(root, userId, currentEntity, userMedia);
-      }
-    });
-  }
+  let pollingTimer = null;
 
   function stopPolling() {
     if (pollingTimer) {
@@ -643,11 +589,10 @@ export async function renderCardPage(root, params = {}) {
 
     if (!job?.id) return;
 
-    console.log("CARD BUILD: polling started", job);
     updateProgressUI(root, job);
 
     pollingTimer = setInterval(async () => {
-      if (destroyed) {
+      if (destroyedRef.value) {
         stopPolling();
         return;
       }
@@ -659,7 +604,6 @@ export async function renderCardPage(root, params = {}) {
 
       if (!updated) return;
 
-      console.log("CARD BUILD: poll update", updated);
       updateProgressUI(root, updated);
 
       if (isFinished(updated)) {
@@ -682,7 +626,7 @@ export async function renderCardPage(root, params = {}) {
       return;
     }
 
-    if (userMedia?.id) return;
+    if (getUserMedia()?.id) return;
 
     try {
       addButton.disabled = true;
@@ -690,25 +634,29 @@ export async function renderCardPage(root, params = {}) {
 
       const result = await addToUserLibrary({
         userId,
-        entity: currentEntity
+        entity: getEntity()
       });
 
-      userMedia = result.userMedia || userMedia;
-      currentEntity = result.entity || result.userMedia?.media_entities || currentEntity;
+      const nextUserMedia = result.userMedia || getUserMedia();
+      const nextEntity = result.entity || result.userMedia?.media_entities || getEntity();
+
+      setUserMedia(nextUserMedia);
+      setEntity(nextEntity);
 
       updateCachedLibraryItem(userId, {
-        ...userMedia,
-        media_entities: currentEntity
+        ...nextUserMedia,
+        media_entities: nextEntity
       });
 
-      updateUserMediaUI(root, userMedia);
+      setTemporaryCardItem(nextEntity);
+      updateUserMediaUI(root, nextUserMedia);
 
       statusNode.textContent = result.alreadyExists
         ? "Уже есть в библиотеке"
         : "Добавлено в библиотеку";
 
-      if (userMedia?.id) {
-        hydrateRelatedItems(root, userId, currentEntity, userMedia);
+      if (nextUserMedia?.id) {
+        hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
       }
     } catch (error) {
       console.error("CARD: add to library error", error);
@@ -718,12 +666,6 @@ export async function renderCardPage(root, params = {}) {
   });
 
   buildButton?.addEventListener("click", async () => {
-    console.log("CARD BUILD: click", {
-      userId,
-      currentEntity,
-      userMedia
-    });
-
     if (!userId) {
       openAuthModal("login");
       return;
@@ -735,43 +677,32 @@ export async function renderCardPage(root, params = {}) {
 
       const saved = await ensureEntitySavedForBuild({
         userId,
-        entity: currentEntity,
-        userMedia
+        entity: getEntity(),
+        userMedia: getUserMedia()
       });
 
-      currentEntity = saved.entity;
-      userMedia = saved.userMedia;
+      setEntity(saved.entity);
+      setUserMedia(saved.userMedia);
 
-      updateUserMediaUI(root, userMedia);
+      updateUserMediaUI(root, saved.userMedia);
 
       statusNode.textContent = "Создаём задачу построения…";
 
-      console.log("CARD BUILD: creating job", {
-        userId,
-        entityId: currentEntity.id,
-        canonicalKey: currentEntity.canonical_key,
-        universeKey: currentEntity.universe_key
-      });
-
       const job = await createUniverseBuildJob({
         userId,
-        entityId: currentEntity.id,
-        canonicalKey: currentEntity.canonical_key || "",
-        universeKey: currentEntity.universe_key || ""
+        entityId: saved.entity.id,
+        canonicalKey: saved.entity.canonical_key || "",
+        universeKey: saved.entity.universe_key || ""
       });
-
-      console.log("CARD BUILD: job created", job);
 
       updateProgressUI(root, job);
       startPolling(job);
 
       statusNode.textContent = "Строим вселенную…";
 
-      buildUniverseForJob(job, currentEntity)
+      buildUniverseForJob(job, saved.entity)
         .then((result) => {
-          console.log("CARD BUILD: build result", result);
-
-          if (destroyed || !result?.universe_key) return;
+          if (destroyedRef.value || !result?.universe_key) return;
 
           navigate("/universe", {
             id: result.universe_key
@@ -779,8 +710,8 @@ export async function renderCardPage(root, params = {}) {
         })
         .catch((error) => {
           console.error("CARD BUILD: build failed", error);
-          if (statusNode) statusNode.textContent = error.message || "Ошибка построения вселенной";
-          if (buildButton) buildButton.disabled = false;
+          statusNode.textContent = error.message || "Ошибка построения вселенной";
+          buildButton.disabled = false;
         });
     } catch (error) {
       console.error("CARD BUILD: start failed", error);
@@ -789,8 +720,105 @@ export async function renderCardPage(root, params = {}) {
     }
   });
 
+  return stopPolling;
+}
+
+export async function renderCardPage(root, params = {}) {
+  const key = normalizeKey(params.key || "");
+  const userId = state.user?.id || "";
+
+  let currentEntity = loadFastEntity(params);
+  let userMedia = currentEntity ? getCachedUserMedia(userId, currentEntity) : null;
+  const destroyedRef = { value: false };
+  let stopPolling = null;
+
+  if (!currentEntity) {
+    renderLoading(root);
+
+    try {
+      currentEntity = await loadEntityFromDb(key);
+    } catch (error) {
+      console.warn("CARD: first DB load skipped", error);
+    }
+
+    if (!currentEntity) {
+      currentEntity = buildFallbackEntity(params);
+    }
+  }
+
+  if (!currentEntity) {
+    renderNotFound(root);
+    return;
+  }
+
+  setTemporaryCardItem(currentEntity);
+
+  renderCard(root, {
+    entity: currentEntity,
+    userMedia,
+    relatedItems: []
+  });
+
+  const statusNode = root.querySelector("[data-status]");
+
+  if (!currentEntity.id && statusNode) {
+    statusNode.textContent = "Карточка открыта из локального кэша. При действии она будет сохранена в БД.";
+  }
+
+  bindRelated(root);
+
+  stopPolling = bindCardActions({
+    root,
+    userId,
+    destroyedRef,
+    getEntity: () => currentEntity,
+    setEntity: (entity) => {
+      currentEntity = entity;
+    },
+    getUserMedia: () => userMedia,
+    setUserMedia: (value) => {
+      userMedia = value;
+    }
+  });
+
+  if (userId && currentEntity.id) {
+    loadUserLibrary(userId, {
+      category: currentEntity.category || "",
+      mode: "list",
+      allowStale: true,
+      backgroundRefresh: false
+    }).catch(() => []);
+
+    hydrateUserMediaState(root, userId, currentEntity).then((loadedUserMedia) => {
+      if (destroyedRef.value) return;
+
+      userMedia = loadedUserMedia || userMedia;
+
+      if (userMedia?.id) {
+        hydrateRelatedItems(root, userId, currentEntity, userMedia);
+      }
+    });
+  }
+
+  if (key) {
+    loadEntityFromDb(key)
+      .then((dbEntity) => {
+        if (destroyedRef.value || !dbEntity?.id) return;
+
+        currentEntity = dbEntity;
+        setTemporaryCardItem(dbEntity);
+
+        if (!userMedia) {
+          userMedia = getCachedUserMedia(userId, dbEntity);
+        }
+      })
+      .catch((error) => {
+        console.warn("CARD: background DB refresh skipped", error);
+      });
+  }
+
   return () => {
-    destroyed = true;
-    stopPolling();
+    destroyedRef.value = true;
+    if (stopPolling) stopPolling();
   };
 }
