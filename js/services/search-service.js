@@ -8,6 +8,28 @@ const WIKIDATA_LIMIT = 10;
 const TMDB_LIMIT = 12;
 const ANILIST_LIMIT = 10;
 
+const SEARCH_CACHE_TTL_MS = 1000 * 60 * 3;
+const searchCache = new Map();
+
+function getSearchCacheKey(scope = "global", query = "", category = "") {
+  return `${scope}:${compactString(query)}:${category}`;
+}
+
+function getCachedSearchResult(key = "") {
+  const row = searchCache.get(key);
+  if (!row) return null;
+  if (Date.now() - row.ts > SEARCH_CACHE_TTL_MS) {
+    searchCache.delete(key);
+    return null;
+  }
+  return row.value;
+}
+
+function setCachedSearchResult(key = "", value = null) {
+  if (!key) return;
+  searchCache.set(key, { ts: Date.now(), value });
+}
+
 function normalizeQuery(value = "") {
   return normalizeString(value || "");
 }
@@ -94,6 +116,73 @@ function getTitleKeys(item = {}) {
   ])
     .map(cleanTitleForDedupe)
     .filter(Boolean);
+}
+
+
+function sanitizeCategory(value = "") {
+  const category = String(value || "").trim().toLowerCase();
+  return ["books", "movies", "series", "anime", "manga"].includes(category)
+    ? category
+    : "";
+}
+
+function normalizeExternalIds(ids = {}) {
+  const source = ids && typeof ids === "object" ? ids : {};
+  return {
+    wikidata: source.wikidata || null,
+    tmdb: source.tmdb || null,
+    imdb: source.imdb || null,
+    openlibrary_work: source.openlibrary_work || null,
+    isbn: uniqueArray(safeArray(source.isbn).map(String).filter(Boolean)),
+    anilist: source.anilist || null,
+    mal: source.mal || null,
+    edition_key: uniqueArray(safeArray(source.edition_key).map(String).filter(Boolean))
+  };
+}
+
+function normalizeSearchResult(raw = {}) {
+  const category = sanitizeCategory(raw.category);
+  const title = String(raw.title || raw.title_primary || raw.title_ru || raw.title_en || raw.original_title || "").trim();
+  const canonical = String(raw.canonical_key || "").trim();
+  const originalTitle = String(raw.original_title || raw.title_en || raw.title_ru || title).trim();
+  const external_ids = normalizeExternalIds(raw.external_ids || {});
+
+  if (!category || !title || !canonical) return null;
+
+  return {
+    canonical_key: canonical,
+    category,
+    title,
+    original_title: originalTitle,
+    year: safeNumberYear(raw.year),
+    cover_url: String(raw.cover_url || "").trim(),
+    external_ids,
+    score: Number.isFinite(Number(raw.score)) ? Number(raw.score) : 0,
+    aliases: uniqueArray(safeArray(raw.aliases).map(String).filter(Boolean)),
+    description_ru: String(raw.description_ru || "").trim(),
+    description_en: String(raw.description_en || "").trim(),
+    primary_source: String(raw.primary_source || "").trim()
+  };
+}
+
+function pickBestItem(items = []) {
+  return safeArray(items)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aHasCover = a.cover_url ? 1 : 0;
+      const bHasCover = b.cover_url ? 1 : 0;
+      if (bHasCover !== aHasCover) return bHasCover - aHasCover;
+
+      const aHasYear = a.year ? 1 : 0;
+      const bHasYear = b.year ? 1 : 0;
+      if (bHasYear !== aHasYear) return bHasYear - aHasYear;
+
+      const aIds = Object.values(a.external_ids || {}).flat().filter(Boolean).length;
+      const bIds = Object.values(b.external_ids || {}).flat().filter(Boolean).length;
+      if (bIds !== aIds) return bIds - aIds;
+
+      return (b.score || 0) - (a.score || 0);
+    })[0] || null;
 }
 
 function hasSharedValue(a = [], b = []) {
@@ -214,36 +303,45 @@ function identityKeys(item = {}) {
 }
 
 function dedupeAll(items = []) {
-  const result = [];
-  const keyToIndex = new Map();
+  const normalized = safeArray(items)
+    .map((item) => normalizeSearchResult(item))
+    .filter(Boolean);
 
-  safeArray(items).forEach((item) => {
-    if (!item?.canonical_key) return;
+  const grouped = new Map();
 
+  normalized.forEach((item) => {
     const keys = identityKeys(item);
-    const seenIndexes = uniqueArray(keys.map((k) => keyToIndex.get(k)).filter((v) => Number.isInteger(v)));
+    let groupKey = keys.find((key) => grouped.has(key));
 
-    if (!seenIndexes.length) {
-      const idx = result.length;
-      result.push(item);
-      keys.forEach((k) => keyToIndex.set(k, idx));
+    if (!groupKey) {
+      groupKey = keys[0] || item.canonical_key;
+      grouped.set(groupKey, [item]);
+      keys.forEach((key) => grouped.set(key, grouped.get(groupKey)));
       return;
     }
 
-    const targetIndex = seenIndexes[0];
-    let merged = mergeItems(result[targetIndex], item);
-
-    for (let i = 1; i < seenIndexes.length; i += 1) {
-      const idx = seenIndexes[i];
-      merged = mergeItems(merged, result[idx]);
-      result[idx] = merged;
-    }
-
-    result[targetIndex] = merged;
-    identityKeys(merged).forEach((k) => keyToIndex.set(k, targetIndex));
+    const bucket = grouped.get(groupKey) || [];
+    bucket.push(item);
+    keys.forEach((key) => grouped.set(key, bucket));
   });
 
-  return result.filter(Boolean);
+  const uniqueBuckets = [];
+  const seenBuckets = new Set();
+
+  Array.from(grouped.values()).forEach((bucket) => {
+    if (!bucket || seenBuckets.has(bucket)) return;
+    seenBuckets.add(bucket);
+    uniqueBuckets.push(bucket);
+  });
+
+  return uniqueBuckets
+    .map((bucket) => {
+      const best = pickBestItem(bucket);
+      if (!best) return null;
+      return safeArray(bucket).reduce((acc, item) => mergeItems(acc, item), best);
+    })
+    .map((item) => normalizeSearchResult(item))
+    .filter((item) => item && item.title && item.canonical_key);
 }
 
 function openLibraryCoverUrlFromId(coverId) {
@@ -502,15 +600,17 @@ function scoreBookResult(query, item) {
 
   let score = 0;
 
-  if (title === q) score += 140;
-  if (aliases.includes(q)) score += 115;
-  if (title.startsWith(q)) score += 45;
-  if (aliases.some((alias) => alias.startsWith(q))) score += 38;
-  if (aliases.some((alias) => alias.includes(q))) score += 22;
-  if (item.cover_url) score += 35;
-  if (item.primary_source === "openlibrary") score += 14;
-  if (item.primary_source === "wikidata") score += 10;
-  if (item.year) score += 5;
+  if (title === q || aliases.includes(q)) score += 150;
+  if (title.startsWith(q) || aliases.some((alias) => alias.startsWith(q))) score += 50;
+  if (title.includes(q) || aliases.some((alias) => alias.includes(q))) score += 20;
+  if (item.cover_url) score += 40;
+  if (item.year) score += 10;
+  if (Object.keys(item.external_ids || {}).some((key) => {
+    const value = item.external_ids?.[key];
+    return Array.isArray(value) ? value.length : Boolean(value);
+  })) score += 15;
+  if (!item.cover_url) score -= 35;
+  if ((item.title || "").trim().length < 2) score -= 50;
 
   return score;
 }
@@ -664,14 +764,17 @@ function scoreScreenResult(query, item) {
   const aliases = safeArray(item.aliases).map(compactString);
   let score = item.score || 0;
 
-  if (title === q || originalTitle === q) score += 150;
-  if (aliases.includes(q)) score += 120;
-  if (title.startsWith(q) || originalTitle.startsWith(q)) score += 50;
-  if (aliases.some((alias) => alias.startsWith(q))) score += 40;
-  if (aliases.some((alias) => alias.includes(q))) score += 20;
-  if (item.cover_url) score += 25;
-  if (item.year) score += 8;
-  if ((item.title || '').length < 2) score -= 50;
+  if (title === q || originalTitle === q || aliases.includes(q)) score += 150;
+  if (title.startsWith(q) || originalTitle.startsWith(q) || aliases.some((alias) => alias.startsWith(q))) score += 50;
+  if (title.includes(q) || originalTitle.includes(q) || aliases.some((alias) => alias.includes(q))) score += 20;
+  if (item.cover_url) score += 40;
+  if (item.year) score += 10;
+  if (Object.keys(item.external_ids || {}).some((key) => {
+    const value = item.external_ids?.[key];
+    return Array.isArray(value) ? value.length : Boolean(value);
+  })) score += 15;
+  if (!item.cover_url) score -= 35;
+  if ((item.title || "").trim().length < 2) score -= 50;
 
   return score;
 }
@@ -853,6 +956,9 @@ function filterCrossCategoryNoise({ books = [], moviesSeries = [], anime = [], m
 
 export async function runGlobalSearch(query) {
   const cleanQuery = normalizeQuery(query);
+  const cacheKey = getSearchCacheKey("global", cleanQuery);
+  const cached = getCachedSearchResult(cacheKey);
+  if (cached) return cached;
 
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return emptyGroups();
@@ -877,27 +983,39 @@ export async function runGlobalSearch(query) {
   const merged = dedupeAll(flattenGroups(grouped))
     .map((item) => ({
       ...item,
-      score: item.category === 'books' ? scoreBookResult(cleanQuery, item) : scoreScreenResult(cleanQuery, item)
+      score: item.category === "books" ? scoreBookResult(cleanQuery, item) : scoreScreenResult(cleanQuery, item)
     }))
+    .map((item) => normalizeSearchResult(item))
+    .filter((item) => item && item.title && item.canonical_key)
     .sort((a, b) => b.score - a.score);
 
-  return groupItems(merged);
+  const groupedResult = groupItems(merged);
+  setCachedSearchResult(cacheKey, groupedResult);
+
+  return groupedResult;
 }
 
 export async function runCategorySearch(query, category) {
   const cleanQuery = normalizeQuery(query);
+  const normalizedCategory = sanitizeCategory(category);
+  const cacheKey = getSearchCacheKey("category", cleanQuery, normalizedCategory);
+  const cached = getCachedSearchResult(cacheKey);
+  if (cached) return cached;
 
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
   }
 
-  if (category === "books") return dedupeAll(await searchBooks(cleanQuery));
-  if (category === "movies") return dedupeAll(await searchMovies(cleanQuery));
-  if (category === "series") return dedupeAll(await searchSeries(cleanQuery));
-  if (category === "anime") return dedupeAll(await searchAnimeOrManga(cleanQuery, "anime"));
-  if (category === "manga") return dedupeAll(await searchAnimeOrManga(cleanQuery, "manga"));
+  let result = [];
 
-  return [];
+  if (normalizedCategory === "books") result = dedupeAll(await searchBooks(cleanQuery)).filter((item) => item.category === "books");
+  if (normalizedCategory === "movies") result = dedupeAll(await searchMovies(cleanQuery)).filter((item) => item.category === "movies");
+  if (normalizedCategory === "series") result = dedupeAll(await searchSeries(cleanQuery)).filter((item) => item.category === "series");
+  if (normalizedCategory === "anime") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "anime")).filter((item) => item.category === "anime");
+  if (normalizedCategory === "manga") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "manga")).filter((item) => item.category === "manga");
+
+  setCachedSearchResult(cacheKey, result);
+  return result;
 }
 
 export async function addSearchResultDirectlyToLibrary({ userId, item }) {
