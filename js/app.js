@@ -1,6 +1,14 @@
 import { ROUTES } from "./config.js";
 import { initRouter } from "./router.js";
-import { state, subscribe, setUser, logoutUser, closeAuthModal } from "./state.js";
+import {
+  state,
+  subscribe,
+  setUser,
+  logoutUser,
+  closeAuthModal,
+  setTheme,
+  setLanguage
+} from "./state.js";
 
 import { renderHeader } from "./components/header.js";
 import { renderSidebar } from "./components/sidebar.js";
@@ -78,8 +86,16 @@ function renderFatalAppError(message) {
   `;
 }
 
+function normalizeTheme(value = "") {
+  return value === "light" || value === "dark" ? value : "dark";
+}
+
+function normalizeLanguage(value = "") {
+  return value === "en" || value === "ru" ? value : "ru";
+}
+
 function applyTheme() {
-  document.documentElement.setAttribute("data-theme", state.theme || "dark");
+  document.documentElement.setAttribute("data-theme", normalizeTheme(state.theme));
 }
 
 function readCachedUser() {
@@ -108,7 +124,9 @@ function writeCachedUser(user) {
         email: user.email || null,
         username: user.username || null,
         display_name: user.display_name || "User",
-        avatar_url: user.avatar_url || null
+        avatar_url: user.avatar_url || null,
+        preferred_theme: normalizeTheme(user.preferred_theme || state.theme),
+        preferred_language: normalizeLanguage(user.preferred_language || state.language)
       })
     );
   } catch (error) {
@@ -163,6 +181,19 @@ function buildAvatarUrl(user, profile = null) {
   );
 }
 
+function applyProfilePreferences(profile = null) {
+  const nextTheme = normalizeTheme(profile?.preferred_theme || state.theme);
+  const nextLanguage = normalizeLanguage(profile?.preferred_language || state.language);
+
+  if (nextTheme && nextTheme !== state.theme) {
+    setTheme(nextTheme);
+  }
+
+  if (nextLanguage && nextLanguage !== state.language) {
+    setLanguage(nextLanguage);
+  }
+}
+
 async function ensureUserProfile(user) {
   if (!user?.id) return null;
 
@@ -172,7 +203,9 @@ async function ensureUserProfile(user) {
     id: user.id,
     username: existingProfile?.username || buildUsername(user),
     display_name: existingProfile?.display_name || buildDisplayName(user, existingProfile),
-    avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile)
+    avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile),
+    preferred_theme: normalizeTheme(existingProfile?.preferred_theme || state.theme),
+    preferred_language: normalizeLanguage(existingProfile?.preferred_language || state.language)
   };
 
   const savedProfile = await upsertUserProfileSafe(fallbackProfile);
@@ -192,7 +225,9 @@ async function applyAuthenticatedUser(user) {
     email: user.email || null,
     username: buildUsername(user),
     display_name: buildDisplayName(user),
-    avatar_url: buildAvatarUrl(user)
+    avatar_url: buildAvatarUrl(user),
+    preferred_theme: normalizeTheme(state.theme),
+    preferred_language: normalizeLanguage(state.language)
   };
 
   setUser(cachedBeforeProfile);
@@ -205,9 +240,12 @@ async function applyAuthenticatedUser(user) {
     email: user.email || null,
     username: profile?.username || cachedBeforeProfile.username,
     display_name: profile?.display_name || cachedBeforeProfile.display_name,
-    avatar_url: profile?.avatar_url || cachedBeforeProfile.avatar_url
+    avatar_url: profile?.avatar_url || cachedBeforeProfile.avatar_url,
+    preferred_theme: normalizeTheme(profile?.preferred_theme || cachedBeforeProfile.preferred_theme),
+    preferred_language: normalizeLanguage(profile?.preferred_language || cachedBeforeProfile.preferred_language)
   };
 
+  applyProfilePreferences(normalizedUser);
   setUser(normalizedUser);
   writeCachedUser(normalizedUser);
 }
@@ -221,7 +259,12 @@ async function hydrateAuthStateSafely() {
       const cachedUser = readCachedUser();
 
       if (cachedUser?.id) {
-        setUser(cachedUser);
+        applyProfilePreferences(cachedUser);
+        setUser({
+          ...cachedUser,
+          preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
+          preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
+        });
       }
 
       return;
@@ -234,7 +277,12 @@ async function hydrateAuthStateSafely() {
     const cachedUser = readCachedUser();
 
     if (cachedUser?.id) {
-      setUser(cachedUser);
+      applyProfilePreferences(cachedUser);
+      setUser({
+        ...cachedUser,
+        preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
+        preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
+      });
     }
   }
 }
@@ -435,8 +483,14 @@ async function init() {
   }
 
   const cachedUser = readCachedUser();
+
   if (cachedUser?.id) {
-    setUser(cachedUser);
+    applyProfilePreferences(cachedUser);
+    setUser({
+      ...cachedUser,
+      preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
+      preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
+    });
   }
 
   subscribe(renderApp);
