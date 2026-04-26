@@ -300,7 +300,7 @@ export function renderSidebar(root) {
         setLanguage(language);
         await savePreference({ preferred_language: language });
       } catch (error) {
-        console.error("Sidebar language save error:", error);
+        console.warn("Sidebar language save error:", error);
       } finally {
         button.disabled = false;
       }
@@ -316,7 +316,7 @@ export function renderSidebar(root) {
         setTheme(theme);
         await savePreference({ preferred_theme: theme });
       } catch (error) {
-        console.error("Sidebar theme save error:", error);
+        console.warn("Sidebar theme save error:", error);
       } finally {
         button.disabled = false;
       }
@@ -351,7 +351,7 @@ export function renderSidebar(root) {
       closeSidebar();
       navigate(ROUTES.HOME);
     } catch (error) {
-      console.error("Logout error:", error);
+      console.warn("Logout error:", error);
 
       if (logoutButton) {
         logoutButton.disabled = false;
