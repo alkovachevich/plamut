@@ -1,4 +1,8 @@
-import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
+import {
+  getSupabaseClient,
+  withTimeout,
+  getCurrentSession
+} from "../lib/supabase-client.js";
 import { safeArray } from "../utils.js";
 
 const USER_MEDIA_SELECT = `
@@ -14,7 +18,6 @@ const USER_MEDIA_SELECT = `
     id,
     canonical_key,
     category,
-    primary_source,
     title_primary,
     title_ru,
     title_en,
@@ -24,7 +27,6 @@ const USER_MEDIA_SELECT = `
     description_ru,
     description_en,
     external_ids,
-    meta,
     universe_key,
     relations_built_at,
     relations_status
@@ -32,9 +34,10 @@ const USER_MEDIA_SELECT = `
 `;
 
 const CACHE_TTL_MS = 1000 * 60 * 5;
+const LIBRARY_TIMEOUT_MS = 9000;
 
 const cache = {
-  byUser: new Map(),
+  byKey: new Map(),
   pending: new Map()
 };
 
@@ -46,8 +49,10 @@ function cleanText(value = "") {
   return String(value || "").trim();
 }
 
-function getUserKey(userId) {
-  return cleanText(userId);
+function buildCacheKey(userId, category = "") {
+  const cleanUserId = cleanText(userId);
+  const cleanCategory = cleanText(category) || "all";
+  return `${cleanUserId}:${cleanCategory}`;
 }
 
 function getItemEntity(item = {}) {
@@ -62,9 +67,9 @@ function getStableItemKey(item = {}) {
     cleanText(item.canonical_key) ||
     [
       cleanText(entity.category || item.category),
-      cleanText(entity.primary_source),
       cleanText(entity.external_ids?.wikidata),
       cleanText(entity.external_ids?.tmdb),
+      cleanText(entity.external_ids?.imdb),
       cleanText(entity.external_ids?.openlibrary_work),
       cleanText(entity.external_ids?.anilist),
       cleanText(entity.title_primary || entity.title_ru || entity.title_en || entity.original_title),
@@ -129,33 +134,24 @@ export function dedupeLibraryItems(items = []) {
   });
 }
 
-function readCache(userId) {
-  const key = getUserKey(userId);
-  if (!key) return null;
+function readCache(cacheKey) {
+  if (!cacheKey) return null;
 
-  const entry = cache.byUser.get(key);
+  const entry = cache.byKey.get(cacheKey);
   if (!entry) return null;
-
-  if (now() - entry.createdAt > CACHE_TTL_MS) {
-    return {
-      ...entry,
-      expired: true
-    };
-  }
 
   return {
     ...entry,
-    expired: false
+    expired: now() - entry.createdAt > CACHE_TTL_MS
   };
 }
 
-function writeCache(userId, items = []) {
-  const key = getUserKey(userId);
-  if (!key) return [];
+function writeCache(cacheKey, items = []) {
+  if (!cacheKey) return [];
 
   const deduped = dedupeLibraryItems(items);
 
-  cache.byUser.set(key, {
+  cache.byKey.set(cacheKey, {
     createdAt: now(),
     items: deduped
   });
@@ -163,41 +159,53 @@ function writeCache(userId, items = []) {
   return deduped;
 }
 
+async function hasValidSessionForUser(userId) {
+  const session = await getCurrentSession().catch(() => null);
+  return Boolean(session?.user?.id && session.user.id === userId);
+}
+
 export function clearLibraryCache(userId = null) {
   if (!userId) {
-    cache.byUser.clear();
+    cache.byKey.clear();
     cache.pending.clear();
     return;
   }
 
-  const key = getUserKey(userId);
-  cache.byUser.delete(key);
-  cache.pending.delete(key);
+  const prefix = `${cleanText(userId)}:`;
+
+  Array.from(cache.byKey.keys()).forEach((key) => {
+    if (key.startsWith(prefix)) cache.byKey.delete(key);
+  });
+
+  Array.from(cache.pending.keys()).forEach((key) => {
+    if (key.startsWith(prefix)) cache.pending.delete(key);
+  });
 }
 
-export function getCachedLibrary(userId) {
-  const entry = readCache(userId);
+export function getCachedLibrary(userId, options = {}) {
+  const cacheKey = buildCacheKey(userId, options.category);
+  const entry = readCache(cacheKey);
   return entry?.items || [];
 }
 
-export function getCachedLibraryItem(userId, canonicalKey) {
+export function getCachedLibraryItem(userId, canonicalKey, options = {}) {
   const key = cleanText(canonicalKey);
   if (!key) return null;
 
-  return getCachedLibrary(userId).find((item) => {
+  return getCachedLibrary(userId, options).find((item) => {
     const entity = item.media_entities || {};
     return entity.canonical_key === key;
   }) || null;
 }
 
 export async function fetchUserLibraryFromDb(userId, options = {}) {
-  const cleanUserId = getUserKey(userId);
+  const cleanUserId = cleanText(userId);
   if (!cleanUserId) return [];
 
-  const {
-    category = "",
-    timeout = 30000
-  } = options;
+  const category = cleanText(options.category);
+
+  const sessionOk = await hasValidSessionForUser(cleanUserId);
+  if (!sessionOk) return [];
 
   const supabase = getSupabaseClient();
 
@@ -214,7 +222,7 @@ export async function fetchUserLibraryFromDb(userId, options = {}) {
   const { data, error } = await withTimeout(
     query,
     "Загрузка библиотеки",
-    timeout
+    LIBRARY_TIMEOUT_MS
   );
 
   if (error) throw error;
@@ -225,39 +233,43 @@ export async function fetchUserLibraryFromDb(userId, options = {}) {
 }
 
 export async function loadUserLibrary(userId, options = {}) {
-  const cleanUserId = getUserKey(userId);
+  const cleanUserId = cleanText(userId);
   if (!cleanUserId) return [];
 
-  const {
-    category = "",
-    force = false,
-    backgroundRefresh = true
-  } = options;
-
-  const cacheKey = `${cleanUserId}:${category || "all"}`;
+  const category = cleanText(options.category);
+  const force = Boolean(options.force);
+  const backgroundRefresh = options.backgroundRefresh !== false;
+  const cacheKey = buildCacheKey(cleanUserId, category);
   const cached = readCache(cacheKey);
 
   if (!force && cached?.items?.length && !cached.expired) {
     return cached.items;
   }
 
-  if (!force && cached?.items?.length && cached.expired && backgroundRefresh) {
-    refreshUserLibrary(userId, { category }).catch((error) => {
-      console.warn("Library background refresh skipped:", error);
-    });
+  if (!force && cached?.items?.length) {
+    if (backgroundRefresh) {
+      refreshUserLibrary(cleanUserId, { category }).catch((error) => {
+        console.warn("Library background refresh skipped:", error);
+      });
+    }
 
     return cached.items;
   }
 
-  return refreshUserLibrary(userId, { category });
+  try {
+    return await refreshUserLibrary(cleanUserId, { category });
+  } catch (error) {
+    console.warn("Library initial load skipped:", error);
+    return [];
+  }
 }
 
 export async function refreshUserLibrary(userId, options = {}) {
-  const cleanUserId = getUserKey(userId);
+  const cleanUserId = cleanText(userId);
   if (!cleanUserId) return [];
 
   const category = cleanText(options.category);
-  const cacheKey = `${cleanUserId}:${category || "all"}`;
+  const cacheKey = buildCacheKey(cleanUserId, category);
 
   if (cache.pending.has(cacheKey)) {
     return cache.pending.get(cacheKey);
@@ -265,6 +277,10 @@ export async function refreshUserLibrary(userId, options = {}) {
 
   const promise = fetchUserLibraryFromDb(cleanUserId, { category })
     .then((items) => writeCache(cacheKey, items))
+    .catch((error) => {
+      console.warn("Library refresh failed:", error);
+      return readCache(cacheKey)?.items || [];
+    })
     .finally(() => {
       cache.pending.delete(cacheKey);
     });
@@ -275,13 +291,13 @@ export async function refreshUserLibrary(userId, options = {}) {
 }
 
 export function updateCachedLibraryItem(userId, updatedItem, options = {}) {
-  const cleanUserId = getUserKey(userId);
+  const cleanUserId = cleanText(userId);
   if (!cleanUserId || !updatedItem) return [];
 
   const category = cleanText(options.category || updatedItem.category);
   const cacheKeys = [
-    `${cleanUserId}:all`,
-    category ? `${cleanUserId}:${category}` : ""
+    buildCacheKey(cleanUserId, ""),
+    category ? buildCacheKey(cleanUserId, category) : ""
   ].filter(Boolean);
 
   let result = [];
@@ -296,7 +312,7 @@ export function updateCachedLibraryItem(userId, updatedItem, options = {}) {
       ...items.filter((item) => getStableItemKey(item) !== updatedKey)
     ]);
 
-    cache.byUser.set(cacheKey, {
+    cache.byKey.set(cacheKey, {
       createdAt: now(),
       items: nextItems
     });
@@ -308,15 +324,15 @@ export function updateCachedLibraryItem(userId, updatedItem, options = {}) {
 }
 
 export function removeCachedLibraryItem(userId, userMediaId, options = {}) {
-  const cleanUserId = getUserKey(userId);
+  const cleanUserId = cleanText(userId);
   const cleanId = Number(userMediaId);
 
   if (!cleanUserId || !cleanId) return [];
 
   const category = cleanText(options.category);
   const cacheKeys = [
-    `${cleanUserId}:all`,
-    category ? `${cleanUserId}:${category}` : ""
+    buildCacheKey(cleanUserId, ""),
+    category ? buildCacheKey(cleanUserId, category) : ""
   ].filter(Boolean);
 
   let result = [];
@@ -325,7 +341,7 @@ export function removeCachedLibraryItem(userId, userMediaId, options = {}) {
     const entry = readCache(cacheKey);
     const nextItems = safeArray(entry?.items).filter((item) => Number(item.id) !== cleanId);
 
-    cache.byUser.set(cacheKey, {
+    cache.byKey.set(cacheKey, {
       createdAt: now(),
       items: nextItems
     });
@@ -338,9 +354,9 @@ export function removeCachedLibraryItem(userId, userMediaId, options = {}) {
 
 export function getLibraryCacheDebugInfo() {
   return {
-    keys: Array.from(cache.byUser.keys()),
+    keys: Array.from(cache.byKey.keys()),
     pending: Array.from(cache.pending.keys()),
-    sizes: Array.from(cache.byUser.entries()).map(([key, value]) => ({
+    sizes: Array.from(cache.byKey.entries()).map(([key, value]) => ({
       key,
       size: value.items?.length || 0,
       ageMs: now() - value.createdAt
