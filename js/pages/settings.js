@@ -12,6 +12,33 @@ import {
   uploadAvatarImage
 } from "../lib/supabase-client.js";
 
+const SETTINGS_SECTIONS = ["appearance", "avatar", "profile", "password"];
+
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeUsername(value = "") {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+}
+
+function normalizeTheme(value = "") {
+  return value === "light" || value === "dark" ? value : "dark";
+}
+
+function normalizeLanguage(value = "") {
+  return value === "en" || value === "ru" ? value : "ru";
+}
+
+function getInitialSection() {
+  const section = state.routeParams?.section || "appearance";
+  return SETTINGS_SECTIONS.includes(section) ? section : "appearance";
+}
+
 function renderGuestState(root) {
   root.innerHTML = `
     <section style="display:flex;flex-direction:column;gap:16px;padding:24px 0;">
@@ -40,12 +67,224 @@ function renderAvatar(url, name) {
   return `<div class="settings-avatar__fallback">?</div>`;
 }
 
+function renderStyles() {
+  return `
+    <style>
+      .settings-page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .settings-title {
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+
+      .settings-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .settings-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow);
+      }
+
+      .settings-nav-button {
+        min-height: 48px;
+        padding: 0 14px;
+        border-radius: 14px;
+        text-align: left;
+        font-weight: 700;
+        color: var(--text-soft);
+      }
+
+      .settings-nav-button.is-active {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
+
+      .settings-panel-card {
+        padding: 20px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow);
+      }
+
+      .settings-panel-title {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 10px;
+      }
+
+      .settings-form-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .settings-label {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-weight: 600;
+      }
+
+      .settings-label span {
+        color: var(--text-soft);
+        font-size: 14px;
+      }
+
+      .settings-input,
+      .settings-file-input {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        border-radius: 14px;
+        padding: 12px 14px;
+        outline: none;
+      }
+
+      .settings-setting-block + .settings-setting-block {
+        margin-top: 18px;
+      }
+
+      .settings-setting-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-soft);
+        margin-bottom: 10px;
+      }
+
+      .settings-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .settings-chip {
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        font-weight: 700;
+        color: var(--text-soft);
+      }
+
+      .settings-chip.is-active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      .settings-inline-actions {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+      }
+
+      .settings-primary-button {
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: #fff;
+        font-weight: 700;
+        box-shadow: var(--shadow);
+      }
+
+      .settings-primary-button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .settings-avatar-block {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .settings-avatar-preview {
+        width: 112px;
+        height: 112px;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .settings-avatar-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .settings-avatar__fallback {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-soft);
+      }
+
+      .settings-avatar-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 420px;
+      }
+
+      .settings-status {
+        margin-top: 14px;
+        min-height: 20px;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--text-soft);
+      }
+
+      .settings-status[data-type="success"] {
+        color: var(--success);
+      }
+
+      .settings-status[data-type="error"] {
+        color: var(--danger);
+      }
+
+      @media (min-width: 900px) {
+        .settings-layout {
+          grid-template-columns: 280px minmax(0, 1fr);
+          align-items: start;
+        }
+
+        .settings-sidebar {
+          position: sticky;
+          top: 88px;
+        }
+      }
+    </style>
+  `;
+}
+
 function renderSectionContent(section, localState) {
   const displayName = localState.profile.display_name || "";
   const username = localState.profile.username || "";
   const avatarUrl = localState.profile.avatar_url || "";
-  const theme = localState.profile.preferred_theme || state.theme || "dark";
-  const language = localState.profile.preferred_language || state.language || "ru";
+  const theme = normalizeTheme(localState.profile.preferred_theme || state.theme);
+  const language = normalizeLanguage(localState.profile.preferred_language || state.language);
   const previewAvatar = localState.avatarPreviewUrl || avatarUrl || "";
 
   if (section === "appearance") {
@@ -56,16 +295,16 @@ function renderSectionContent(section, localState) {
         <div class="settings-setting-block">
           <div class="settings-setting-title">Тема</div>
           <div class="settings-chip-row">
-            <button class="settings-chip ${theme === "light" ? "is-active" : ""}" data-theme="light">Светлая</button>
-            <button class="settings-chip ${theme === "dark" ? "is-active" : ""}" data-theme="dark">Тёмная</button>
+            <button class="settings-chip ${theme === "light" ? "is-active" : ""}" type="button" data-theme="light">Светлая</button>
+            <button class="settings-chip ${theme === "dark" ? "is-active" : ""}" type="button" data-theme="dark">Тёмная</button>
           </div>
         </div>
 
         <div class="settings-setting-block">
           <div class="settings-setting-title">Язык</div>
           <div class="settings-chip-row">
-            <button class="settings-chip ${language === "ru" ? "is-active" : ""}" data-language="ru">Русский</button>
-            <button class="settings-chip ${language === "en" ? "is-active" : ""}" data-language="en">English</button>
+            <button class="settings-chip ${language === "ru" ? "is-active" : ""}" type="button" data-language="ru">Русский</button>
+            <button class="settings-chip ${language === "en" ? "is-active" : ""}" type="button" data-language="en">English</button>
           </div>
         </div>
 
@@ -162,6 +401,18 @@ function setStatus(contentRoot, message, type = "info") {
   node.dataset.type = type;
 }
 
+function setLoading(button, loading) {
+  if (!button) return;
+  button.disabled = Boolean(loading);
+}
+
+function updateLocalUserProfile(patch = {}) {
+  setUser({
+    ...state.user,
+    ...patch
+  });
+}
+
 export function renderSettingsPage(root) {
   const userId = state.user?.id;
 
@@ -170,69 +421,32 @@ export function renderSettingsPage(root) {
     return;
   }
 
-  const initialSection = state.routeParams?.section || "appearance";
-
   const localState = {
-    activeSection: ["appearance", "avatar", "profile", "password"].includes(initialSection)
-      ? initialSection
-      : "appearance",
+    activeSection: getInitialSection(),
     profile: {
       id: userId,
       username: state.user.username || "",
       display_name: state.user.display_name || "",
       avatar_url: state.user.avatar_url || "",
-      preferred_language: state.language || "ru",
-      preferred_theme: state.theme || "dark"
+      preferred_language: normalizeLanguage(state.language || "ru"),
+      preferred_theme: normalizeTheme(state.theme || "dark")
     },
     avatarFile: null,
     avatarPreviewUrl: ""
   };
 
   root.innerHTML = `
-    <style>
-      .settings-page { display:flex; flex-direction:column; gap:20px; }
-      .settings-title { font-size:28px; font-weight:800; letter-spacing:-0.03em; }
-      .settings-layout { display:grid; grid-template-columns:1fr; gap:16px; }
-      .settings-sidebar { display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:22px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); }
-      .settings-nav-button { min-height:48px; padding:0 14px; border-radius:14px; text-align:left; font-weight:700; color:var(--text-soft); }
-      .settings-nav-button.is-active { background:var(--accent-soft); color:var(--text); }
-      .settings-panel-card { padding:20px; border-radius:22px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); }
-      .settings-panel-title { font-size:20px; font-weight:800; margin-bottom:10px; }
-      .settings-form-grid { display:flex; flex-direction:column; gap:14px; }
-      .settings-label { display:flex; flex-direction:column; gap:8px; font-weight:600; }
-      .settings-label span { color:var(--text-soft); font-size:14px; }
-      .settings-input, .settings-file-input { width:100%; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:14px; padding:12px 14px; outline:none; }
-      .settings-setting-block + .settings-setting-block { margin-top:18px; }
-      .settings-setting-title { font-size:14px; font-weight:700; color:var(--text-soft); margin-bottom:10px; }
-      .settings-chip-row { display:flex; flex-wrap:wrap; gap:10px; }
-      .settings-chip { min-height:40px; padding:0 14px; border-radius:999px; border:1px solid var(--border); background:var(--surface); font-weight:700; color:var(--text-soft); }
-      .settings-chip.is-active { background:var(--accent); border-color:var(--accent); color:#fff; }
-      .settings-inline-actions { margin-top:18px; display:flex; gap:10px; }
-      .settings-primary-button { min-height:46px; padding:0 16px; border-radius:14px; background:linear-gradient(135deg,var(--accent),var(--accent-strong)); color:#fff; font-weight:700; box-shadow:var(--shadow); }
-      .settings-avatar-block { display:flex; flex-direction:column; gap:16px; }
-      .settings-avatar-preview { width:112px; height:112px; border-radius:999px; overflow:hidden; border:1px solid var(--border); background:var(--surface); }
-      .settings-avatar-preview img { width:100%; height:100%; object-fit:cover; }
-      .settings-avatar__fallback { width:100%; height:100%; display:grid; place-items:center; font-size:28px; font-weight:800; color:var(--text-soft); }
-      .settings-avatar-controls { display:flex; flex-direction:column; gap:12px; max-width:420px; }
-      .settings-status { margin-top:14px; min-height:20px; font-size:14px; line-height:1.5; color:var(--text-soft); }
-      .settings-status[data-type="success"] { color:var(--success); }
-      .settings-status[data-type="error"] { color:var(--danger); }
-
-      @media (min-width:900px) {
-        .settings-layout { grid-template-columns:280px minmax(0,1fr); align-items:start; }
-        .settings-sidebar { position:sticky; top:88px; }
-      }
-    </style>
+    ${renderStyles()}
 
     <section class="settings-page">
       <div class="settings-title">Настройки</div>
 
       <div class="settings-layout">
         <aside class="settings-sidebar">
-          <button class="settings-nav-button" data-section="appearance">Внешний вид</button>
-          <button class="settings-nav-button" data-section="avatar">Аватар</button>
-          <button class="settings-nav-button" data-section="profile">Профиль</button>
-          <button class="settings-nav-button" data-section="password">Пароль</button>
+          <button class="settings-nav-button" type="button" data-section="appearance">Внешний вид</button>
+          <button class="settings-nav-button" type="button" data-section="avatar">Аватар</button>
+          <button class="settings-nav-button" type="button" data-section="profile">Профиль</button>
+          <button class="settings-nav-button" type="button" data-section="password">Пароль</button>
         </aside>
 
         <div class="settings-content" data-settings-content></div>
@@ -255,72 +469,107 @@ export function renderSettingsPage(root) {
   function bindSectionEvents() {
     contentRoot.querySelectorAll("[data-theme]").forEach((button) => {
       button.addEventListener("click", () => {
-        localState.profile.preferred_theme = button.dataset.theme || "dark";
+        localState.profile.preferred_theme = normalizeTheme(button.dataset.theme);
         renderSection();
       });
     });
 
     contentRoot.querySelectorAll("[data-language]").forEach((button) => {
       button.addEventListener("click", () => {
-        localState.profile.preferred_language = button.dataset.language || "ru";
+        localState.profile.preferred_language = normalizeLanguage(button.dataset.language);
         renderSection();
       });
     });
 
-    contentRoot.querySelector('[data-action="save-appearance"]')?.addEventListener("click", async () => {
+    contentRoot.querySelector('[data-action="save-appearance"]')?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+
       try {
+        setLoading(button, true);
+        setStatus(contentRoot, "Сохраняем…");
+
+        const theme = normalizeTheme(localState.profile.preferred_theme);
+        const language = normalizeLanguage(localState.profile.preferred_language);
+
         const saved = await upsertUserProfile({
           id: userId,
-          preferred_theme: localState.profile.preferred_theme,
-          preferred_language: localState.profile.preferred_language
+          preferred_theme: theme,
+          preferred_language: language
         });
 
-        setTheme(saved.preferred_theme || localState.profile.preferred_theme);
-        setLanguage(saved.preferred_language || localState.profile.preferred_language);
+        const nextTheme = normalizeTheme(saved?.preferred_theme || theme);
+        const nextLanguage = normalizeLanguage(saved?.preferred_language || language);
+
+        localState.profile.preferred_theme = nextTheme;
+        localState.profile.preferred_language = nextLanguage;
+
+        setTheme(nextTheme);
+        setLanguage(nextLanguage);
+
         setStatus(contentRoot, "Настройки сохранены", "success");
       } catch (error) {
-        setStatus(contentRoot, error.message || "Не удалось сохранить", "error");
+        setStatus(contentRoot, error.message || "Не удалось сохранить настройки", "error");
+      } finally {
+        setLoading(button, false);
       }
     });
 
     contentRoot.querySelector("[data-avatar-file]")?.addEventListener("change", (event) => {
       const file = event.target.files?.[0] || null;
+
+      if (localState.avatarPreviewUrl) {
+        URL.revokeObjectURL(localState.avatarPreviewUrl);
+      }
+
       localState.avatarFile = file;
       localState.avatarPreviewUrl = file ? URL.createObjectURL(file) : "";
+
       renderSection();
     });
 
-    contentRoot.querySelector('[data-action="save-avatar"]')?.addEventListener("click", async () => {
+    contentRoot.querySelector('[data-action="save-avatar"]')?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+
       if (!localState.avatarFile) {
         setStatus(contentRoot, "Сначала выбери изображение", "error");
         return;
       }
 
       try {
+        setLoading(button, true);
+        setStatus(contentRoot, "Загружаем аватар…");
+
         const avatarUrl = await uploadAvatarImage(userId, localState.avatarFile);
-        const saved = await upsertUserProfile({ id: userId, avatar_url: avatarUrl });
+        const saved = await upsertUserProfile({
+          id: userId,
+          avatar_url: avatarUrl
+        });
 
-        localState.profile.avatar_url = saved.avatar_url || avatarUrl;
+        localState.profile.avatar_url = saved?.avatar_url || avatarUrl;
         localState.avatarFile = null;
-        localState.avatarPreviewUrl = "";
 
-        setUser({ ...state.user, avatar_url: localState.profile.avatar_url });
+        if (localState.avatarPreviewUrl) {
+          URL.revokeObjectURL(localState.avatarPreviewUrl);
+          localState.avatarPreviewUrl = "";
+        }
+
+        updateLocalUserProfile({
+          avatar_url: localState.profile.avatar_url
+        });
 
         renderSection();
         setStatus(contentRoot, "Аватар сохранён", "success");
       } catch (error) {
         setStatus(contentRoot, error.message || "Не удалось загрузить аватар", "error");
+      } finally {
+        setLoading(button, false);
       }
     });
 
-    contentRoot.querySelector('[data-action="save-profile"]')?.addEventListener("click", async () => {
-      const displayName = (contentRoot.querySelector("[data-profile-display-name]")?.value || "").trim();
-      const username = (contentRoot.querySelector("[data-profile-username]")?.value || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_]+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .slice(0, 32);
+    contentRoot.querySelector('[data-action="save-profile"]')?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const displayName = cleanText(contentRoot.querySelector("[data-profile-display-name]")?.value || "");
+      const username = normalizeUsername(contentRoot.querySelector("[data-profile-username]")?.value || "");
 
       if (!displayName) {
         setStatus(contentRoot, "Display name не должен быть пустым", "error");
@@ -333,17 +582,19 @@ export function renderSettingsPage(root) {
       }
 
       try {
+        setLoading(button, true);
+        setStatus(contentRoot, "Сохраняем профиль…");
+
         const saved = await upsertUserProfile({
           id: userId,
           display_name: displayName,
           username
         });
 
-        localState.profile.display_name = saved.display_name || displayName;
-        localState.profile.username = saved.username || username;
+        localState.profile.display_name = saved?.display_name || displayName;
+        localState.profile.username = saved?.username || username;
 
-        setUser({
-          ...state.user,
+        updateLocalUserProfile({
           display_name: localState.profile.display_name,
           username: localState.profile.username
         });
@@ -351,12 +602,17 @@ export function renderSettingsPage(root) {
         setStatus(contentRoot, "Профиль сохранён", "success");
       } catch (error) {
         setStatus(contentRoot, error.message || "Не удалось сохранить профиль", "error");
+      } finally {
+        setLoading(button, false);
       }
     });
 
-    contentRoot.querySelector('[data-action="save-password"]')?.addEventListener("click", async () => {
-      const newPassword = contentRoot.querySelector("[data-password-new]")?.value || "";
-      const confirmPassword = contentRoot.querySelector("[data-password-confirm]")?.value || "";
+    contentRoot.querySelector('[data-action="save-password"]')?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const newPasswordInput = contentRoot.querySelector("[data-password-new]");
+      const confirmPasswordInput = contentRoot.querySelector("[data-password-confirm]");
+      const newPassword = newPasswordInput?.value || "";
+      const confirmPassword = confirmPasswordInput?.value || "";
 
       if (!newPassword || !confirmPassword) {
         setStatus(contentRoot, "Заполни оба поля", "error");
@@ -369,12 +625,19 @@ export function renderSettingsPage(root) {
       }
 
       try {
+        setLoading(button, true);
+        setStatus(contentRoot, "Меняем пароль…");
+
         await updateUserPassword(newPassword);
-        contentRoot.querySelector("[data-password-new]").value = "";
-        contentRoot.querySelector("[data-password-confirm]").value = "";
+
+        if (newPasswordInput) newPasswordInput.value = "";
+        if (confirmPasswordInput) confirmPasswordInput.value = "";
+
         setStatus(contentRoot, "Пароль изменён", "success");
       } catch (error) {
         setStatus(contentRoot, error.message || "Не удалось изменить пароль", "error");
+      } finally {
+        setLoading(button, false);
       }
     });
   }
