@@ -14,6 +14,8 @@ import {
 } from "../state.js";
 import { debounce, escapeHtml, clampText } from "../utils.js";
 
+let activeSearchPageRequestId = 0;
+
 function renderCover(item) {
   if (item.cover_url) {
     return `
@@ -21,6 +23,7 @@ function renderCover(item) {
         src="${escapeHtml(item.cover_url)}"
         alt="${escapeHtml(item.title || "")}"
         loading="lazy"
+        onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
   }
@@ -78,9 +81,7 @@ function renderEmpty(message) {
 }
 
 function attachCardHandlers(root, items = []) {
-  const byKey = new Map(
-    items.map((item) => [item.canonical_key, item])
-  );
+  const byKey = new Map(items.map((item) => [item.canonical_key, item]));
 
   root.querySelectorAll("[data-key]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -116,18 +117,16 @@ function attachCardHandlers(root, items = []) {
 
       try {
         button.disabled = true;
-        button.textContent = "Добавление...";
+        button.textContent = "Добавляем…";
 
         const result = await addSearchResultDirectlyToLibrary({
           userId,
           item
         });
 
-        if (result?.alreadyExists) {
-          button.textContent = "Уже в библиотеке";
-        } else {
-          button.textContent = "Добавлено";
-        }
+        button.textContent = result?.alreadyExists
+          ? "Уже в библиотеке"
+          : "Добавлено";
       } catch (error) {
         console.error("Direct add from search page error:", error);
         button.disabled = false;
@@ -138,21 +137,28 @@ function attachCardHandlers(root, items = []) {
 }
 
 async function performSearch(resultsRoot, query) {
+  if (!resultsRoot) return;
+
   const cleanQuery = String(query || "").trim();
+
+  activeSearchPageRequestId += 1;
+  const requestId = activeSearchPageRequestId;
+  resultsRoot.dataset.requestId = String(requestId);
 
   if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     resultsRoot.innerHTML = renderEmpty("Введите больше символов");
     return;
   }
 
-  const requestId = Date.now();
-  resultsRoot.dataset.requestId = String(requestId);
-  resultsRoot.innerHTML = renderEmpty("Ищем...");
+  resultsRoot.innerHTML = renderEmpty("Ищем…");
 
   try {
     const grouped = await runGlobalSearch(cleanQuery);
 
-    if (resultsRoot.dataset.requestId !== String(requestId)) {
+    if (
+      resultsRoot.dataset.requestId !== String(requestId) ||
+      requestId !== activeSearchPageRequestId
+    ) {
       return;
     }
 
@@ -170,6 +176,14 @@ async function performSearch(resultsRoot, query) {
     attachCardHandlers(resultsRoot, flat);
   } catch (error) {
     console.error("Search page error:", error);
+
+    if (
+      resultsRoot.dataset.requestId !== String(requestId) ||
+      requestId !== activeSearchPageRequestId
+    ) {
+      return;
+    }
+
     resultsRoot.innerHTML = renderEmpty("Ошибка поиска");
   }
 }
@@ -244,6 +258,11 @@ export function renderSearchPage(root, params = {}) {
         padding: 0 12px;
       }
 
+      .result-add-btn:disabled {
+        opacity: 0.7;
+        cursor: default;
+      }
+
       .result-cover {
         width: 84px;
         height: 118px;
@@ -256,6 +275,11 @@ export function renderSearchPage(root, params = {}) {
         width: 100%;
         height: 100%;
         object-fit: cover;
+      }
+
+      .result-cover.is-empty {
+        display: grid;
+        place-items: center;
       }
 
       .result-cover-fallback {
