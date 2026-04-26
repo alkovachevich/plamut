@@ -269,10 +269,10 @@ async function performSearch(root, query) {
 
 const debouncedSearch = debounce(performSearch, SEARCH_LIMITS.DEBOUNCE_MS);
 
-export function renderSearchModal(root) {
+export function renderSearchModal(root, options = {}) {
   const isOpen = state.searchModalOpen;
   const initialQuery = state.searchQuery || "";
-  const contextCategory = state.searchContextCategory || "";
+  const contextCategory = options.category || state.searchContextCategory || "";
 
   root.innerHTML = `
     <style>
