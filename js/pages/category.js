@@ -5,10 +5,32 @@ import { clampText, escapeHtml, safeArray } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
 import {
   loadUserLibrary,
-  refreshUserLibrary,
   updateCachedLibraryItem,
   removeCachedLibraryItem
 } from "../services/library-cache.js";
+
+const USER_MEDIA_UPDATE_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at,
+  media_entities (
+    id,
+    canonical_key,
+    category,
+    title_primary,
+    title_ru,
+    title_en,
+    original_title,
+    year,
+    cover_url,
+    universe_key
+  )
+`;
 
 async function updateUserMedia(userMediaId, payload) {
   const supabase = getSupabaseClient();
@@ -17,35 +39,7 @@ async function updateUserMedia(userMediaId, payload) {
     .from("user_media")
     .update(payload)
     .eq("id", userMediaId)
-    .select(`
-      id,
-      user_id,
-      entity_id,
-      category,
-      status,
-      folder_name,
-      created_at,
-      updated_at,
-      media_entities (
-        id,
-        canonical_key,
-        category,
-        primary_source,
-        title_primary,
-        title_ru,
-        title_en,
-        original_title,
-        year,
-        cover_url,
-        description_ru,
-        description_en,
-        external_ids,
-        meta,
-        universe_key,
-        relations_built_at,
-        relations_status
-      )
-    `)
+    .select(USER_MEDIA_UPDATE_SELECT)
     .single();
 
   if (error) throw error;
@@ -64,226 +58,6 @@ async function removeFromLibrary(userMediaId) {
   return true;
 }
 
-function openLibraryCoverUrlFromId(coverId) {
-  return coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "";
-}
-
-function openLibraryCoverUrlFromIsbn(isbn) {
-  return isbn ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg` : "";
-}
-
-function openLibraryCoverUrlFromOlid(olid) {
-  return olid ? `https://covers.openlibrary.org/b/olid/${encodeURIComponent(olid)}-L.jpg` : "";
-}
-
-function wikimediaFileUrl(filename = "") {
-  const clean = String(filename || "").trim();
-  if (!clean) return "";
-  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(clean)}`;
-}
-
-function normalizeOpenLibraryWorkKey(value = "") {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  return raw.startsWith("/works/") ? raw.replace("/works/", "") : raw;
-}
-
-async function fetchOpenLibraryWorkCover(workKey) {
-  const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
-  if (!normalizedWorkKey) return "";
-
-  try {
-    const response = await fetch(`https://openlibrary.org/works/${encodeURIComponent(normalizedWorkKey)}.json`, {
-      headers: { Accept: "application/json" }
-    });
-
-    if (!response.ok) return "";
-
-    const payload = await response.json();
-    const coverId = safeArray(payload?.covers).find(Boolean);
-
-    return coverId ? openLibraryCoverUrlFromId(coverId) : "";
-  } catch {
-    return "";
-  }
-}
-
-async function fetchOpenLibraryCoverByTitle(entity = {}) {
-  const titles = [
-    entity.title_primary,
-    entity.title_ru,
-    entity.title_en,
-    entity.original_title
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
-  for (const title of titles) {
-    try {
-      const url = new URL("https://openlibrary.org/search.json");
-      url.searchParams.set("title", title);
-      url.searchParams.set("limit", "10");
-      url.searchParams.set("fields", "key,title,first_publish_year,cover_i,isbn,edition_key");
-
-      const response = await fetch(url.toString(), {
-        headers: { Accept: "application/json" }
-      });
-
-      if (!response.ok) continue;
-
-      const payload = await response.json();
-      const docs = safeArray(payload?.docs);
-
-      const exact = docs.find((doc) => {
-        const docTitle = String(doc?.title || "").toLowerCase().trim();
-        const currentTitle = title.toLowerCase().trim();
-        return doc?.cover_i && docTitle === currentTitle;
-      });
-
-      const withCover = exact || docs.find((doc) => doc?.cover_i);
-
-      if (withCover?.cover_i) return openLibraryCoverUrlFromId(withCover.cover_i);
-
-      const isbn = safeArray(withCover?.isbn).find(Boolean);
-      if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
-
-      const editionKey = safeArray(withCover?.edition_key).find(Boolean);
-      if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
-    } catch (error) {
-      console.warn("Open Library title cover skipped:", error);
-    }
-  }
-
-  return "";
-}
-
-async function fetchWikidataCoverByTitle(entity = {}) {
-  const title = entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || "";
-  if (!title) return "";
-
-  try {
-    const searchUrl = new URL("https://www.wikidata.org/w/api.php");
-    searchUrl.searchParams.set("action", "wbsearchentities");
-    searchUrl.searchParams.set("format", "json");
-    searchUrl.searchParams.set("language", "ru");
-    searchUrl.searchParams.set("uselang", "ru");
-    searchUrl.searchParams.set("type", "item");
-    searchUrl.searchParams.set("origin", "*");
-    searchUrl.searchParams.set("limit", "5");
-    searchUrl.searchParams.set("search", title);
-
-    const searchResponse = await fetch(searchUrl.toString(), {
-      headers: { Accept: "application/json" }
-    });
-
-    if (!searchResponse.ok) return "";
-
-    const searchPayload = await searchResponse.json();
-    const ids = safeArray(searchPayload?.search)
-      .map((item) => item.id)
-      .filter(Boolean);
-
-    if (!ids.length) return "";
-
-    const detailsUrl = new URL("https://www.wikidata.org/w/api.php");
-    detailsUrl.searchParams.set("action", "wbgetentities");
-    detailsUrl.searchParams.set("format", "json");
-    detailsUrl.searchParams.set("props", "claims");
-    detailsUrl.searchParams.set("origin", "*");
-    detailsUrl.searchParams.set("ids", ids.join("|"));
-
-    const detailsResponse = await fetch(detailsUrl.toString(), {
-      headers: { Accept: "application/json" }
-    });
-
-    if (!detailsResponse.ok) return "";
-
-    const detailsPayload = await detailsResponse.json();
-    const entities = detailsPayload?.entities || {};
-
-    for (const id of ids) {
-      const image = safeArray(entities?.[id]?.claims?.P18)
-        .map((claim) => claim?.mainsnak?.datavalue?.value)
-        .find(Boolean);
-
-      if (image) return wikimediaFileUrl(image);
-    }
-  } catch (error) {
-    console.warn("Wikidata title cover skipped:", error);
-  }
-
-  return "";
-}
-
-async function resolveBookCover(entity = {}) {
-  if (entity.cover_url) return entity.cover_url;
-
-  const externalIds = entity.external_ids || {};
-  const isbn = safeArray(externalIds.isbn).find(Boolean);
-  const editionKey = safeArray(externalIds.edition_key).find(Boolean);
-  const ia = safeArray(externalIds.ia).find(Boolean);
-  const work = externalIds.openlibrary_work || "";
-
-  if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
-  if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
-  if (ia) return openLibraryCoverUrlFromOlid(ia);
-
-  if (work) {
-    const cover = await fetchOpenLibraryWorkCover(work);
-    if (cover) return cover;
-  }
-
-  const canonicalKey = entity.canonical_key || "";
-  if (canonicalKey.startsWith("books:openlibrary:")) {
-    const possibleWork = canonicalKey.replace("books:openlibrary:", "");
-    const cover = await fetchOpenLibraryWorkCover(possibleWork);
-    if (cover) return cover;
-  }
-
-  const coverByTitle = await fetchOpenLibraryCoverByTitle(entity);
-  if (coverByTitle) return coverByTitle;
-
-  const wikidataCover = await fetchWikidataCoverByTitle(entity);
-  if (wikidataCover) return wikidataCover;
-
-  return "";
-}
-
-async function fixMissingBookCovers(items = [], userId) {
-  const supabase = getSupabaseClient();
-  let changed = false;
-
-  const nextItems = [...items];
-
-  for (const item of nextItems) {
-    const entity = item.media_entities || {};
-
-    if (entity.category !== "books") continue;
-    if (entity.cover_url) continue;
-
-    const newCover = await resolveBookCover(entity);
-    if (!newCover) continue;
-
-    try {
-      await supabase
-        .from("media_entities")
-        .update({ cover_url: newCover })
-        .eq("id", entity.id);
-
-      entity.cover_url = newCover;
-      updateCachedLibraryItem(userId, item, { category: item.category });
-      changed = true;
-    } catch (error) {
-      console.warn("Book cover restore skipped:", error);
-    }
-  }
-
-  return {
-    items: nextItems,
-    changed
-  };
-}
-
 function resolveTitle(entity = {}) {
   return (
     entity.title_primary ||
@@ -295,7 +69,10 @@ function resolveTitle(entity = {}) {
 }
 
 function resolveSubtitle(entity = {}) {
-  return entity.original_title || "";
+  const title = resolveTitle(entity);
+  const original = entity.original_title || "";
+
+  return original && original !== title ? original : "";
 }
 
 function getCover(entity = {}) {
@@ -307,7 +84,7 @@ function getCover(entity = {}) {
 function uniqueFolders(items = []) {
   return [
     ...new Set(
-      items
+      safeArray(items)
         .map((item) => item.folder_name || "")
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b, "ru"))
@@ -316,7 +93,7 @@ function uniqueFolders(items = []) {
 }
 
 function sortItems(items = [], sort = "recent") {
-  const result = [...items];
+  const result = [...safeArray(items)];
 
   if (sort === "title") {
     return result.sort((a, b) =>
@@ -341,7 +118,7 @@ function sortItems(items = [], sort = "recent") {
 
 function filterItems(items = [], activeFolder = "all") {
   if (activeFolder === "all") return items;
-  return items.filter((item) => (item.folder_name || "") === activeFolder);
+  return safeArray(items).filter((item) => (item.folder_name || "") === activeFolder);
 }
 
 function renderCover(entity = {}) {
@@ -435,7 +212,7 @@ function renderLibraryCard(item) {
         <div class="library-card__title">${escapeHtml(clampText(title, 80))}</div>
 
         ${
-          subtitle && subtitle !== title
+          subtitle
             ? `<div class="library-card__subtitle">${escapeHtml(clampText(subtitle, 90))}</div>`
             : ""
         }
@@ -455,6 +232,15 @@ function renderEmptyState(categoryTitle) {
       <div class="empty-state__text">
         Добавь первый элемент в раздел ${escapeHtml(categoryTitle)}.
       </div>
+    </div>
+  `;
+}
+
+function renderErrorState() {
+  return `
+    <div class="empty-state">
+      <div class="empty-state__title">Ошибка загрузки</div>
+      <div class="empty-state__text">Не удалось загрузить библиотеку.</div>
     </div>
   `;
 }
@@ -738,6 +524,39 @@ function renderStyles() {
         font-weight: 700;
       }
 
+      .category-guest {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .category-guest__title {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text);
+      }
+
+      .category-guest__card {
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+        border-radius: 20px;
+        padding: 20px;
+      }
+
+      .category-guest__text {
+        color: var(--text-soft);
+        line-height: 1.6;
+        margin-bottom: 14px;
+      }
+
+      .category-guest__button {
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+      }
+
       @media (max-width: 640px) {
         .library-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -779,6 +598,7 @@ export async function renderCategoryPage(root, params = {}) {
   let items = [];
   let activeFolder = "all";
   let activeSort = "recent";
+  let isDestroyed = false;
 
   root.innerHTML = `
     ${renderStyles()}
@@ -811,21 +631,25 @@ export async function renderCategoryPage(root, params = {}) {
   const contentRoot = root.querySelector("[data-content]");
   const sortSelect = root.querySelector("[data-sort]");
 
+  function findItemById(userMediaId) {
+    return items.find((item) => Number(item.id) === Number(userMediaId)) || null;
+  }
+
   function renderList() {
+    if (isDestroyed || !foldersRoot || !contentRoot) return;
+
     const folders = uniqueFolders(items);
     const visibleItems = sortItems(filterItems(items, activeFolder), activeSort);
 
     foldersRoot.innerHTML = renderFolderTabs(folders, activeFolder);
 
-    if (!visibleItems.length) {
-      contentRoot.innerHTML = renderEmptyState(title);
-    } else {
-      contentRoot.innerHTML = `
+    contentRoot.innerHTML = visibleItems.length
+      ? `
         <div class="library-grid">
           ${visibleItems.map(renderLibraryCard).join("")}
         </div>
-      `;
-    }
+      `
+      : renderEmptyState(title);
 
     foldersRoot.querySelectorAll("[data-folder]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -838,6 +662,7 @@ export async function renderCategoryPage(root, params = {}) {
       card.addEventListener("click", () => {
         const key = card.dataset.key || "";
         const itemCategory = card.dataset.category || category;
+
         if (!key) return;
 
         navigate("/card", {
@@ -875,16 +700,24 @@ export async function renderCategoryPage(root, params = {}) {
         if (!userMediaId || !newStatus) return;
 
         try {
-          const updated = await updateUserMedia(userMediaId, { status: newStatus });
+          button.disabled = true;
+
+          const updated = await updateUserMedia(userMediaId, {
+            status: newStatus
+          });
 
           items = items.map((item) =>
-            item.id === userMediaId ? updated : item
+            Number(item.id) === userMediaId ? updated : item
           );
 
-          updateCachedLibraryItem(userId, updated, { category });
+          updateCachedLibraryItem(userId, updated, {
+            category: updated.category || category
+          });
+
           renderList();
         } catch (error) {
           console.error("Update status error:", error);
+          button.disabled = false;
         }
       });
     });
@@ -897,7 +730,7 @@ export async function renderCategoryPage(root, params = {}) {
         const userMediaId = Number(button.dataset.userMediaId);
         if (!userMediaId) return;
 
-        const current = items.find((item) => item.id === userMediaId);
+        const current = findItemById(userMediaId);
         const currentFolder = current?.folder_name || "";
 
         const folderName = window.prompt(
@@ -907,18 +740,22 @@ export async function renderCategoryPage(root, params = {}) {
 
         if (folderName === null) return;
 
-        const cleanFolder = folderName.trim();
+        const cleanFolder = String(folderName || "").trim();
 
         try {
+          button.disabled = true;
+
           const updated = await updateUserMedia(userMediaId, {
             folder_name: cleanFolder || null
           });
 
           items = items.map((item) =>
-            item.id === userMediaId ? updated : item
+            Number(item.id) === userMediaId ? updated : item
           );
 
-          updateCachedLibraryItem(userId, updated, { category });
+          updateCachedLibraryItem(userId, updated, {
+            category: updated.category || category
+          });
 
           if (activeFolder !== "all" && activeFolder !== cleanFolder) {
             activeFolder = "all";
@@ -927,6 +764,7 @@ export async function renderCategoryPage(root, params = {}) {
           renderList();
         } catch (error) {
           console.error("Update folder error:", error);
+          button.disabled = false;
         }
       });
     });
@@ -940,12 +778,20 @@ export async function renderCategoryPage(root, params = {}) {
         if (!userMediaId) return;
 
         try {
+          button.disabled = true;
+
           await removeFromLibrary(userMediaId);
-          items = items.filter((item) => item.id !== userMediaId);
-          removeCachedLibraryItem(userId, userMediaId, { category });
+
+          items = items.filter((item) => Number(item.id) !== userMediaId);
+
+          removeCachedLibraryItem(userId, userMediaId, {
+            category
+          });
+
           renderList();
         } catch (error) {
           console.error("Remove from library error:", error);
+          button.disabled = false;
         }
       });
     });
@@ -967,34 +813,25 @@ export async function renderCategoryPage(root, params = {}) {
   });
 
   try {
-    items = await loadUserLibrary(userId, { category });
+    items = await loadUserLibrary(userId, {
+      category,
+      mode: "list",
+      allowStale: true,
+      backgroundRefresh: false
+    });
+
+    if (isDestroyed) return;
+
     renderList();
-
-    refreshUserLibrary(userId, { category })
-      .then((freshItems) => {
-        items = freshItems;
-        renderList();
-
-        if (category === "books") {
-          fixMissingBookCovers(items, userId).then((result) => {
-            if (result?.changed) {
-              items = result.items;
-              renderList();
-            }
-          });
-        }
-      })
-      .catch((error) => {
-        console.warn("Category background refresh skipped:", error);
-      });
   } catch (error) {
     console.error("Category library load error:", error);
 
-    contentRoot.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__title">Ошибка загрузки</div>
-        <div class="empty-state__text">Не удалось загрузить библиотеку.</div>
-      </div>
-    `;
+    if (contentRoot) {
+      contentRoot.innerHTML = renderErrorState();
+    }
   }
+
+  return () => {
+    isDestroyed = true;
+  };
 }
