@@ -9,6 +9,7 @@ import {
 import { debounce, escapeHtml } from "../utils.js";
 import {
   runGlobalSearch,
+  runCategorySearch,
   flattenResults,
   sortByScore,
   limitResults,
@@ -101,11 +102,14 @@ function renderResultCard(item) {
   `;
 }
 
-function renderGroups(groupedResults) {
+function renderGroups(groupedResults, forcedCategory = "") {
   const orderedCategories = ["books", "movies", "series", "anime", "manga"];
 
   return orderedCategories
-    .filter((category) => groupedResults?.[category]?.length)
+    .filter((category) => {
+      if (forcedCategory && category !== forcedCategory) return false;
+      return groupedResults?.[category]?.length;
+    })
     .map((category) => `
       <section class="search-modal__group">
         <div class="search-modal__group-title">
@@ -179,7 +183,7 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
           ? "Уже в библиотеке"
           : "Добавлено";
       } catch (error) {
-        console.error("Direct add error:", error);
+        console.warn("Direct add error:", error);
         button.disabled = false;
         button.textContent = "Ошибка";
       }
@@ -188,7 +192,11 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
 
   root.querySelector('[data-action="show-all"]')?.addEventListener("click", () => {
     closeSearchModal();
-    navigate("/search", { q: currentQuery || "" });
+    const payload = { q: currentQuery || "" };
+    if (state.searchContextCategory) {
+      payload.category = state.searchContextCategory;
+    }
+    navigate("/search", payload);
   });
 }
 
@@ -197,6 +205,7 @@ async function performSearch(root, query) {
   if (!resultsRoot) return;
 
   const cleanQuery = String(query || "").trim();
+  const contextCategory = String(state.searchContextCategory || "").trim();
   root.dataset.currentQuery = cleanQuery;
 
   activeSearchRequestId += 1;
@@ -211,7 +220,9 @@ async function performSearch(root, query) {
   resultsRoot.innerHTML = `<div class="search-modal__loading">Ищем…</div>`;
 
   try {
-    const groupedResults = await runGlobalSearch(cleanQuery);
+    const groupedResults = contextCategory
+      ? { [contextCategory]: await runCategorySearch(cleanQuery, contextCategory) }
+      : await runGlobalSearch(cleanQuery);
 
     if (
       root.dataset.requestId !== String(requestId) ||
@@ -228,7 +239,7 @@ async function performSearch(root, query) {
     }
 
     resultsRoot.innerHTML = `
-      ${renderGroups(groupedResults)}
+      ${renderGroups(groupedResults, contextCategory)}
 
       <div class="search-modal__footer">
         <button class="search-modal__show-all" type="button" data-action="show-all">
@@ -239,7 +250,7 @@ async function performSearch(root, query) {
 
     attachResultHandlers(resultsRoot, groupedResults, cleanQuery);
   } catch (error) {
-    console.error("Search modal error:", error);
+    console.warn("Search modal error:", error);
 
     if (
       root.dataset.requestId !== String(requestId) ||
@@ -261,6 +272,7 @@ const debouncedSearch = debounce(performSearch, SEARCH_LIMITS.DEBOUNCE_MS);
 export function renderSearchModal(root) {
   const isOpen = state.searchModalOpen;
   const initialQuery = state.searchQuery || "";
+  const contextCategory = state.searchContextCategory || "";
 
   root.innerHTML = `
     <style>
