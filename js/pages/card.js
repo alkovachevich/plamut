@@ -378,6 +378,10 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
             <button class="card-btn" type="button" data-action="build">
               Построить вселенную
             </button>
+
+            <button class="card-btn" type="button" data-action="rebuild">
+              Пересобрать вселенную
+            </button>
           </div>
 
           <div class="card-status" data-status></div>
@@ -606,6 +610,7 @@ function bindCardActions({
   const statusNode = root.querySelector("[data-status]");
   const addButton = root.querySelector('[data-action="add"]');
   const buildButton = root.querySelector('[data-action="build"]');
+  const rebuildButton = root.querySelector('[data-action="rebuild"]');
 
   let pollingTimer = null;
 
@@ -649,11 +654,73 @@ function bindCardActions({
           navigate("/universe", { id: updated.universe_key });
         }
 
-        if (updated.status === UNIVERSE_JOB_STATUS.FAILED && buildButton) {
-          buildButton.disabled = false;
+        if (updated.status === UNIVERSE_JOB_STATUS.FAILED) {
+          if (buildButton) buildButton.disabled = false;
+          if (rebuildButton) rebuildButton.disabled = false;
         }
       }
     }, 1500);
+  }
+
+  async function startBuildFlow(forceRebuild = false) {
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
+
+    try {
+      buildButton && (buildButton.disabled = true);
+      rebuildButton && (rebuildButton.disabled = true);
+      setStatus(forceRebuild ? "Пересобираем вселенную…" : "Сохраняем карточку…");
+
+      const saved = await ensureEntitySavedForBuild({
+        userId,
+        entity: getEntity(),
+        userMedia: getUserMedia()
+      });
+
+      setEntity(saved.entity);
+      setUserMedia(saved.userMedia);
+      updateUserMediaUI(root, saved.userMedia);
+
+      if (!forceRebuild && saved.entity.universe_key && saved.entity.relations_status === "ready") {
+        navigate("/universe", { id: saved.entity.universe_key });
+        return;
+      }
+
+      setStatus("Создаём задачу построения…");
+
+      const job = await createUniverseBuildJob({
+        userId,
+        entityId: saved.entity.id,
+        canonicalKey: saved.entity.canonical_key || "",
+        universeKey: saved.entity.universe_key || "",
+        force: forceRebuild
+      });
+
+      updateProgressUI(root, job);
+      startPolling(job);
+      setStatus("Строим вселенную…");
+
+      buildUniverseForJob(job, saved.entity)
+        .then((result) => {
+          if (destroyedRef.value || !result?.universe_key) return;
+          navigate("/universe", { id: result.universe_key });
+        })
+        .catch((error) => {
+          console.warn("CARD BUILD: build failed", error);
+          setStatus(error.message || "Ошибка построения вселенной");
+        })
+        .finally(() => {
+          if (buildButton) buildButton.disabled = false;
+          if (rebuildButton) rebuildButton.disabled = false;
+        });
+    } catch (error) {
+      console.warn("CARD BUILD: start failed", error);
+      setStatus(error.message || "Ошибка запуска построения");
+      if (buildButton) buildButton.disabled = false;
+      if (rebuildButton) rebuildButton.disabled = false;
+    }
   }
 
   addButton?.addEventListener("click", async () => {
@@ -705,63 +772,11 @@ function bindCardActions({
   });
 
   buildButton?.addEventListener("click", async () => {
-    if (!userId) {
-      openAuthModal("login");
-      return;
-    }
+    await startBuildFlow(false);
+  });
 
-    try {
-      buildButton.disabled = true;
-      setStatus("Сохраняем карточку…");
-
-      const saved = await ensureEntitySavedForBuild({
-        userId,
-        entity: getEntity(),
-        userMedia: getUserMedia()
-      });
-
-      setEntity(saved.entity);
-      setUserMedia(saved.userMedia);
-
-      updateUserMediaUI(root, saved.userMedia);
-
-      if (saved.entity.universe_key && saved.entity.relations_status === "ready") {
-        navigate("/universe", { id: saved.entity.universe_key });
-        return;
-      }
-
-      setStatus("Создаём задачу построения…");
-
-      const job = await createUniverseBuildJob({
-        userId,
-        entityId: saved.entity.id,
-        canonicalKey: saved.entity.canonical_key || "",
-        universeKey: saved.entity.universe_key || ""
-      });
-
-      updateProgressUI(root, job);
-      startPolling(job);
-
-      setStatus("Строим вселенную…");
-
-      buildUniverseForJob(job, saved.entity)
-        .then((result) => {
-          if (destroyedRef.value || !result?.universe_key) return;
-
-          navigate("/universe", {
-            id: result.universe_key
-          });
-        })
-        .catch((error) => {
-          console.warn("CARD BUILD: build failed", error);
-          setStatus(error.message || "Ошибка построения вселенной");
-          buildButton.disabled = false;
-        });
-    } catch (error) {
-      console.warn("CARD BUILD: start failed", error);
-      setStatus(error.message || "Ошибка запуска построения");
-      buildButton.disabled = false;
-    }
+  rebuildButton?.addEventListener("click", async () => {
+    await startBuildFlow(true);
   });
 
   return stopPolling;
@@ -807,6 +822,7 @@ export async function renderCardPage(root, params = {}) {
 
   const statusNode = root.querySelector("[data-status]");
   const buildButton = root.querySelector('[data-action="build"]');
+  const rebuildButton = root.querySelector('[data-action="rebuild"]');
 
   if (currentEntity.__fallback) {
     if (statusNode) {
