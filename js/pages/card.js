@@ -20,9 +20,7 @@ import {
 
 import {
   createUniverseBuildJob,
-  pollUniverseBuildJob,
-  renderUniverseJobProgress,
-  isUniverseJobFinished,
+  getUniverseBuildJob,
   UNIVERSE_JOB_STATUS
 } from "../services/universe-build-jobs.js";
 
@@ -47,6 +45,14 @@ const USER_MEDIA_SELECT = `
   created_at,
   updated_at
 `;
+
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeKey(value = "") {
+  return clean(value).toLowerCase();
+}
 
 function resolveTitle(entity = {}) {
   return (
@@ -74,10 +80,6 @@ function getCover(entity = {}) {
   return cover;
 }
 
-function normalizeKey(value = "") {
-  return String(value || "").trim().toLowerCase();
-}
-
 function getCachedEntityByKey(userId, key) {
   if (!userId || !key) return null;
 
@@ -88,11 +90,33 @@ function getCachedEntityByKey(userId, key) {
   return cached?.media_entities || null;
 }
 
+function getCachedUserMedia(userId, entity = {}) {
+  if (!userId || !entity?.canonical_key) return null;
+
+  const cached =
+    getCachedLibraryItem(userId, entity.canonical_key, { mode: "full" }) ||
+    getCachedLibraryItem(userId, entity.canonical_key, { mode: "list" });
+
+  if (!cached?.id) return null;
+
+  return {
+    id: cached.id,
+    user_id: cached.user_id,
+    entity_id: cached.entity_id,
+    category: cached.category,
+    status: cached.status,
+    folder_name: cached.folder_name,
+    created_at: cached.created_at,
+    updated_at: cached.updated_at
+  };
+}
+
 async function loadEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
   const cachedEntity = getCachedEntityByKey(userId, key);
+
   if (cachedEntity?.canonical_key) {
     return cachedEntity;
   }
@@ -142,27 +166,6 @@ async function loadUserMedia(userId, entityId) {
   if (error) throw error;
 
   return data || null;
-}
-
-function getCachedUserMedia(userId, entity = {}) {
-  if (!userId || !entity?.canonical_key) return null;
-
-  const cached =
-    getCachedLibraryItem(userId, entity.canonical_key, { mode: "full" }) ||
-    getCachedLibraryItem(userId, entity.canonical_key, { mode: "list" });
-
-  if (!cached?.id) return null;
-
-  return {
-    id: cached.id,
-    user_id: cached.user_id,
-    entity_id: cached.entity_id,
-    category: cached.category,
-    status: cached.status,
-    folder_name: cached.folder_name,
-    created_at: cached.created_at,
-    updated_at: cached.updated_at
-  };
 }
 
 function renderCover(entity = {}) {
@@ -226,292 +229,51 @@ function renderRelatedItem(item = {}) {
 function renderStyles() {
   return `
     <style>
-      .card-page {
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-      }
+      .card-page { display:flex; flex-direction:column; gap:18px; }
+      .card-shell { display:grid; grid-template-columns:132px 1fr; gap:16px; padding:16px; border-radius:22px; border:1px solid var(--border-soft); background:var(--bg-elevated); }
+      .card-cover { width:132px; aspect-ratio:2/3; overflow:hidden; border-radius:16px; border:1px solid var(--border-soft); background:var(--surface); }
+      .card-cover img { width:100%; height:100%; object-fit:cover; }
+      .card-cover.is-empty { display:grid; place-items:center; }
+      .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:800; }
+      .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; }
+      .card-title { font-size:24px; line-height:1.15; font-weight:850; color:var(--text); }
+      .card-subtitle { color:var(--text-soft); font-size:14px; line-height:1.4; }
+      .card-badges { display:flex; gap:8px; flex-wrap:wrap; }
+      .card-badge { display:inline-flex; align-items:center; min-height:26px; padding:5px 9px; border-radius:999px; background:var(--accent-soft); color:var(--text); font-size:12px; }
+      .card-badge.folder { background:var(--bg-soft); }
+      .card-actions { display:flex; gap:10px; flex-wrap:wrap; }
+      .card-btn { min-height:42px; padding:10px 14px; border-radius:999px; font-weight:750; background:var(--bg-soft); color:var(--text); border:1px solid var(--border-soft); }
+      .card-btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
+      .card-btn:disabled { opacity:.55; cursor:default; }
+      .card-status { min-height:20px; font-size:13px; color:var(--text-soft); }
+      .build-progress { display:none; flex-direction:column; gap:8px; padding:12px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface); }
+      .build-progress.is-visible { display:flex; }
+      .build-progress__top { display:flex; justify-content:space-between; gap:12px; color:var(--text-soft); font-size:13px; }
+      .build-progress__bar { width:100%; height:8px; overflow:hidden; border-radius:999px; background:var(--bg-soft); }
+      .build-progress__fill { width:0%; height:100%; border-radius:inherit; background:var(--accent); transition:width .25s ease; }
+      .card-section { padding:16px; border-radius:18px; border:1px solid var(--border-soft); background:var(--surface); }
+      .card-section[hidden] { display:none; }
+      .card-section__title { font-size:17px; font-weight:850; color:var(--text); margin-bottom:10px; }
+      .card-description { color:var(--text-soft); font-size:15px; line-height:1.55; white-space:pre-line; }
+      .related-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; }
+      .related-card { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:center; padding:8px; border-radius:14px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
+      .related-card__cover { width:54px; height:76px; border-radius:10px; overflow:hidden; background:var(--surface); }
+      .related-card__cover img { width:100%; height:100%; object-fit:cover; }
+      .related-card__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); }
+      .related-card__body { min-width:0; }
+      .related-card__title { font-size:14px; font-weight:750; line-height:1.3; }
+      .related-card__meta { margin-top:4px; font-size:12px; color:var(--text-soft); }
+      .card-empty { padding:20px; border-radius:18px; background:var(--surface); border:1px solid var(--border-soft); color:var(--text-soft); }
 
-      .card-shell {
-        display: grid;
-        grid-template-columns: 132px 1fr;
-        gap: 16px;
-        padding: 16px;
-        border-radius: 22px;
-        border: 1px solid var(--border-soft);
-        background: var(--bg-elevated);
-      }
-
-      .card-cover {
-        width: 132px;
-        aspect-ratio: 2 / 3;
-        overflow: hidden;
-        border-radius: 16px;
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-      }
-
-      .card-cover img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .card-cover.is-empty {
-        display: grid;
-        place-items: center;
-      }
-
-      .card-cover.is-empty::after,
-      .card-cover__fallback {
-        width: 100%;
-        height: 100%;
-        display: grid;
-        place-items: center;
-        color: var(--text-soft);
-        font-size: 28px;
-        font-weight: 800;
-      }
-
-      .card-main {
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .card-title {
-        font-size: 24px;
-        line-height: 1.15;
-        font-weight: 850;
-        color: var(--text);
-      }
-
-      .card-subtitle {
-        color: var(--text-soft);
-        font-size: 14px;
-        line-height: 1.4;
-      }
-
-      .card-badges {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-
-      .card-badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 26px;
-        padding: 5px 9px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        color: var(--text);
-        font-size: 12px;
-      }
-
-      .card-badge.folder {
-        background: var(--bg-soft);
-      }
-
-      .card-actions {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-
-      .card-btn {
-        min-height: 42px;
-        padding: 10px 14px;
-        border-radius: 999px;
-        font-weight: 750;
-        background: var(--bg-soft);
-        color: var(--text);
-        border: 1px solid var(--border-soft);
-      }
-
-      .card-btn.primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: transparent;
-      }
-
-      .card-btn:disabled {
-        opacity: 0.55;
-        cursor: default;
-      }
-
-      .card-status {
-        min-height: 20px;
-        font-size: 13px;
-        color: var(--text-soft);
-      }
-
-      .build-progress {
-        display: none;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        border-radius: 14px;
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-      }
-
-      .build-progress.is-visible {
-        display: flex;
-      }
-
-      .build-progress__top {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        color: var(--text-soft);
-        font-size: 13px;
-      }
-
-      .build-progress__bar {
-        width: 100%;
-        height: 8px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: var(--bg-soft);
-      }
-
-      .build-progress__fill {
-        width: 0%;
-        height: 100%;
-        border-radius: inherit;
-        background: var(--accent);
-        transition: width 0.25s ease;
-      }
-
-      .card-section {
-        padding: 16px;
-        border-radius: 18px;
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-      }
-
-      .card-section[hidden] {
-        display: none;
-      }
-
-      .card-section__title {
-        font-size: 17px;
-        font-weight: 850;
-        color: var(--text);
-        margin-bottom: 10px;
-      }
-
-      .card-description {
-        color: var(--text-soft);
-        font-size: 15px;
-        line-height: 1.55;
-        white-space: pre-line;
-      }
-
-      .related-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 12px;
-      }
-
-      .related-card {
-        display: grid;
-        grid-template-columns: 54px 1fr;
-        gap: 10px;
-        align-items: center;
-        padding: 8px;
-        border-radius: 14px;
-        border: 1px solid var(--border-soft);
-        background: var(--bg-elevated);
-        color: var(--text);
-        text-align: left;
-      }
-
-      .related-card__cover {
-        width: 54px;
-        height: 76px;
-        border-radius: 10px;
-        overflow: hidden;
-        background: var(--surface);
-      }
-
-      .related-card__cover img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .related-card__fallback {
-        width: 100%;
-        height: 100%;
-        display: grid;
-        place-items: center;
-        color: var(--text-soft);
-      }
-
-      .related-card__body {
-        min-width: 0;
-      }
-
-      .related-card__title {
-        font-size: 14px;
-        font-weight: 750;
-        line-height: 1.3;
-      }
-
-      .related-card__meta {
-        margin-top: 4px;
-        font-size: 12px;
-        color: var(--text-soft);
-      }
-
-      .card-empty {
-        padding: 20px;
-        border-radius: 18px;
-        background: var(--surface);
-        border: 1px solid var(--border-soft);
-        color: var(--text-soft);
-      }
-
-      @media (max-width: 640px) {
-        .card-shell {
-          grid-template-columns: 104px 1fr;
-          gap: 12px;
-          padding: 12px;
-          border-radius: 18px;
-        }
-
-        .card-cover {
-          width: 104px;
-          border-radius: 14px;
-        }
-
-        .card-title {
-          font-size: 20px;
-        }
-
-        .card-actions {
-          flex-direction: column;
-        }
-
-        .card-btn {
-          width: 100%;
-        }
-
-        .related-grid {
-          grid-template-columns: 1fr;
-        }
+      @media (max-width:640px) {
+        .card-shell { grid-template-columns:104px 1fr; gap:12px; padding:12px; border-radius:18px; }
+        .card-cover { width:104px; border-radius:14px; }
+        .card-title { font-size:20px; }
+        .card-actions { flex-direction:column; }
+        .card-btn { width:100%; }
+        .related-grid { grid-template-columns:1fr; }
       }
     </style>
-  `;
-}
-
-function renderNotFound(root) {
-  root.innerHTML = `
-    ${renderStyles()}
-    <div class="card-empty">Карточка не найдена.</div>
   `;
 }
 
@@ -522,19 +284,11 @@ function renderLoading(root) {
   `;
 }
 
-function getProgressPercent(job = {}) {
-  if (!job) return 0;
-
-  if (Number.isFinite(Number(job.progress_percent))) {
-    return Math.max(0, Math.min(100, Number(job.progress_percent)));
-  }
-
-  const current = Number(job.progress_current || 0);
-  const total = Number(job.progress_total || 0);
-
-  if (!total) return 0;
-
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+function renderNotFound(root) {
+  root.innerHTML = `
+    ${renderStyles()}
+    <div class="card-empty">Карточка не найдена.</div>
+  `;
 }
 
 function renderCard(root, { entity, userMedia, relatedItems = [] }) {
@@ -558,11 +312,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
         <div class="card-main">
           <div>
             <div class="card-title">${escapeHtml(title)}</div>
-            ${
-              originalTitle
-                ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>`
-                : ""
-            }
+            ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
           </div>
 
           <div class="card-badges" data-card-badges>
@@ -657,14 +407,21 @@ function bindRelated(root) {
       const key = button.dataset.related || "";
       if (!key) return;
 
-      navigate("/card", {
-        key
-      });
+      navigate("/card", { key });
     });
   });
 }
 
-function updateProgressUI(root, job) {
+function getProgressPercent(job = {}) {
+  const current = Number(job.progress_current || 0);
+  const total = Number(job.progress_total || 0);
+
+  if (!total) return 0;
+
+  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+}
+
+function updateProgressUI(root, job = {}) {
   const progressRoot = root.querySelector("[data-build-progress]");
   const labelNode = root.querySelector("[data-build-progress-label]");
   const percentNode = root.querySelector("[data-build-progress-percent]");
@@ -674,7 +431,12 @@ function updateProgressUI(root, job) {
   if (!progressRoot || !job) return;
 
   const percent = getProgressPercent(job);
-  const label = renderUniverseJobProgress(job);
+  const label =
+    job.status === UNIVERSE_JOB_STATUS.READY
+      ? "Вселенная готова"
+      : job.status === UNIVERSE_JOB_STATUS.FAILED
+        ? job.error_message || "Ошибка построения"
+        : job.progress_label || "Построение вселенной";
 
   progressRoot.classList.add("is-visible");
 
@@ -684,10 +446,15 @@ function updateProgressUI(root, job) {
   if (statusNode) statusNode.textContent = label;
 }
 
+function isFinished(job = {}) {
+  return [UNIVERSE_JOB_STATUS.READY, UNIVERSE_JOB_STATUS.FAILED].includes(job.status);
+}
+
 async function hydrateUserMediaState(root, userId, entity) {
   if (!userId || !entity?.id) return null;
 
   const cached = getCachedUserMedia(userId, entity);
+
   if (cached?.id) {
     updateUserMediaUI(root, cached);
     return cached;
@@ -795,19 +562,23 @@ export async function renderCardPage(root, params = {}) {
         return;
       }
 
-      const updated = await pollUniverseBuildJob(job.id);
+      const updated = await getUniverseBuildJob(job.id).catch(() => null);
 
       if (!updated) return;
 
       updateProgressUI(root, updated);
 
-      if (isUniverseJobFinished(updated)) {
+      if (isFinished(updated)) {
         stopPolling();
 
         if (updated.status === UNIVERSE_JOB_STATUS.READY && updated.universe_key) {
           navigate("/universe", {
             id: updated.universe_key
           });
+        }
+
+        if (updated.status === UNIVERSE_JOB_STATUS.FAILED && buildButton) {
+          buildButton.disabled = false;
         }
       }
     }, 1500);
@@ -842,6 +613,10 @@ export async function renderCardPage(root, params = {}) {
       statusNode.textContent = result.alreadyExists
         ? "Уже есть в библиотеке"
         : "Добавлено в библиотеку";
+
+      if (userMedia?.id) {
+        hydrateRelatedItems(root, userId, result.entity || entity, userMedia);
+      }
     } catch (error) {
       console.error("Add to library error:", error);
       statusNode.textContent = "Ошибка добавления";
@@ -878,18 +653,25 @@ export async function renderCardPage(root, params = {}) {
         updateUserMediaUI(root, userMedia);
       }
 
-      const { job } = await createUniverseBuildJob({
+      const job = await createUniverseBuildJob({
         userId,
         entityId: buildEntity.id,
-        canonicalKey: buildEntity.canonical_key,
-        universeKey: buildEntity.universe_key || ""
+        universeKey: buildEntity.universe_key || null
       });
 
       updateProgressUI(root, job);
       startPolling(job);
 
-      buildUniverseForJob(job, buildEntity).catch((error) => {
+      buildUniverseForJob(job, buildEntity).then((result) => {
+        if (destroyed || !result?.universe_key) return;
+
+        navigate("/universe", {
+          id: result.universe_key
+        });
+      }).catch((error) => {
         console.error("Universe background build failed:", error);
+        if (statusNode) statusNode.textContent = "Ошибка построения вселенной";
+        if (buildButton) buildButton.disabled = false;
       });
     } catch (error) {
       console.error("Build universe job error:", error);
