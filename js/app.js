@@ -347,7 +347,8 @@ function getSidebarSignature() {
 function getSearchModalSignature() {
   return JSON.stringify({
     searchModalOpen: state.searchModalOpen,
-    searchQuery: state.searchQuery || ""
+    searchQuery: state.searchQuery || "",
+    searchContextCategory: state.searchContextCategory || ""
   });
 }
 
@@ -470,7 +471,7 @@ function renderApp() {
 
     const searchModalSignature = getSearchModalSignature();
     if (searchModalSignature !== lastSearchModalSignature) {
-      renderSearchModal(searchModalRoot);
+      renderSearchModal(searchModalRoot, { category: state.searchContextCategory || null });
       lastSearchModalSignature = searchModalSignature;
     }
 
@@ -508,10 +509,19 @@ async function init() {
     console.warn("Router init error:", error);
   }
 
-  bindAuthListenerSafely();
-  renderApp();
+  const cachedUser = readCachedUser();
+  if (cachedUser?.id) {
+    setUserIfChanged(cachedUser);
+  }
 
-  Promise.resolve().then(() => hydrateAuthStateSafely());
+  renderApp();
+  bindAuthListenerSafely();
+
+  Promise.resolve().then(() => {
+    hydrateAuthStateSafely().catch((error) => {
+      console.warn("Auth hydration deferred skipped:", error);
+    });
+  });
 }
 
 init();
