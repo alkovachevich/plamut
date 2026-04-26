@@ -501,8 +501,8 @@ function renderApp() {
 
     const routeSignature = getRouteSignature();
     if (routeSignature !== lastRouteSignature) {
-      renderRouteSafely();
       lastRouteSignature = routeSignature;
+      renderRouteSafely();
     }
   } catch (error) {
     console.error("App render error:", error);
