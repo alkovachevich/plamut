@@ -383,7 +383,10 @@ function getAuthModalSignature() {
 function getRouteSignature() {
   return JSON.stringify({
     route: state.route,
-    routeParams: state.routeParams
+    routeParams: state.routeParams,
+    userId: state.user?.id || null,
+    language: state.language,
+    theme: state.theme
   });
 }
 
