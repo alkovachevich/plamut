@@ -3,8 +3,9 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 let client = null;
 let sessionPromise = null;
 
-const DEFAULT_TIMEOUT_MS = 45000;
-const AUTH_TIMEOUT_MS = 60000;
+const DEFAULT_TIMEOUT_MS = 15000;
+const AUTH_TIMEOUT_MS = 30000;
+const STORAGE_TIMEOUT_MS = 60000;
 
 function createClient() {
   if (!window.supabase) {
@@ -38,6 +39,22 @@ export function getSupabaseClient() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
+function cleanPayload(payload = {}) {
+  const result = {};
+
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  });
+
+  return result;
 }
 
 export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -83,8 +100,11 @@ export async function getCurrentSession() {
 
   const supabase = getSupabaseClient();
 
-  sessionPromise = supabase.auth
-    .getSession()
+  sessionPromise = withTimeout(
+    supabase.auth.getSession(),
+    "Получение сессии",
+    AUTH_TIMEOUT_MS
+  )
     .then(({ data, error }) => {
       if (error) throw error;
       return data?.session || null;
@@ -102,12 +122,7 @@ export async function getCurrentSession() {
 
 export async function getCurrentUser() {
   const session = await getCurrentSession();
-
-  if (session?.user) {
-    return session.user;
-  }
-
-  return null;
+  return session?.user || null;
 }
 
 export async function signInWithEmail(email, password) {
@@ -165,7 +180,8 @@ export async function signOut() {
 }
 
 export async function fetchUserProfile(userId) {
-  if (!userId) return null;
+  const cleanUserId = cleanText(userId);
+  if (!cleanUserId) return null;
 
   const session = await getCurrentSession();
 
@@ -180,7 +196,7 @@ export async function fetchUserProfile(userId) {
       supabase
         .from("profiles")
         .select("*")
-        .eq("id", userId)
+        .eq("id", cleanUserId)
         .maybeSingle(),
     "Загрузка профиля",
     {
@@ -211,25 +227,29 @@ export async function upsertUserProfile(profile) {
 
   const session = await getCurrentSession();
 
-  if (!session?.user?.id || session.user.id !== profile.id) {
-    return null;
+  if (!session?.user?.id) {
+    throw new Error("Нужно войти в аккаунт");
+  }
+
+  if (session.user.id !== profile.id) {
+    throw new Error("Нельзя изменить чужой профиль");
   }
 
   const supabase = getSupabaseClient();
 
-  const payload = {
+  const payload = cleanPayload({
     id: profile.id,
-    username: profile.username ?? undefined,
-    display_name: profile.display_name ?? undefined,
-    avatar_url: profile.avatar_url ?? undefined,
-    preferred_language: profile.preferred_language ?? undefined,
-    preferred_theme: profile.preferred_theme ?? undefined
-  };
-
-  Object.keys(payload).forEach((key) => {
-    if (payload[key] === undefined) {
-      delete payload[key];
-    }
+    username: profile.username !== undefined ? cleanText(profile.username) : undefined,
+    display_name: profile.display_name !== undefined ? cleanText(profile.display_name) : undefined,
+    avatar_url: profile.avatar_url !== undefined ? cleanText(profile.avatar_url) : undefined,
+    preferred_language:
+      profile.preferred_language !== undefined
+        ? cleanText(profile.preferred_language)
+        : undefined,
+    preferred_theme:
+      profile.preferred_theme !== undefined
+        ? cleanText(profile.preferred_theme)
+        : undefined
   });
 
   const { data, error } = await withRetry(
@@ -237,7 +257,7 @@ export async function upsertUserProfile(profile) {
       supabase
         .from("profiles")
         .upsert(payload, { onConflict: "id" })
-        .select()
+        .select("*")
         .single(),
     "Сохранение профиля",
     {
@@ -249,7 +269,11 @@ export async function upsertUserProfile(profile) {
 
   if (error) throw error;
 
-  return data || null;
+  if (!data) {
+    throw new Error("Профиль не был сохранён");
+  }
+
+  return data;
 }
 
 export async function upsertUserProfileSafe(profile) {
@@ -298,7 +322,9 @@ function sanitizeFilename(filename = "avatar") {
 }
 
 export async function uploadAvatarImage(userId, file) {
-  if (!userId) {
+  const cleanUserId = cleanText(userId);
+
+  if (!cleanUserId) {
     throw new Error("Не найден пользователь");
   }
 
@@ -308,7 +334,7 @@ export async function uploadAvatarImage(userId, file) {
 
   const session = await getCurrentSession();
 
-  if (!session?.user?.id || session.user.id !== userId) {
+  if (!session?.user?.id || session.user.id !== cleanUserId) {
     throw new Error("Нужно войти в аккаунт");
   }
 
@@ -319,7 +345,7 @@ export async function uploadAvatarImage(userId, file) {
   const supabase = getSupabaseClient();
   const extension = (file.name.split(".").pop() || "png").toLowerCase();
   const safeName = sanitizeFilename(file.name || `avatar.${extension}`);
-  const path = `${userId}/${Date.now()}-${safeName}`;
+  const path = `${cleanUserId}/${Date.now()}-${safeName}`;
 
   const { error: uploadError } = await withRetry(
     () =>
@@ -332,7 +358,7 @@ export async function uploadAvatarImage(userId, file) {
     "Загрузка аватара",
     {
       retries: 1,
-      timeoutMs: 60000,
+      timeoutMs: STORAGE_TIMEOUT_MS,
       delayMs: 1000
     }
   );
