@@ -201,6 +201,17 @@ function pickBetterText(existingValue = "", incomingValue = "") {
 
 function mergeItems(existing, incoming) {
   if (!existing?.category || !incoming?.category || existing.category !== incoming.category) {
+    console.warn("merge conflict: category mismatch", existing?.canonical_key, incoming?.canonical_key);
+    return existing || incoming || null;
+  }
+
+  if (!hasStrictSharedIds(existing, incoming)) {
+    console.warn("merge conflict: no strict shared ids", existing?.canonical_key, incoming?.canonical_key);
+    return existing;
+  }
+
+  if (existing.category === "books" && (hasBookScreenDescriptionNoise(existing) || hasBookScreenDescriptionNoise(incoming))) {
+    console.warn("merge conflict: books with screen-like description", existing?.canonical_key, incoming?.canonical_key);
     return existing || incoming || null;
   }
 
@@ -237,41 +248,14 @@ function mergeItems(existing, incoming) {
         ...safeArray(incomingIds.ia)
       ])
     },
+    primary_source: resolveBooksPrimarySource(existing, incoming),
     score: Math.max(existing.score || 0, incoming.score || 0)
   };
 }
 
 function areSameBook(a = {}, b = {}) {
   if (a.category !== "books" || b.category !== "books") return false;
-
-  const aIds = a.external_ids || {};
-  const bIds = b.external_ids || {};
-
-  if (aIds.openlibrary_work && bIds.openlibrary_work && aIds.openlibrary_work === bIds.openlibrary_work) {
-    return true;
-  }
-
-  if (aIds.wikidata && bIds.wikidata && aIds.wikidata === bIds.wikidata) {
-    return true;
-  }
-
-  if (hasSharedValue(aIds.isbn, bIds.isbn)) {
-    return true;
-  }
-
-  const aTitles = getTitleKeys(a);
-  const bTitles = getTitleKeys(b);
-
-  if (!aTitles.length || !bTitles.length) return false;
-
-  const sameTitle = aTitles.some((title) => bTitles.includes(title));
-  if (!sameTitle) return false;
-
-  if (a.year && b.year) {
-    return Math.abs(Number(a.year) - Number(b.year)) <= 1;
-  }
-
-  return true;
+  return hasStrictSharedIds(a, b);
 }
 
 function dedupeBooks(items = []) {
@@ -562,6 +546,8 @@ const WIKIDATA_BANNED_BOOK_TYPES = new Set([
   "Q43229" // organization
 ]);
 
+const BOOK_SCREEN_NOISE_WORDS = ["film", "movie", "series", "tv", "сериал", "фильм"];
+
 function getWikidataTypeIds(claims = {}) {
   return uniqueArray(
     safeArray(claims?.P31)
@@ -575,6 +561,36 @@ function isAllowedWikidataBook(claims = {}) {
   if (!typeIds.length) return false;
   if (typeIds.some((id) => WIKIDATA_BANNED_BOOK_TYPES.has(id))) return false;
   return typeIds.some((id) => WIKIDATA_ALLOWED_BOOK_TYPES.has(id));
+}
+
+function hasBookScreenDescriptionNoise(item = {}) {
+  const desc = compactString(`${item.description_ru || ""} ${item.description_en || ""}`);
+  return BOOK_SCREEN_NOISE_WORDS.some((word) => desc.includes(word));
+}
+
+function hasStrictSharedIds(a = {}, b = {}) {
+  const aIds = a.external_ids || {};
+  const bIds = b.external_ids || {};
+
+  if (aIds.openlibrary_work && bIds.openlibrary_work && normalizeOpenLibraryWorkKey(aIds.openlibrary_work) === normalizeOpenLibraryWorkKey(bIds.openlibrary_work)) {
+    return true;
+  }
+  if (aIds.wikidata && bIds.wikidata && aIds.wikidata === bIds.wikidata) return true;
+  if (aIds.tmdb && bIds.tmdb && String(aIds.tmdb) === String(bIds.tmdb)) return true;
+  if (hasSharedValue(aIds.isbn, bIds.isbn)) return true;
+  return false;
+}
+
+function resolveBooksPrimarySource(existing = {}, incoming = {}) {
+  if (existing.category !== "books" || incoming.category !== "books") {
+    return existing.primary_source || incoming.primary_source || "";
+  }
+
+  if (existing.primary_source === "openlibrary" || incoming.primary_source === "openlibrary") {
+    return "openlibrary";
+  }
+
+  return existing.primary_source || incoming.primary_source || "";
 }
 
 function extractOpenLibraryWorkIdFromClaims(claims = {}) {
@@ -682,9 +698,8 @@ function applyFinalCategoryFilter(items = [], category = "") {
 
 function applyBookScreenPenalty(item = {}) {
   if (item.category !== "books") return item;
-  const desc = compactString(`${item.description_ru || ""} ${item.description_en || ""}`);
-  if (desc.includes("film") || desc.includes("movie") || desc.includes("series") || desc.includes("сериал") || desc.includes("фильм")) {
-    return { ...item, score: (item.score || 0) - 25 };
+  if (hasBookScreenDescriptionNoise(item)) {
+    return { ...item, score: (item.score || 0) - 100 };
   }
   return item;
 }
@@ -714,18 +729,15 @@ function scoreBookResult(query, item) {
 
 function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
   return safeArray(wikidataItems).map((item) => {
-    const itemTitle = cleanTitleForDedupe(item.title || item.original_title || "");
     const itemIsbns = safeArray(item.external_ids?.isbn);
     const itemWork = item.external_ids?.openlibrary_work || "";
 
     const match = safeArray(openLibraryItems).find((candidate) => {
-      const candidateTitle = cleanTitleForDedupe(candidate.title || candidate.original_title || "");
       const candidateIsbns = safeArray(candidate.external_ids?.isbn);
       const candidateWork = candidate.external_ids?.openlibrary_work || "";
 
       if (itemWork && candidateWork && itemWork === candidateWork) return true;
       if (itemIsbns.some((isbn) => candidateIsbns.includes(isbn))) return true;
-      if (itemTitle && candidateTitle && itemTitle === candidateTitle) return true;
 
       return false;
     });
@@ -763,12 +775,26 @@ async function searchBooks(query) {
     const detailsResult = await fetchWikidataEntityDetails(ids).catch(() => ({}));
 
     wikidataItems = safeArray(wdResult.value)
-      .map((candidate) => ({
-        candidate,
-        details: detailsResult[candidate.id] || {}
-      }))
-      .filter(({ details }) => isAllowedWikidataBook(details?.claims || {}))
-      .map(({ candidate, details }) => mapWikidataBookEntity(candidate, details));
+      .map((candidate) => {
+        const details = detailsResult[candidate.id] || {};
+        const claims = details?.claims || {};
+        const typeIds = getWikidataTypeIds(claims);
+        const allowed = isAllowedWikidataBook(claims);
+        const mapped = mapWikidataBookEntity(candidate, details);
+
+        if (!typeIds.length) {
+          console.warn("filtered wikidata item: missing P31", candidate.id);
+          return { ...mapped, score: -120, meta: { ...(mapped.meta || {}), wikidata_p31_missing: true } };
+        }
+
+        if (!allowed) {
+          console.warn("filtered wikidata item: banned/non-book P31", candidate.id, typeIds);
+          return null;
+        }
+
+        return mapped;
+      })
+      .filter(Boolean);
   }
 
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
@@ -1058,6 +1084,30 @@ function filterCrossCategoryNoise({ books = [], moviesSeries = [], anime = [], m
   };
 }
 
+function hasConflictData(item = {}) {
+  if (item.category === "books") {
+    const ids = item.external_ids || {};
+    if (ids.tmdb || ids.imdb) return true;
+  }
+  return false;
+}
+
+function validateFinalItem(item = {}) {
+  if (!item?.title || !item?.category || !item?.canonical_key) {
+    console.warn("invalid entity: missing required fields", item?.canonical_key || item?.title || "unknown");
+    return false;
+  }
+  if (!["books", "movies", "series", "anime", "manga"].includes(item.category)) {
+    console.warn("invalid entity: unsupported category", item.category, item.canonical_key);
+    return false;
+  }
+  if (hasConflictData(item)) {
+    console.warn("invalid entity: conflicting data", item.canonical_key);
+    return false;
+  }
+  return true;
+}
+
 /* =========================
    MAIN
 ========================= */
@@ -1103,7 +1153,7 @@ export async function runGlobalSearch(query) {
     })
     .map((item) => applyBookScreenPenalty(item))
     .map((item) => normalizeSearchResult(item))
-    .filter((item) => item && item.title && item.canonical_key)
+    .filter((item) => item && validateFinalItem(item))
     .sort((a, b) => b.score - a.score);
 
   const groupedResult = groupItems(merged);
@@ -1141,6 +1191,7 @@ export async function runCategorySearch(query, category) {
       };
     })
     .map((item) => applyBookScreenPenalty(item))
+    .filter((item) => validateFinalItem(item))
     .sort((a, b) => (b.score || 0) - (a.score || 0));
 
   setCachedSearchResult(cacheKey, result);
