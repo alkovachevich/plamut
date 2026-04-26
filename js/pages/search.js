@@ -1,5 +1,6 @@
 import {
   runGlobalSearch,
+  runCategorySearch,
   flattenResults,
   sortByScore,
   limitResults,
@@ -136,7 +137,7 @@ function attachCardHandlers(root, items = []) {
   });
 }
 
-async function performSearch(resultsRoot, query) {
+async function performSearch(resultsRoot, query, category = "") {
   if (!resultsRoot) return;
 
   const cleanQuery = String(query || "").trim();
@@ -153,7 +154,9 @@ async function performSearch(resultsRoot, query) {
   resultsRoot.innerHTML = renderEmpty("Ищем…");
 
   try {
-    const grouped = await runGlobalSearch(cleanQuery);
+    const grouped = category
+      ? { [category]: await runCategorySearch(cleanQuery, category) }
+      : await runGlobalSearch(cleanQuery);
 
     if (
       resultsRoot.dataset.requestId !== String(requestId) ||
@@ -190,6 +193,7 @@ async function performSearch(resultsRoot, query) {
 
 export function renderSearchPage(root, params = {}) {
   const initialQuery = params.q || state.searchQuery || "";
+  const searchCategory = params.category || "";
 
   root.innerHTML = `
     <style>
@@ -358,7 +362,7 @@ export function renderSearchPage(root, params = {}) {
 
     <section class="page">
       <div class="search-header">
-        <div class="search-title">Поиск</div>
+        <div class="search-title">Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ''}</div>
 
         <input
           class="search-input"
@@ -380,7 +384,7 @@ export function renderSearchPage(root, params = {}) {
   const resultsRoot = root.querySelector("[data-results]");
 
   const debouncedSearch = debounce((value) => {
-    performSearch(resultsRoot, value);
+    performSearch(resultsRoot, value, searchCategory);
   }, SEARCH_LIMITS.DEBOUNCE_MS);
 
   input?.addEventListener("input", () => {
@@ -389,6 +393,6 @@ export function renderSearchPage(root, params = {}) {
   });
 
   if (initialQuery && initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    performSearch(resultsRoot, initialQuery);
+    performSearch(resultsRoot, initialQuery, searchCategory);
   }
 }
