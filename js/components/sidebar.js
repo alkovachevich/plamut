@@ -4,11 +4,15 @@ import {
   closeSidebar,
   setTheme,
   setLanguage,
+  setUser,
   openAuthModal
 } from "../state.js";
 import { escapeHtml, getInitials } from "../utils.js";
 import { ROUTES } from "../config.js";
-import { signOut } from "../lib/supabase-client.js";
+import {
+  signOut,
+  upsertUserProfile
+} from "../lib/supabase-client.js";
 
 function renderAvatar(user) {
   const name = user?.display_name || user?.username || "Гость";
@@ -29,6 +33,23 @@ function renderAvatar(user) {
 
 function isLoggedIn(user) {
   return Boolean(user?.id);
+}
+
+async function savePreference(patch = {}) {
+  if (!state.user?.id) return;
+
+  const saved = await upsertUserProfile({
+    id: state.user.id,
+    ...patch
+  });
+
+  if (saved) {
+    setUser({
+      ...state.user,
+      preferred_theme: saved.preferred_theme || state.user.preferred_theme,
+      preferred_language: saved.preferred_language || state.user.preferred_language
+    });
+  }
 }
 
 export function renderSidebar(root) {
@@ -151,6 +172,11 @@ export function renderSidebar(root) {
         border: 1px solid transparent;
       }
 
+      .segmented button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
       .segmented .active {
         background: var(--accent-soft);
         color: var(--text);
@@ -169,6 +195,11 @@ export function renderSidebar(root) {
         border-radius: 14px;
         font-weight: 700;
         color: var(--text);
+      }
+
+      .btn:disabled {
+        opacity: 0.7;
+        cursor: default;
       }
 
       .btn.secondary {
@@ -212,16 +243,16 @@ export function renderSidebar(root) {
         <div class="setting-row">
           <span>Язык</span>
           <div class="segmented">
-            <button data-lang="ru" class="${state.language === "ru" ? "active" : ""}">RU</button>
-            <button data-lang="en" class="${state.language === "en" ? "active" : ""}">EN</button>
+            <button type="button" data-lang="ru" class="${state.language === "ru" ? "active" : ""}">RU</button>
+            <button type="button" data-lang="en" class="${state.language === "en" ? "active" : ""}">EN</button>
           </div>
         </div>
 
         <div class="setting-row">
           <span>Тема</span>
           <div class="segmented">
-            <button data-theme="dark" class="${state.theme === "dark" ? "active" : ""}">Dark</button>
-            <button data-theme="light" class="${state.theme === "light" ? "active" : ""}">Light</button>
+            <button type="button" data-theme="dark" class="${state.theme === "dark" ? "active" : ""}">Dark</button>
+            <button type="button" data-theme="light" class="${state.theme === "light" ? "active" : ""}">Light</button>
           </div>
         </div>
 
@@ -229,20 +260,20 @@ export function renderSidebar(root) {
           ${
             loggedIn
               ? `
-                <button class="btn secondary" data-action="settings">
+                <button class="btn secondary" type="button" data-action="settings">
                   Настройки
                 </button>
 
-                <button class="btn danger" data-action="logout">
+                <button class="btn danger" type="button" data-action="logout">
                   Выйти
                 </button>
               `
               : `
-                <button class="btn primary" data-action="login">
+                <button class="btn primary" type="button" data-action="login">
                   Войти
                 </button>
 
-                <button class="btn secondary" data-action="register">
+                <button class="btn secondary" type="button" data-action="register">
                   Регистрация
                 </button>
               `
@@ -254,21 +285,41 @@ export function renderSidebar(root) {
 
   const overlay = root.querySelector(".sidebar-overlay");
 
-  overlay?.addEventListener("click", (e) => {
-    if (e.target === overlay) {
+  overlay?.addEventListener("click", (event) => {
+    if (event.target === overlay) {
       closeSidebar();
     }
   });
 
-  root.querySelectorAll("[data-lang]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setLanguage(btn.dataset.lang);
+  root.querySelectorAll("[data-lang]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const language = button.dataset.lang || "ru";
+
+      try {
+        button.disabled = true;
+        setLanguage(language);
+        await savePreference({ preferred_language: language });
+      } catch (error) {
+        console.error("Sidebar language save error:", error);
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 
-  root.querySelectorAll("[data-theme]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setTheme(btn.dataset.theme);
+  root.querySelectorAll("[data-theme]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const theme = button.dataset.theme || "dark";
+
+      try {
+        button.disabled = true;
+        setTheme(theme);
+        await savePreference({ preferred_theme: theme });
+      } catch (error) {
+        console.error("Sidebar theme save error:", error);
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 
@@ -288,12 +339,12 @@ export function renderSidebar(root) {
   });
 
   root.querySelector('[data-action="logout"]')?.addEventListener("click", async () => {
-    const logoutBtn = root.querySelector('[data-action="logout"]');
+    const logoutButton = root.querySelector('[data-action="logout"]');
 
     try {
-      if (logoutBtn) {
-        logoutBtn.disabled = true;
-        logoutBtn.textContent = "Выход...";
+      if (logoutButton) {
+        logoutButton.disabled = true;
+        logoutButton.textContent = "Выход…";
       }
 
       await signOut();
@@ -302,9 +353,9 @@ export function renderSidebar(root) {
     } catch (error) {
       console.error("Logout error:", error);
 
-      if (logoutBtn) {
-        logoutBtn.disabled = false;
-        logoutBtn.textContent = "Выйти";
+      if (logoutButton) {
+        logoutButton.disabled = false;
+        logoutButton.textContent = "Выйти";
       }
     }
   });
