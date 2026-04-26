@@ -44,6 +44,8 @@ const CACHED_USER_KEY = "plamut_cached_user";
 
 let initialized = false;
 let authSubscription = null;
+let routeCleanup = null;
+let routeRenderToken = 0;
 
 let lastHeaderSignature = null;
 let lastSidebarSignature = null;
@@ -124,6 +126,32 @@ function clearCachedUser() {
   }
 }
 
+function usersEqual(a = {}, b = {}) {
+  return JSON.stringify({
+    id: a?.id || null,
+    email: a?.email || null,
+    username: a?.username || null,
+    display_name: a?.display_name || null,
+    avatar_url: a?.avatar_url || null,
+    preferred_theme: normalizeTheme(a?.preferred_theme || state.theme),
+    preferred_language: normalizeLanguage(a?.preferred_language || state.language)
+  }) === JSON.stringify({
+    id: b?.id || null,
+    email: b?.email || null,
+    username: b?.username || null,
+    display_name: b?.display_name || null,
+    avatar_url: b?.avatar_url || null,
+    preferred_theme: normalizeTheme(b?.preferred_theme || state.theme),
+    preferred_language: normalizeLanguage(b?.preferred_language || state.language)
+  });
+}
+
+function setUserIfChanged(user) {
+  if (!usersEqual(state.user, user)) {
+    setUser(user);
+  }
+}
+
 function buildUsername(user) {
   const source =
     user?.user_metadata?.username ||
@@ -190,8 +218,11 @@ async function ensureUserProfile(user) {
     preferred_language: normalizeLanguage(existingProfile?.preferred_language || state.language)
   };
 
-  const savedProfile = await upsertUserProfileSafe(fallbackProfile);
+  if (existingProfile?.id) {
+    return fallbackProfile;
+  }
 
+  const savedProfile = await upsertUserProfileSafe(fallbackProfile);
   return savedProfile || fallbackProfile;
 }
 
@@ -213,7 +244,7 @@ async function applyAuthenticatedUser(user) {
     preferred_language: normalizeLanguage(state.language)
   };
 
-  setUser(fastUser);
+  setUserIfChanged(fastUser);
   writeCachedUser(fastUser);
 
   const profile = await ensureUserProfile(user);
@@ -229,7 +260,7 @@ async function applyAuthenticatedUser(user) {
   };
 
   applyProfilePreferences(normalizedUser);
-  setUser(normalizedUser);
+  setUserIfChanged(normalizedUser);
   writeCachedUser(normalizedUser);
 }
 
@@ -242,7 +273,7 @@ async function hydrateAuthStateSafely() {
 
       if (cachedUser?.id) {
         applyProfilePreferences(cachedUser);
-        setUser({
+        setUserIfChanged({
           ...cachedUser,
           preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
           preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
@@ -261,7 +292,7 @@ async function hydrateAuthStateSafely() {
 
     if (cachedUser?.id) {
       applyProfilePreferences(cachedUser);
-      setUser({
+      setUserIfChanged({
         ...cachedUser,
         preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
         preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
@@ -352,50 +383,78 @@ function getAuthModalSignature() {
 function getRouteSignature() {
   return JSON.stringify({
     route: state.route,
-    routeParams: state.routeParams,
-    userId: state.user?.id || null,
-    language: state.language,
-    theme: state.theme
+    routeParams: state.routeParams
   });
+}
+
+function cleanupCurrentRoute() {
+  if (typeof routeCleanup === "function") {
+    try {
+      routeCleanup();
+    } catch (error) {
+      console.warn("Route cleanup skipped:", error);
+    }
+  }
+
+  routeCleanup = null;
+}
+
+async function resolveRouteRenderer(route, params) {
+  switch (route) {
+    case ROUTES.HOME:
+      return renderHomePage(mainRoot);
+    case ROUTES.CATEGORIES:
+      return renderCategoriesPage(mainRoot);
+    case ROUTES.CATEGORY_LIBRARY:
+      return renderCategoryPage(mainRoot, params);
+    case ROUTES.SEARCH:
+      return renderSearchPage(mainRoot, params);
+    case ROUTES.CARD:
+      return renderCardPage(mainRoot, params);
+    case ROUTES.UNIVERSES:
+      return renderUniversesPage(mainRoot);
+    case ROUTES.UNIVERSE_DETAILS:
+      return renderUniversePage(mainRoot, params);
+    case ROUTES.SETTINGS:
+      return renderSettingsPage(mainRoot);
+    case ROUTES.GUEST:
+      return renderGuestPage(mainRoot, params);
+    default:
+      return renderHomePage(mainRoot);
+  }
 }
 
 function renderRouteSafely() {
   const route = state.route;
   const params = state.routeParams || {};
+  const token = routeRenderToken + 1;
+
+  routeRenderToken = token;
+  cleanupCurrentRoute();
 
   try {
-    switch (route) {
-      case ROUTES.HOME:
-        renderHomePage(mainRoot);
-        break;
-      case ROUTES.CATEGORIES:
-        renderCategoriesPage(mainRoot);
-        break;
-      case ROUTES.CATEGORY_LIBRARY:
-        renderCategoryPage(mainRoot, params);
-        break;
-      case ROUTES.SEARCH:
-        renderSearchPage(mainRoot, params);
-        break;
-      case ROUTES.CARD:
-        renderCardPage(mainRoot, params);
-        break;
-      case ROUTES.UNIVERSES:
-        renderUniversesPage(mainRoot);
-        break;
-      case ROUTES.UNIVERSE_DETAILS:
-        renderUniversePage(mainRoot, params);
-        break;
-      case ROUTES.SETTINGS:
-        renderSettingsPage(mainRoot);
-        break;
-      case ROUTES.GUEST:
-        renderGuestPage(mainRoot, params);
-        break;
-      default:
-        renderHomePage(mainRoot);
-        break;
-    }
+    const result = resolveRouteRenderer(route, params);
+
+    Promise.resolve(result)
+      .then((cleanup) => {
+        if (token !== routeRenderToken) {
+          if (typeof cleanup === "function") cleanup();
+          return;
+        }
+
+        routeCleanup = typeof cleanup === "function" ? cleanup : null;
+      })
+      .catch((error) => {
+        if (token !== routeRenderToken) return;
+
+        console.error("Route render error:", error);
+
+        mainRoot.innerHTML = `
+          <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
+            Не удалось открыть страницу. Вернись на главную.
+          </div>
+        `;
+      });
   } catch (error) {
     console.error("Route render error:", error);
 
@@ -464,7 +523,7 @@ async function init() {
 
   if (cachedUser?.id) {
     applyProfilePreferences(cachedUser);
-    setUser({
+    setUserIfChanged({
       ...cachedUser,
       preferred_theme: normalizeTheme(cachedUser.preferred_theme || state.theme),
       preferred_language: normalizeLanguage(cachedUser.preferred_language || state.language)
