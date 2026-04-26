@@ -73,7 +73,7 @@ export async function getApiCache(source, query) {
   const { data, error } = await withTimeout(
     supabase
       .from(API_CACHE_TABLE)
-      .select("*")
+      .select("payload")
       .eq("cache_key", cache_key)
       .gt("expires_at", new Date().toISOString())
       .maybeSingle(),
@@ -109,8 +109,8 @@ export async function setApiCache(source, query, payload, options = {}) {
     supabase
       .from(API_CACHE_TABLE)
       .upsert(row, { onConflict: "cache_key" })
-      .select()
-      .single(),
+      .select("cache_key")
+      .maybeSingle(),
     "Запись api cache",
     DEFAULT_TIMEOUT_MS
   ).catch((error) => ({ data: null, error }));
@@ -131,19 +131,31 @@ export async function setApiCache(source, query, payload, options = {}) {
 export async function fetchJsonCached(source, query, fetcher, options = {}) {
   const {
     ttlMs = 1000 * 60 * 60 * 24 * 7,
-    force = false
+    force = false,
+    fallback = []
   } = options;
 
   if (!force) {
     try {
       const cached = await getApiCache(source, query);
-      if (cached) return cached;
+      if (cached !== null && cached !== undefined) return cached;
     } catch (error) {
       console.warn("fetchJsonCached read-through disabled:", error);
     }
   }
 
-  const payload = await fetcher();
+  let payload = null;
+
+  try {
+    payload = await fetcher();
+  } catch (error) {
+    console.warn("fetchJsonCached fetch failed, using fallback:", error);
+    payload = Array.isArray(fallback) ? [...fallback] : fallback;
+  }
+
+  if (payload === null || payload === undefined) {
+    payload = Array.isArray(fallback) ? [...fallback] : fallback;
+  }
 
   try {
     await setApiCache(source, query, payload, { ttlMs });
