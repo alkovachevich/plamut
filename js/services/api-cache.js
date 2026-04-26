@@ -2,6 +2,7 @@ import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 
 const API_CACHE_TABLE = "api_cache";
 const DEFAULT_TIMEOUT_MS = 12000;
+let apiCacheDisabledForSession = false;
 
 function isPermissionError(error) {
   const status = Number(error?.status || error?.code || 0);
@@ -83,7 +84,8 @@ export async function getApiCache(source, query) {
 
   if (error) {
     if (isPermissionError(error)) {
-      console.warn("getApiCache permission denied, fallback to direct fetch");
+      apiCacheDisabledForSession = true;
+      console.warn("getApiCache permission denied, disable api_cache for session");
       return null;
     }
 
@@ -117,7 +119,8 @@ export async function setApiCache(source, query, payload, options = {}) {
 
   if (error) {
     if (isPermissionError(error)) {
-      console.warn("setApiCache permission denied, skip cache write");
+      apiCacheDisabledForSession = true;
+      console.warn("setApiCache permission denied, disable api_cache for session");
       return null;
     }
 
@@ -135,7 +138,7 @@ export async function fetchJsonCached(source, query, fetcher, options = {}) {
     fallback = []
   } = options;
 
-  if (!force) {
+  if (!force && !apiCacheDisabledForSession) {
     try {
       const cached = await getApiCache(source, query);
       if (cached !== null && cached !== undefined) return cached;
@@ -157,13 +160,19 @@ export async function fetchJsonCached(source, query, fetcher, options = {}) {
     payload = Array.isArray(fallback) ? [...fallback] : fallback;
   }
 
-  try {
-    await setApiCache(source, query, payload, { ttlMs });
-  } catch (error) {
-    console.warn("fetchJsonCached write-through disabled:", error);
+  if (!apiCacheDisabledForSession) {
+    try {
+      await setApiCache(source, query, payload, { ttlMs });
+    } catch (error) {
+      console.warn("fetchJsonCached write-through disabled:", error);
+    }
   }
 
   return payload;
+}
+
+export function isApiCacheDisabledForSession() {
+  return apiCacheDisabledForSession;
 }
 
 export async function clearExpiredApiCache() {
