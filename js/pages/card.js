@@ -26,7 +26,7 @@ import {
 
 import {
   getSupabaseClient,
-  withRetry
+  withTimeout
 } from "../lib/supabase-client.js";
 
 import {
@@ -34,6 +34,8 @@ import {
   loadUserLibrary,
   updateCachedLibraryItem
 } from "../services/library-cache.js";
+
+const CARD_TIMEOUT_MS = 8000;
 
 const USER_MEDIA_SELECT = `
   id,
@@ -66,12 +68,7 @@ function resolveTitle(entity = {}) {
 }
 
 function resolveDescription(entity = {}) {
-  return (
-    entity.description_ru ||
-    entity.description_en ||
-    entity.description ||
-    ""
-  );
+  return entity.description_ru || entity.description_en || entity.description || "";
 }
 
 function getCover(entity = {}) {
@@ -111,44 +108,60 @@ function getCachedUserMedia(userId, entity = {}) {
   };
 }
 
+function buildFallbackEntity(params = {}) {
+  const key = normalizeKey(params.key || "");
+  const category = clean(params.category || "");
+
+  if (!key) return null;
+
+  return {
+    id: null,
+    canonical_key: key,
+    category,
+    title_primary: "Карточка временно недоступна",
+    title_ru: "",
+    title_en: "",
+    original_title: key,
+    year: null,
+    cover_url: "",
+    description_ru: "Не удалось быстро загрузить данные из базы. Обнови страницу или открой карточку позже.",
+    description_en: "",
+    external_ids: {},
+    meta: {},
+    relations_status: "unknown"
+  };
+}
+
 async function loadEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
   const cachedEntity = getCachedEntityByKey(userId, key);
-
-  if (cachedEntity?.canonical_key) {
-    return cachedEntity;
-  }
+  if (cachedEntity?.canonical_key) return cachedEntity;
 
   const temp = getTemporaryCardItem();
-
   if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
     return temp;
   }
 
-  if (key) {
-    try {
-      const fromDb = await withRetry(
-        () => getEntityByCanonicalKey(key),
-        "Загрузка карточки",
-        {
-          retries: 1,
-          timeoutMs: 9000,
-          delayMs: 500
-        }
-      );
+  if (!key) return null;
 
-      if (fromDb) {
-        clearTemporaryCardItem();
-        return fromDb;
-      }
-    } catch (error) {
-      console.warn("DB card load skipped:", error);
+  try {
+    const fromDb = await withTimeout(
+      getEntityByCanonicalKey(key),
+      "Загрузка карточки",
+      CARD_TIMEOUT_MS
+    );
+
+    if (fromDb) {
+      clearTemporaryCardItem();
+      return fromDb;
     }
+  } catch (error) {
+    console.warn("DB card load skipped:", error);
   }
 
-  return temp || null;
+  return buildFallbackEntity(params);
 }
 
 async function loadUserMedia(userId, entityId) {
@@ -156,12 +169,16 @@ async function loadUserMedia(userId, entityId) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("user_media")
-    .select(USER_MEDIA_SELECT)
-    .eq("user_id", userId)
-    .eq("entity_id", entityId)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .select(USER_MEDIA_SELECT)
+      .eq("user_id", userId)
+      .eq("entity_id", entityId)
+      .maybeSingle(),
+    "Загрузка статуса карточки",
+    CARD_TIMEOUT_MS
+  );
 
   if (error) throw error;
 
@@ -188,15 +205,12 @@ function renderCover(entity = {}) {
 
 function renderStatusBadge(userMedia) {
   if (!userMedia?.status) return "";
-
   const label = STATUS_LABELS[userMedia.status] || userMedia.status;
-
   return `<span class="card-badge" data-user-status>${escapeHtml(label)}</span>`;
 }
 
 function renderFolderBadge(userMedia) {
   if (!userMedia?.folder_name) return "";
-
   return `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`;
 }
 
@@ -233,7 +247,6 @@ function renderStyles() {
       .card-shell { display:grid; grid-template-columns:132px 1fr; gap:16px; padding:16px; border-radius:22px; border:1px solid var(--border-soft); background:var(--bg-elevated); }
       .card-cover { width:132px; aspect-ratio:2/3; overflow:hidden; border-radius:16px; border:1px solid var(--border-soft); background:var(--surface); }
       .card-cover img { width:100%; height:100%; object-fit:cover; }
-      .card-cover.is-empty { display:grid; place-items:center; }
       .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:800; }
       .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; }
       .card-title { font-size:24px; line-height:1.15; font-weight:850; color:var(--text); }
@@ -316,7 +329,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
           </div>
 
           <div class="card-badges" data-card-badges>
-            <span class="card-badge">${escapeHtml(categoryLabel)}</span>
+            ${categoryLabel ? `<span class="card-badge">${escapeHtml(categoryLabel)}</span>` : ""}
             ${entity.year ? `<span class="card-badge">${escapeHtml(String(entity.year))}</span>` : ""}
             ${renderStatusBadge(userMedia)}
             ${renderFolderBadge(userMedia)}
@@ -327,7 +340,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
               ${userMedia ? "В библиотеке" : "Добавить"}
             </button>
 
-            <button class="card-btn" type="button" data-action="build">
+            <button class="card-btn" type="button" data-action="build" ${entity.id ? "" : "disabled"}>
               Построить вселенную
             </button>
           </div>
@@ -406,7 +419,6 @@ function bindRelated(root) {
     button.addEventListener("click", () => {
       const key = button.dataset.related || "";
       if (!key) return;
-
       navigate("/card", { key });
     });
   });
@@ -521,9 +533,13 @@ export async function renderCardPage(root, params = {}) {
   const addButton = root.querySelector('[data-action="add"]');
   const buildButton = root.querySelector('[data-action="build"]');
 
+  if (!entity.id && statusNode) {
+    statusNode.textContent = "Карточка не загружена из БД. Действия временно недоступны.";
+  }
+
   bindRelated(root);
 
-  if (userId) {
+  if (userId && entity.id) {
     loadUserLibrary(userId, {
       category: entity.category || "",
       mode: "list",
@@ -572,9 +588,7 @@ export async function renderCardPage(root, params = {}) {
         stopPolling();
 
         if (updated.status === UNIVERSE_JOB_STATUS.READY && updated.universe_key) {
-          navigate("/universe", {
-            id: updated.universe_key
-          });
+          navigate("/universe", { id: updated.universe_key });
         }
 
         if (updated.status === UNIVERSE_JOB_STATUS.FAILED && buildButton) {
@@ -630,13 +644,18 @@ export async function renderCardPage(root, params = {}) {
       return;
     }
 
+    if (!entity.id) {
+      statusNode.textContent = "Нельзя построить вселенную: карточка не загружена из БД.";
+      return;
+    }
+
     try {
       buildButton.disabled = true;
       statusNode.textContent = "Создаём задачу построения…";
 
       let buildEntity = entity;
 
-      if (!buildEntity.id || !userMedia?.id) {
+      if (!userMedia?.id) {
         const added = await addToUserLibrary({
           userId,
           entity
@@ -656,23 +675,26 @@ export async function renderCardPage(root, params = {}) {
       const job = await createUniverseBuildJob({
         userId,
         entityId: buildEntity.id,
-        universeKey: buildEntity.universe_key || null
+        canonicalKey: buildEntity.canonical_key || "",
+        universeKey: buildEntity.universe_key || ""
       });
 
       updateProgressUI(root, job);
       startPolling(job);
 
-      buildUniverseForJob(job, buildEntity).then((result) => {
-        if (destroyed || !result?.universe_key) return;
+      buildUniverseForJob(job, buildEntity)
+        .then((result) => {
+          if (destroyed || !result?.universe_key) return;
 
-        navigate("/universe", {
-          id: result.universe_key
+          navigate("/universe", {
+            id: result.universe_key
+          });
+        })
+        .catch((error) => {
+          console.error("Universe background build failed:", error);
+          if (statusNode) statusNode.textContent = "Ошибка построения вселенной";
+          if (buildButton) buildButton.disabled = false;
         });
-      }).catch((error) => {
-        console.error("Universe background build failed:", error);
-        if (statusNode) statusNode.textContent = "Ошибка построения вселенной";
-        if (buildButton) buildButton.disabled = false;
-      });
     } catch (error) {
       console.error("Build universe job error:", error);
       statusNode.textContent = "Ошибка запуска построения";
