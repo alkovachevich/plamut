@@ -698,7 +698,7 @@ function bindCardActions({
         hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
       }
     } catch (error) {
-      console.error("CARD: add to library error", error);
+      console.warn("CARD: add to library error", error);
       setStatus(error.message || "Ошибка добавления");
       addButton.disabled = false;
     }
@@ -753,12 +753,12 @@ function bindCardActions({
           });
         })
         .catch((error) => {
-          console.error("CARD BUILD: build failed", error);
+          console.warn("CARD BUILD: build failed", error);
           setStatus(error.message || "Ошибка построения вселенной");
           buildButton.disabled = false;
         });
     } catch (error) {
-      console.error("CARD BUILD: start failed", error);
+      console.warn("CARD BUILD: start failed", error);
       setStatus(error.message || "Ошибка запуска построения");
       buildButton.disabled = false;
     }
