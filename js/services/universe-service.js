@@ -15,6 +15,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const EDGE_FUNCTION_NAME = "plamut-universe-normalize";
+const universeMemoryCache = new Map();
 
 const RELATION_LABELS = {
   related_work: "Связанное",
@@ -693,7 +694,6 @@ async function fetchSavedMediaEntities(seedEntity = {}, items = []) {
 }
 
 async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelations, libraryItems = [] }) {
-  const supabase = getSupabaseClient();
   const context = await buildNormalizationContext({
     seedEntity,
     items,
@@ -717,22 +717,53 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
       "Normalize one media universe. Return JSON with universe title+description, deduped_entities, relation groups, direct sequels/prequels, adaptations/source material, spin-offs, same universe, book_series, release_order, story_chronology, and low-confidence related_work for weak links. Use existing entity IDs when possible. Never invent entity IDs."
   };
 
-  const { data, error } = await withTimeout(
-    supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-      body: payload
-    }),
-    "OpenAI нормализация вселенной",
-    DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: null, error }));
+  try {
+    const url = `${window.location.origin}/functions/v1/${EDGE_FUNCTION_NAME}`;
+    const response = await withTimeout(
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify(payload)
+      }),
+      "OpenAI нормализация вселенной",
+      DEFAULT_TIMEOUT_MS
+    );
 
-  if (error) {
+    let body = null;
+    try {
+      body = await response.json();
+    } catch (parseError) {
+      console.warn("OpenAI universe normalization: invalid JSON", parseError);
+    }
+
+    if (!response.ok) {
+      console.warn("OpenAI universe normalization bad status:", response.status, body || null);
+      return null;
+    }
+
+    return body || null;
+  } catch (error) {
     console.warn("OpenAI universe normalization skipped:", error);
     return null;
   }
-
-  return data || null;
 }
 
+function isAllowedUniverseMemberForSeed(seedCategory = "", entity = {}) {
+  const category = cleanLower(entity?.category || "");
+
+  if (seedCategory === "movies") {
+    return category === "movies" || category === "series";
+  }
+
+  if (seedCategory === "books") {
+    return category === "books";
+  }
+
+  return true;
+}
 function sharedExternalId(a = {}, b = {}) {
   const aIds = a.external_ids || {};
   const bIds = b.external_ids || {};
@@ -1640,7 +1671,8 @@ export async function buildUniverseForJob(job, entity) {
       media_entities: saved
     }));
 
-    const mergedItems = dedupeUniverseItems([...allItems, ...aiResolvedItems]);
+    const mergedItems = dedupeUniverseItems([...allItems, ...aiResolvedItems])
+      .filter((item) => isAllowedUniverseMemberForSeed(cleanLower(entity.category), item.media_entities || {}));
     const allowedEntityIds = new Set(
       mergedItems.map((item) => Number(item.media_entities?.id || item.entity_id || item.id)).filter(Boolean)
     );
@@ -1741,12 +1773,12 @@ export async function buildUniverseForJob(job, entity) {
     const fallbackRelations = buildRelationRows(entity, fallbackItems);
 
     await updateUniverseBuildJob(job.id, {
-      status: UNIVERSE_JOB_STATUS.READY,
+      status: UNIVERSE_JOB_STATUS.FAILED,
       progress_current: 9,
       progress_total: 9,
-      progress_label: "Готово (fallback)",
+      progress_label: "Завершено с fallback",
       universe_key: fallbackInfo.universe_key,
-      error_message: null,
+      error_message: clean(error?.message || "build failed"),
       result_payload: {
         universe_key: fallbackInfo.universe_key,
         members_count: fallbackItems.length,
@@ -1838,7 +1870,8 @@ export async function buildUniverseForEntity({ userId, entityId }) {
       media_entities: saved
     }));
 
-    const mergedItems = dedupeUniverseItems([...universeItems, ...aiResolvedItems]);
+    const mergedItems = dedupeUniverseItems([...universeItems, ...aiResolvedItems])
+      .filter((item) => isAllowedUniverseMemberForSeed(cleanLower(seedEntity.category), item.media_entities || {}));
     const allowedEntityIds = new Set(
       mergedItems.map((item) => Number(item.media_entities?.id || item.entity_id || item.id)).filter(Boolean)
     );
@@ -2017,6 +2050,12 @@ export async function getUniverseDetails({ userId, universeKey }) {
     };
   }
 
+  const cacheKey = `${userId}:${universeKey}`;
+  const cached = universeMemoryCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 60_000) {
+    return cached.value;
+  }
+
   const group = await fetchUniverseGroup(universeKey);
   const members = await fetchUniverseMembers(universeKey);
 
@@ -2024,29 +2063,35 @@ export async function getUniverseDetails({ userId, universeKey }) {
     const entityIds = members.map((item) => item.media_entities?.id).filter(Boolean);
     const relations = await fetchRelationsForEntityIds(entityIds);
 
-    return {
+    const value = {
       universe: group,
       items: members,
       relations
     };
+    universeMemoryCache.set(cacheKey, { ts: Date.now(), value });
+    return value;
   }
 
   const universes = await getUserUniverses(userId);
   const localUniverse = universes.find((item) => item.universe_key === universeKey);
 
   if (!localUniverse) {
-    return {
+    const emptyValue = {
       universe: null,
       items: [],
       relations: []
     };
+    universeMemoryCache.set(cacheKey, { ts: Date.now(), value: emptyValue });
+    return emptyValue;
   }
 
-  return {
+  const value = {
     universe: localUniverse,
     items: localUniverse.items,
     relations: []
   };
+  universeMemoryCache.set(cacheKey, { ts: Date.now(), value });
+  return value;
 }
 
 export function getRelationLabel(type = "related_work") {
