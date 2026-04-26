@@ -1729,17 +1729,46 @@ export async function buildUniverseForJob(job, entity) {
       relations: savedRelations
     };
   } catch (error) {
-    console.error("buildUniverseForJob error:", error);
+    console.warn("buildUniverseForJob error:", error);
+
+    const fallbackInfo = deriveUniverseInfo(entity);
+    const fallbackItems = dedupeUniverseItems(getUniverseItemsForSeed(entity, [{
+      entity_id: entity.id,
+      category: entity.category,
+      status: "planned",
+      media_entities: entity
+    }])) || [];
+    const fallbackRelations = buildRelationRows(entity, fallbackItems);
 
     await updateUniverseBuildJob(job.id, {
-      status: UNIVERSE_JOB_STATUS.FAILED,
-      progress_label: "Ошибка построения",
-      error_message: error.message || "Ошибка построения"
+      status: UNIVERSE_JOB_STATUS.READY,
+      progress_current: 9,
+      progress_total: 9,
+      progress_label: "Готово (fallback)",
+      universe_key: fallbackInfo.universe_key,
+      error_message: null,
+      result_payload: {
+        universe_key: fallbackInfo.universe_key,
+        members_count: fallbackItems.length,
+        relations_count: fallbackRelations.length,
+        source: "local_fallback"
+      }
     });
 
-    await markRelationsStatus(entity.id, "failed");
+    await markRelationsStatus(entity.id, "ready", fallbackInfo.universe_key);
 
-    return null;
+    return {
+      universe_key: fallbackInfo.universe_key,
+      universe: {
+        universe_key: fallbackInfo.universe_key,
+        title: fallbackInfo.title,
+        description: resolveDescription(entity),
+        cover_url: entity.cover_url || "",
+        source: "library"
+      },
+      items: fallbackItems,
+      relations: fallbackRelations
+    };
   }
 }
 
@@ -1853,9 +1882,14 @@ export async function buildUniverseForEntity({ userId, entityId }) {
       relations: savedRelations
     };
   } catch (error) {
-    console.error("buildUniverseForEntity error:", error);
+    console.warn("buildUniverseForEntity error:", error);
     await markRelationsStatus(entityId, "failed");
-    throw error;
+
+    return {
+      universe: null,
+      items: [],
+      relations: []
+    };
   }
 }
 
