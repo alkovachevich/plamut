@@ -2,6 +2,12 @@ import { SEARCH_LIMITS, TMDB_API_KEY, API_ENDPOINTS } from "../config.js";
 import { normalizeString, compactString, uniqueArray, safeArray } from "../utils.js";
 import { addToUserLibrary } from "./entity-db.js";
 
+const SEARCH_TIMEOUT_MS = 9000;
+const BOOKS_LIMIT = 18;
+const WIKIDATA_LIMIT = 10;
+const TMDB_LIMIT = 12;
+const ANILIST_LIMIT = 10;
+
 function normalizeQuery(value = "") {
   return normalizeString(value || "");
 }
@@ -16,11 +22,25 @@ function emptyGroups() {
   };
 }
 
+function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal
+  }).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 function flattenGroups(groups = {}) {
   const result = [];
+
   Object.values(groups).forEach((items) => {
     safeArray(items).forEach((item) => result.push(item));
   });
+
   return result;
 }
 
@@ -46,6 +66,7 @@ function groupItems(items = []) {
 
 function safeNumberYear(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const year = Number(value);
   return Number.isFinite(year) ? year : null;
 }
@@ -147,7 +168,7 @@ function areSameBook(a = {}, b = {}) {
 function dedupeBooks(items = []) {
   const result = [];
 
-  for (const item of items) {
+  for (const item of safeArray(items)) {
     if (!item?.canonical_key) continue;
 
     const existingIndex = result.findIndex((candidate) => areSameBook(candidate, item));
@@ -165,7 +186,7 @@ function dedupeBooks(items = []) {
 function dedupeByCanonicalKey(items = []) {
   const map = new Map();
 
-  for (const item of items) {
+  for (const item of safeArray(items)) {
     if (!item?.canonical_key) continue;
 
     if (!map.has(item.canonical_key)) {
@@ -246,22 +267,26 @@ function buildOpenLibraryCover(doc = {}) {
 
 async function fetchOpenLibraryByTitle(query) {
   const url = new URL("https://openlibrary.org/search.json");
-  url.searchParams.set("title", query);
-  url.searchParams.set("limit", "24");
-  url.searchParams.set("fields", [
-    "key",
-    "title",
-    "subtitle",
-    "alternative_title",
-    "author_name",
-    "first_publish_year",
-    "cover_i",
-    "isbn",
-    "edition_key",
-    "ia"
-  ].join(","));
 
-  const response = await fetch(url.toString(), {
+  url.searchParams.set("title", query);
+  url.searchParams.set("limit", String(BOOKS_LIMIT));
+  url.searchParams.set(
+    "fields",
+    [
+      "key",
+      "title",
+      "subtitle",
+      "alternative_title",
+      "author_name",
+      "first_publish_year",
+      "cover_i",
+      "isbn",
+      "edition_key",
+      "ia"
+    ].join(",")
+  );
+
+  const response = await fetchWithTimeout(url.toString(), {
     headers: { Accept: "application/json" }
   });
 
@@ -273,54 +298,13 @@ async function fetchOpenLibraryByTitle(query) {
   return payload?.docs || [];
 }
 
-async function fetchOpenLibraryWorkCover(workKey) {
-  const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
-  if (!normalizedWorkKey) return "";
-
-  try {
-    const response = await fetch(`https://openlibrary.org/works/${encodeURIComponent(normalizedWorkKey)}.json`, {
-      headers: { Accept: "application/json" }
-    });
-
-    if (!response.ok) return "";
-
-    const payload = await response.json();
-    const coverId = safeArray(payload?.covers).find(Boolean);
-
-    return coverId ? openLibraryCoverUrlFromId(coverId) : "";
-  } catch {
-    return "";
-  }
-}
-
-async function enrichOpenLibraryItemsWithWorkCovers(items = []) {
-  const result = [];
-
-  for (const item of items) {
-    if (item.cover_url) {
-      result.push(item);
-      continue;
-    }
-
-    const work = item.external_ids?.openlibrary_work || "";
-    const cover = await fetchOpenLibraryWorkCover(work);
-
-    result.push({
-      ...item,
-      cover_url: cover || item.cover_url || ""
-    });
-  }
-
-  return result;
-}
-
 function mapOpenLibraryDoc(doc) {
   const workKey = typeof doc?.key === "string" ? doc.key : "";
   const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
 
-  const isbnList = uniqueArray([...safeArray(doc?.isbn).slice(0, 12)]);
-  const editionKeys = uniqueArray([...safeArray(doc?.edition_key).slice(0, 12)]);
-  const iaKeys = uniqueArray([...safeArray(doc?.ia).slice(0, 8)]);
+  const isbnList = uniqueArray([...safeArray(doc?.isbn).slice(0, 8)]);
+  const editionKeys = uniqueArray([...safeArray(doc?.edition_key).slice(0, 8)]);
+  const iaKeys = uniqueArray([...safeArray(doc?.ia).slice(0, 5)]);
 
   return {
     canonical_key: normalizedWorkKey
@@ -352,16 +336,17 @@ function mapOpenLibraryDoc(doc) {
 
 async function fetchWikidataCandidates(query) {
   const url = new URL("https://www.wikidata.org/w/api.php");
+
   url.searchParams.set("action", "wbsearchentities");
   url.searchParams.set("format", "json");
   url.searchParams.set("language", "ru");
   url.searchParams.set("uselang", "ru");
   url.searchParams.set("type", "item");
   url.searchParams.set("origin", "*");
-  url.searchParams.set("limit", "14");
+  url.searchParams.set("limit", String(WIKIDATA_LIMIT));
   url.searchParams.set("search", query);
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithTimeout(url.toString(), {
     headers: { Accept: "application/json" }
   });
 
@@ -377,6 +362,7 @@ async function fetchWikidataEntityDetails(ids = []) {
   if (!ids.length) return {};
 
   const url = new URL("https://www.wikidata.org/w/api.php");
+
   url.searchParams.set("action", "wbgetentities");
   url.searchParams.set("format", "json");
   url.searchParams.set("props", "labels|aliases|claims|descriptions");
@@ -384,7 +370,7 @@ async function fetchWikidataEntityDetails(ids = []) {
   url.searchParams.set("origin", "*");
   url.searchParams.set("ids", ids.join("|"));
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithTimeout(url.toString(), {
     headers: { Accept: "application/json" }
   });
 
@@ -399,6 +385,7 @@ async function fetchWikidataEntityDetails(ids = []) {
 function extractYearFromWikidataClaims(claims = {}) {
   for (const claim of safeArray(claims.P577)) {
     const value = claim?.mainsnak?.datavalue?.value?.time;
+
     if (typeof value === "string") {
       const match = value.match(/[+-](\d{4})-/);
       if (match) return Number(match[1]);
@@ -484,18 +471,19 @@ function scoreBookResult(query, item) {
   if (aliases.some((alias) => alias.includes(q))) score += 22;
   if (item.cover_url) score += 35;
   if (item.primary_source === "openlibrary") score += 14;
+  if (item.primary_source === "wikidata") score += 10;
   if (item.year) score += 5;
 
   return score;
 }
 
 function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
-  return wikidataItems.map((item) => {
+  return safeArray(wikidataItems).map((item) => {
     const itemTitle = cleanTitleForDedupe(item.title || item.original_title || "");
     const itemIsbns = safeArray(item.external_ids?.isbn);
     const itemWork = item.external_ids?.openlibrary_work || "";
 
-    const match = openLibraryItems.find((candidate) => {
+    const match = safeArray(openLibraryItems).find((candidate) => {
       const candidateTitle = cleanTitleForDedupe(candidate.title || candidate.original_title || "");
       const candidateIsbns = safeArray(candidate.external_ids?.isbn);
       const candidateWork = candidate.external_ids?.openlibrary_work || "";
@@ -525,12 +513,10 @@ async function searchBooks(query) {
     fetchWikidataCandidates(cleanQuery)
   ]);
 
-  let openLibraryItems =
+  const openLibraryItems =
     olResult.status === "fulfilled"
       ? safeArray(olResult.value).map(mapOpenLibraryDoc)
       : [];
-
-  openLibraryItems = await enrichOpenLibraryItemsWithWorkCovers(openLibraryItems);
 
   let wikidataItems = [];
 
@@ -567,6 +553,7 @@ function buildTmdbImage(path) {
 
 function mapTmdbItem(item = {}) {
   const isSeries = item.media_type === "tv";
+
   const title =
     item.title ||
     item.name ||
@@ -606,14 +593,17 @@ async function searchMoviesAndSeries(query) {
     return [];
   }
 
+  if (!TMDB_API_KEY) return [];
+
   const url = new URL("https://api.themoviedb.org/3/search/multi");
+
   url.searchParams.set("api_key", TMDB_API_KEY);
   url.searchParams.set("query", cleanQuery);
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("language", "ru-RU");
   url.searchParams.set("page", "1");
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithTimeout(url.toString(), {
     headers: { Accept: "application/json" }
   });
 
@@ -626,7 +616,7 @@ async function searchMoviesAndSeries(query) {
   return safeArray(payload?.results)
     .filter((item) => item?.media_type === "movie" || item?.media_type === "tv")
     .map(mapTmdbItem)
-    .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
+    .slice(0, TMDB_LIMIT);
 }
 
 /* =========================
@@ -637,7 +627,7 @@ function buildAniListGraphqlBody(query, type) {
   return {
     query: `
       query ($search: String, $type: MediaType) {
-        Page(page: 1, perPage: 12) {
+        Page(page: 1, perPage: ${ANILIST_LIMIT}) {
           media(search: $search, type: $type) {
             id
             title {
@@ -664,6 +654,13 @@ function buildAniListGraphqlBody(query, type) {
   };
 }
 
+function cleanAniListDescription(value = "") {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
 function mapAniListItem(item = {}, category = "anime") {
   const title =
     item?.title?.native ||
@@ -685,7 +682,7 @@ function mapAniListItem(item = {}, category = "anime") {
     original_title: originalTitle,
     year: safeNumberYear(item?.startDate?.year),
     cover_url: item?.coverImage?.large || item?.coverImage?.medium || "",
-    description_ru: item?.description || "",
+    description_ru: cleanAniListDescription(item?.description || ""),
     description_en: "",
     aliases: uniqueArray([
       item?.title?.native,
@@ -704,7 +701,7 @@ async function searchAnimeOrManga(query, category = "anime") {
     return [];
   }
 
-  const response = await fetch(API_ENDPOINTS.ANILIST, {
+  const response = await fetchWithTimeout(API_ENDPOINTS.ANILIST, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -729,7 +726,7 @@ function hasAnimeOrMangaMatch(item, animeMangaItems = []) {
 
   if (!itemTitles.length) return false;
 
-  return animeMangaItems.some((candidate) => {
+  return safeArray(animeMangaItems).some((candidate) => {
     const candidateTitles = getTitleKeys(candidate);
     return itemTitles.some((title) => candidateTitles.includes(title));
   });
@@ -738,7 +735,7 @@ function hasAnimeOrMangaMatch(item, animeMangaItems = []) {
 function filterCrossCategoryNoise({ books = [], moviesSeries = [], anime = [], manga = [] }) {
   const animeMangaItems = [...anime, ...manga];
 
-  const filteredMoviesSeries = moviesSeries.filter((item) => {
+  const filteredMoviesSeries = safeArray(moviesSeries).filter((item) => {
     if (!animeMangaItems.length) return true;
 
     const itemTitle = compactString(item.title || item.original_title || "");
@@ -753,7 +750,7 @@ function filterCrossCategoryNoise({ books = [], moviesSeries = [], anime = [], m
     return true;
   });
 
-  const filteredBooks = books.filter((item) => {
+  const filteredBooks = safeArray(books).filter((item) => {
     if (!animeMangaItems.length) return true;
 
     const itemTitle = compactString(item.title || item.original_title || "");
@@ -827,7 +824,7 @@ export async function addSearchResultDirectlyToLibrary({ userId, item }) {
     throw new Error("Некорректная карточка");
   }
 
-  return await addToUserLibrary({
+  return addToUserLibrary({
     userId,
     entity: item
   });
