@@ -118,6 +118,26 @@ export function updateCachedLibraryItem(userId, item) {
   writeCache(cache);
 }
 
+export function removeCachedLibraryItem(userId, userMediaId) {
+  if (!userId || !userMediaId) return;
+
+  const cache = readCache();
+  const bucket = cache[userId];
+
+  if (!bucket) return;
+
+  ["list", "full"].forEach((mode) => {
+    const arr = Array.isArray(bucket[mode]) ? bucket[mode] : [];
+
+    bucket[mode] = arr.filter(
+      (item) => Number(item.id) !== Number(userMediaId)
+    );
+  });
+
+  bucket.updated_at = now();
+  writeCache(cache);
+}
+
 async function fetchUserLibraryFromDb(userId, { mode = "list" } = {}) {
   if (!userId) return [];
 
