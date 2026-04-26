@@ -3,6 +3,11 @@ import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 const CACHE_KEY = "plamut_library_cache_v3";
 const LEGACY_CACHE_KEYS = ["plamut_library_cache_v2", "plamut_library_cache"];
 const CACHE_TTL = 1000 * 60 * 10;
+const LIBRARY_DB_TIMEOUT_MS = 14000;
+const RETRY_AFTER_TIMEOUT_MS = 2500;
+
+const loadPromisesByUserId = new Map();
+const retryTimersByUserId = new Map();
 
 function now() {
   return Date.now();
@@ -184,6 +189,33 @@ function getBucketItems(bucket, { mode = "list", category = "" } = {}) {
   return Array.isArray(categoryBucket?.[cleanMode]) ? categoryBucket[cleanMode] : [];
 }
 
+function getLocalLibrarySnapshot(userId, { mode = "list", category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
+
+  const cache = readRawCache();
+  const bucket = normalizeBucket(cache[cleanUserId]);
+  return getBucketItems(bucket, { mode, category });
+}
+
+function isTimeoutError(error) {
+  return /превышено время ожидания/i.test(String(error?.message || ""));
+}
+
+function scheduleRetry(userId) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId || retryTimersByUserId.has(cleanUserId)) return;
+
+  const timerId = setTimeout(() => {
+    retryTimersByUserId.delete(cleanUserId);
+    refreshUserLibrary(cleanUserId, { mode: "full", category: "" }).catch((error) => {
+      console.warn("library-cache: deferred DB retry skipped", error);
+    });
+  }, RETRY_AFTER_TIMEOUT_MS);
+
+  retryTimersByUserId.set(cleanUserId, timerId);
+}
+
 export function clearLibraryCache(userId = null) {
   if (!userId) {
     localStorage.removeItem(CACHE_KEY);
@@ -351,7 +383,7 @@ async function fetchUserLibraryFromDb(userId, { mode = "list", category = "" } =
     query = query.eq("category", cleanCategory);
   }
 
-  const { data, error } = await withTimeout(query, "Загрузка библиотеки", 15000);
+  const { data, error } = await withTimeout(query, "Загрузка библиотеки", LIBRARY_DB_TIMEOUT_MS);
 
   if (error) {
     throw error;
@@ -393,22 +425,40 @@ export async function loadUserLibrary(
   const cleanUserId = clean(userId);
   if (!cleanUserId) return [];
 
-  const cached = getCachedLibrary(cleanUserId, { mode, category });
+  if (loadPromisesByUserId.has(cleanUserId)) {
+    return loadPromisesByUserId.get(cleanUserId);
+  }
 
-  if (cached.length && allowStale) {
+  const cached = getCachedLibrary(cleanUserId, { mode, category });
+  const localSnapshot = cached.length ? cached : getLocalLibrarySnapshot(cleanUserId, { mode, category });
+
+  if (localSnapshot.length && allowStale) {
     if (backgroundRefresh) {
       refreshUserLibrary(cleanUserId, { mode: "full" }).catch((error) => {
         console.warn("library-cache: background refresh skipped", error);
       });
     }
 
-    return cached;
+    return localSnapshot;
   }
 
-  try {
-    return await refreshUserLibrary(cleanUserId, { mode, category });
-  } catch (error) {
-    console.warn("library-cache: DB load failed, using fallback cache", error);
-    return cached;
-  }
+  const loadPromise = (async () => {
+    try {
+      return await refreshUserLibrary(cleanUserId, { mode, category });
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        console.warn("library-cache: DB load timed out, showing local data", error);
+        scheduleRetry(cleanUserId);
+      } else {
+        console.warn("library-cache: DB load failed, using fallback cache", error);
+      }
+
+      return localSnapshot;
+    } finally {
+      loadPromisesByUserId.delete(cleanUserId);
+    }
+  })();
+
+  loadPromisesByUserId.set(cleanUserId, loadPromise);
+  return loadPromise;
 }
