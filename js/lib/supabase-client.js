@@ -6,8 +6,13 @@ let cachedSession = null;
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const AUTH_TIMEOUT_MS = 12000;
-const SESSION_TIMEOUT_MS = 4000;
+const SESSION_TIMEOUT_MS = 9000;
+const PROFILE_TIMEOUT_MS = 10000;
 const STORAGE_TIMEOUT_MS = 60000;
+const SESSION_RESTORE_GRACE_MS = 12000;
+
+let profilePromiseByUserId = new Map();
+let sessionRestoreStartedAt = 0;
 
 function createClient() {
   if (!window.supabase) {
@@ -116,6 +121,7 @@ export async function getCurrentSession() {
   }
 
   sessionPromise = (async () => {
+    sessionRestoreStartedAt = Date.now();
     try {
       const supabase = getSupabaseClient();
       const { data, error } = await withTimeout(
@@ -132,9 +138,16 @@ export async function getCurrentSession() {
       cachedSession = data?.session || null;
       return cachedSession;
     } catch (error) {
+      const restoreInProgress = Date.now() - sessionRestoreStartedAt < SESSION_RESTORE_GRACE_MS;
+      if (restoreInProgress) {
+        console.info("getCurrentSession pending: auth state is still restoring");
+        return cachedSession || null;
+      }
+
       console.warn("getCurrentSession skipped:", error);
       return cachedSession || null;
     } finally {
+      sessionRestoreStartedAt = 0;
       sessionPromise = null;
     }
   })();
@@ -223,7 +236,7 @@ export async function fetchUserProfile(userId) {
     "Загрузка профиля",
     {
       retries: 1,
-      timeoutMs: DEFAULT_TIMEOUT_MS,
+      timeoutMs: PROFILE_TIMEOUT_MS,
       delayMs: 700
     }
   );
@@ -234,8 +247,28 @@ export async function fetchUserProfile(userId) {
 }
 
 export async function fetchUserProfileSafe(userId) {
+  const cleanUserId = cleanText(userId);
+  if (!cleanUserId) return null;
+
+  if (profilePromiseByUserId.has(cleanUserId)) {
+    return profilePromiseByUserId.get(cleanUserId);
+  }
+
+  const profilePromise = (async () => {
+    try {
+      return await fetchUserProfile(cleanUserId);
+    } catch (error) {
+      console.warn("fetchUserProfileSafe skipped:", error);
+      return null;
+    } finally {
+      profilePromiseByUserId.delete(cleanUserId);
+    }
+  })();
+
+  profilePromiseByUserId.set(cleanUserId, profilePromise);
+
   try {
-    return await fetchUserProfile(userId);
+    return await profilePromise;
   } catch (error) {
     console.warn("fetchUserProfileSafe skipped:", error);
     return null;
