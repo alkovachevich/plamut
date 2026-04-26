@@ -15,6 +15,8 @@ import {
   addSearchResultDirectlyToLibrary
 } from "../services/search-service.js";
 
+let activeSearchRequestId = 0;
+
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
   return Object.values(groupedResults).reduce((sum, items) => sum + (items?.length || 0), 0);
@@ -43,6 +45,7 @@ function renderCover(item) {
         src="${escapeHtml(item.cover_url)}"
         alt="${escapeHtml(item.title || "")}"
         loading="lazy"
+        onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
   }
@@ -117,18 +120,22 @@ function renderGroups(groupedResults) {
     .join("");
 }
 
-function attachResultHandlers(root, groupedResults, currentQuery) {
+function buildItemsMap(groupedResults) {
   const flat = limitResults(
     sortByScore(flattenResults(groupedResults || {})),
     SEARCH_LIMITS.PAGE_RESULTS
   );
 
-  const itemsByKey = new Map(flat.map((item) => [item.canonical_key, item]));
+  return new Map(flat.map((item) => [item.canonical_key, item]));
+}
+
+function attachResultHandlers(root, groupedResults, currentQuery) {
+  const itemsByKey = buildItemsMap(groupedResults);
 
   root.querySelectorAll("[data-card-key]").forEach((button) => {
     button.addEventListener("click", () => {
-      const canonicalKey = button.dataset.cardKey;
-      const category = button.dataset.cardCategory;
+      const canonicalKey = button.dataset.cardKey || "";
+      const category = button.dataset.cardCategory || "";
       const item = itemsByKey.get(canonicalKey) || null;
 
       if (item) {
@@ -136,6 +143,7 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
       }
 
       closeSearchModal();
+
       navigate("/card", {
         key: canonicalKey,
         category,
@@ -160,18 +168,16 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
 
       try {
         button.disabled = true;
-        button.textContent = "Добавление...";
+        button.textContent = "Добавляем…";
 
         const result = await addSearchResultDirectlyToLibrary({
           userId,
           item
         });
 
-        if (result?.alreadyExists) {
-          button.textContent = "Уже в библиотеке";
-        } else {
-          button.textContent = "Добавлено";
-        }
+        button.textContent = result?.alreadyExists
+          ? "Уже в библиотеке"
+          : "Добавлено";
       } catch (error) {
         console.error("Direct add error:", error);
         button.disabled = false;
@@ -193,7 +199,8 @@ async function performSearch(root, query) {
   const cleanQuery = String(query || "").trim();
   root.dataset.currentQuery = cleanQuery;
 
-  const requestId = Date.now();
+  activeSearchRequestId += 1;
+  const requestId = activeSearchRequestId;
   root.dataset.requestId = String(requestId);
 
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
@@ -206,7 +213,10 @@ async function performSearch(root, query) {
   try {
     const groupedResults = await runGlobalSearch(cleanQuery);
 
-    if (root.dataset.requestId !== String(requestId)) {
+    if (
+      root.dataset.requestId !== String(requestId) ||
+      requestId !== activeSearchRequestId
+    ) {
       return;
     }
 
@@ -230,6 +240,14 @@ async function performSearch(root, query) {
     attachResultHandlers(resultsRoot, groupedResults, cleanQuery);
   } catch (error) {
     console.error("Search modal error:", error);
+
+    if (
+      root.dataset.requestId !== String(requestId) ||
+      requestId !== activeSearchRequestId
+    ) {
+      return;
+    }
+
     resultsRoot.innerHTML = `
       <div class="search-modal__empty">
         Не удалось выполнить поиск. Попробуй ещё раз.
@@ -416,6 +434,11 @@ export function renderSearchModal(root) {
         padding: 0 12px;
       }
 
+      .search-result-card__add:disabled {
+        opacity: 0.7;
+        cursor: default;
+      }
+
       .search-result-card__cover {
         width: 74px;
         height: 104px;
@@ -429,6 +452,11 @@ export function renderSearchModal(root) {
         width: 100%;
         height: 100%;
         object-fit: cover;
+      }
+
+      .search-result-card__cover.is-empty {
+        display: grid;
+        place-items: center;
       }
 
       .search-result-card__cover-fallback {
@@ -479,6 +507,13 @@ export function renderSearchModal(root) {
       }
 
       @media (max-width: 640px) {
+        .search-modal-panel {
+          width: 96vw;
+          max-height: 88vh;
+          border-radius: 22px;
+          padding: 14px;
+        }
+
         .search-result-card {
           grid-template-columns: 1fr;
         }
