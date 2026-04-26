@@ -143,7 +143,8 @@ export async function createUniverseBuildJob({
   userId,
   entityId,
   canonicalKey = "",
-  universeKey = ""
+  universeKey = "",
+  force = false
 }) {
   const cleanUserId = cleanText(userId);
   const cleanCanonicalKey = cleanText(canonicalKey);
@@ -167,7 +168,7 @@ export async function createUniverseBuildJob({
     return existing;
   }
 
-  if (existing?.status === UNIVERSE_JOB_STATUS.READY && existing.universe_key) {
+  if (!force && existing?.status === UNIVERSE_JOB_STATUS.READY && existing.universe_key) {
     return existing;
   }
 
