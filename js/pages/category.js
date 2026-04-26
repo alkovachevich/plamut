@@ -3,12 +3,20 @@ import { navigate } from "../router.js";
 import { openAuthModal, openSearchModal, state } from "../state.js";
 import { clampText, escapeHtml, safeArray } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
+import {
+  loadUserLibrary,
+  refreshUserLibrary,
+  updateCachedLibraryItem,
+  removeCachedLibraryItem
+} from "../services/library-cache.js";
 
-async function fetchUserCategoryLibrary(userId, category) {
+async function updateUserMedia(userMediaId, payload) {
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
     .from("user_media")
+    .update(payload)
+    .eq("id", userMediaId)
     .select(`
       id,
       user_id,
@@ -22,6 +30,7 @@ async function fetchUserCategoryLibrary(userId, category) {
         id,
         canonical_key,
         category,
+        primary_source,
         title_primary,
         title_ru,
         title_en,
@@ -30,26 +39,13 @@ async function fetchUserCategoryLibrary(userId, category) {
         cover_url,
         description_ru,
         description_en,
-        external_ids
+        external_ids,
+        meta,
+        universe_key,
+        relations_built_at,
+        relations_status
       )
     `)
-    .eq("user_id", userId)
-    .eq("category", category)
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-
-  return Array.isArray(data) ? data.filter((item) => item?.media_entities) : [];
-}
-
-async function updateUserMedia(userMediaId, payload) {
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("user_media")
-    .update(payload)
-    .eq("id", userMediaId)
-    .select()
     .single();
 
   if (error) throw error;
@@ -83,19 +79,13 @@ function openLibraryCoverUrlFromOlid(olid) {
 function wikimediaFileUrl(filename = "") {
   const clean = String(filename || "").trim();
   if (!clean) return "";
-
   return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(clean)}`;
 }
 
 function normalizeOpenLibraryWorkKey(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return "";
-
-  if (raw.startsWith("/works/")) {
-    return raw.replace("/works/", "");
-  }
-
-  return raw;
+  return raw.startsWith("/works/") ? raw.replace("/works/", "") : raw;
 }
 
 async function fetchOpenLibraryWorkCover(workKey) {
@@ -152,19 +142,13 @@ async function fetchOpenLibraryCoverByTitle(entity = {}) {
 
       const withCover = exact || docs.find((doc) => doc?.cover_i);
 
-      if (withCover?.cover_i) {
-        return openLibraryCoverUrlFromId(withCover.cover_i);
-      }
+      if (withCover?.cover_i) return openLibraryCoverUrlFromId(withCover.cover_i);
 
       const isbn = safeArray(withCover?.isbn).find(Boolean);
-      if (isbn) {
-        return openLibraryCoverUrlFromIsbn(isbn);
-      }
+      if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
 
       const editionKey = safeArray(withCover?.edition_key).find(Boolean);
-      if (editionKey) {
-        return openLibraryCoverUrlFromOlid(editionKey);
-      }
+      if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
     } catch (error) {
       console.warn("Open Library title cover skipped:", error);
     }
@@ -222,9 +206,7 @@ async function fetchWikidataCoverByTitle(entity = {}) {
         .map((claim) => claim?.mainsnak?.datavalue?.value)
         .find(Boolean);
 
-      if (image) {
-        return wikimediaFileUrl(image);
-      }
+      if (image) return wikimediaFileUrl(image);
     }
   } catch (error) {
     console.warn("Wikidata title cover skipped:", error);
@@ -245,6 +227,7 @@ async function resolveBookCover(entity = {}) {
   if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
   if (editionKey) return openLibraryCoverUrlFromOlid(editionKey);
   if (ia) return openLibraryCoverUrlFromOlid(ia);
+
   if (work) {
     const cover = await fetchOpenLibraryWorkCover(work);
     if (cover) return cover;
@@ -266,7 +249,7 @@ async function resolveBookCover(entity = {}) {
   return "";
 }
 
-async function fixMissingBookCovers(items = []) {
+async function fixMissingBookCovers(items = [], userId) {
   const supabase = getSupabaseClient();
   let changed = false;
 
@@ -288,6 +271,7 @@ async function fixMissingBookCovers(items = []) {
         .eq("id", entity.id);
 
       entity.cover_url = newCover;
+      updateCachedLibraryItem(userId, item, { category: item.category });
       changed = true;
     } catch (error) {
       console.warn("Book cover restore skipped:", error);
@@ -501,21 +485,8 @@ function renderGuestState(root, title) {
   });
 }
 
-export async function renderCategoryPage(root, params = {}) {
-  const category = params.category || "unknown";
-  const title = getCategoryLabel(state.language, category);
-  const userId = state.user?.id;
-
-  if (!userId) {
-    renderGuestState(root, title);
-    return;
-  }
-
-  let items = [];
-  let activeFolder = "all";
-  let activeSort = "recent";
-
-  root.innerHTML = `
+function renderStyles() {
+  return `
     <style>
       .page {
         display: flex;
@@ -593,7 +564,6 @@ export async function renderCategoryPage(root, params = {}) {
         position: relative;
         display: flex;
         flex-direction: column;
-        gap: 0;
         overflow: visible;
         cursor: pointer;
         background: var(--bg-elevated);
@@ -712,7 +682,6 @@ export async function renderCategoryPage(root, params = {}) {
         color: var(--text);
         font-size: 20px;
         line-height: 1;
-        cursor: pointer;
       }
 
       .library-card__menu {
@@ -794,6 +763,25 @@ export async function renderCategoryPage(root, params = {}) {
         }
       }
     </style>
+  `;
+}
+
+export async function renderCategoryPage(root, params = {}) {
+  const category = params.category || "unknown";
+  const title = getCategoryLabel(state.language, category);
+  const userId = state.user?.id;
+
+  if (!userId) {
+    renderGuestState(root, title);
+    return;
+  }
+
+  let items = [];
+  let activeFolder = "all";
+  let activeSort = "recent";
+
+  root.innerHTML = `
+    ${renderStyles()}
 
     <section class="page">
       <div class="page-header">
@@ -849,13 +837,12 @@ export async function renderCategoryPage(root, params = {}) {
     contentRoot.querySelectorAll(".library-card").forEach((card) => {
       card.addEventListener("click", () => {
         const key = card.dataset.key || "";
-        const buttonCategory = card.dataset.category || category;
-
+        const itemCategory = card.dataset.category || category;
         if (!key) return;
 
         navigate("/card", {
           key,
-          category: buttonCategory
+          category: itemCategory
         });
       });
     });
@@ -888,12 +875,13 @@ export async function renderCategoryPage(root, params = {}) {
         if (!userMediaId || !newStatus) return;
 
         try {
-          await updateUserMedia(userMediaId, { status: newStatus });
+          const updated = await updateUserMedia(userMediaId, { status: newStatus });
 
           items = items.map((item) =>
-            item.id === userMediaId ? { ...item, status: newStatus } : item
+            item.id === userMediaId ? updated : item
           );
 
+          updateCachedLibraryItem(userId, updated, { category });
           renderList();
         } catch (error) {
           console.error("Update status error:", error);
@@ -922,11 +910,15 @@ export async function renderCategoryPage(root, params = {}) {
         const cleanFolder = folderName.trim();
 
         try {
-          await updateUserMedia(userMediaId, { folder_name: cleanFolder || null });
+          const updated = await updateUserMedia(userMediaId, {
+            folder_name: cleanFolder || null
+          });
 
           items = items.map((item) =>
-            item.id === userMediaId ? { ...item, folder_name: cleanFolder || null } : item
+            item.id === userMediaId ? updated : item
           );
+
+          updateCachedLibraryItem(userId, updated, { category });
 
           if (activeFolder !== "all" && activeFolder !== cleanFolder) {
             activeFolder = "all";
@@ -950,6 +942,7 @@ export async function renderCategoryPage(root, params = {}) {
         try {
           await removeFromLibrary(userMediaId);
           items = items.filter((item) => item.id !== userMediaId);
+          removeCachedLibraryItem(userId, userMediaId, { category });
           renderList();
         } catch (error) {
           console.error("Remove from library error:", error);
@@ -974,19 +967,29 @@ export async function renderCategoryPage(root, params = {}) {
   });
 
   try {
-    items = await fetchUserCategoryLibrary(userId, category);
+    items = await loadUserLibrary(userId, { category });
     renderList();
 
-    if (category === "books") {
-      fixMissingBookCovers(items).then((result) => {
-        if (result?.changed) {
-          items = result.items;
-          renderList();
+    refreshUserLibrary(userId, { category })
+      .then((freshItems) => {
+        items = freshItems;
+        renderList();
+
+        if (category === "books") {
+          fixMissingBookCovers(items, userId).then((result) => {
+            if (result?.changed) {
+              items = result.items;
+              renderList();
+            }
+          });
         }
+      })
+      .catch((error) => {
+        console.warn("Category background refresh skipped:", error);
       });
-    }
   } catch (error) {
     console.error("Category library load error:", error);
+
     contentRoot.innerHTML = `
       <div class="empty-state">
         <div class="empty-state__title">Ошибка загрузки</div>
