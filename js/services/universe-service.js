@@ -74,6 +74,11 @@ const ALLOWED_DB_SOURCES = new Set([
   "openai"
 ]);
 
+const WIKIDATA_ALLOWED_BOOK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q47461344", "Q277759"]);
+const WIKIDATA_BANNED_BOOK_TYPES = new Set(["Q11424", "Q5398426", "Q95074", "Q5", "Q7889", "Q43229"]);
+const WIKIDATA_MOVIE_TYPES = new Set(["Q11424", "Q24856"]);
+const WIKIDATA_TV_TYPES = new Set(["Q5398426"]);
+
 function clean(value = "") {
   return String(value || "").trim();
 }
@@ -141,6 +146,38 @@ function normalizeConfidence(value, fallback = 0.65) {
 
 function normalizeWorkId(value = "") {
   return clean(value).replace("/works/", "");
+}
+
+function getWikidataTypeIds(claims = {}) {
+  return uniqueArray(
+    safeArray(claims?.P31)
+      .map((claim) => claim?.mainsnak?.datavalue?.value?.id)
+      .filter(Boolean)
+  );
+}
+
+function resolveCategoryFromWikidataClaims(claims = {}, fallback = "") {
+  const typeIds = getWikidataTypeIds(claims);
+  if (!typeIds.length) return fallback;
+
+  if (typeIds.some((id) => WIKIDATA_BANNED_BOOK_TYPES.has(id))) {
+    if (typeIds.some((id) => WIKIDATA_MOVIE_TYPES.has(id))) return "movies";
+    if (typeIds.some((id) => WIKIDATA_TV_TYPES.has(id))) return "series";
+    return "";
+  }
+
+  if (typeIds.some((id) => WIKIDATA_ALLOWED_BOOK_TYPES.has(id))) return "books";
+  if (typeIds.some((id) => WIKIDATA_MOVIE_TYPES.has(id))) return "movies";
+  if (typeIds.some((id) => WIKIDATA_TV_TYPES.has(id))) return "series";
+  return fallback;
+}
+
+function isAllowedWikidataForSeed(seedCategory = "", claims = {}) {
+  const category = resolveCategoryFromWikidataClaims(claims, "");
+  if (!category) return false;
+  if (seedCategory === "books") return category === "books";
+  if (seedCategory === "movies") return category === "movies" || category === "series";
+  return true;
 }
 
 function openLibraryCoverUrlFromId(coverId) {
@@ -575,6 +612,23 @@ function rankCandidate(item = {}, seedCategory = "") {
   if (item.category === "books" && ids.openlibrary_work) score += 10;
 
   return score;
+}
+
+function pickBestSeedEntity(seedEntity = {}, candidates = []) {
+  const shortlist = [seedEntity, ...safeArray(candidates)];
+  const ranked = shortlist
+    .filter(Boolean)
+    .map((candidate) => ({
+      candidate,
+      score: rankCandidate(candidate, seedEntity.category || candidate.category || "")
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0]?.candidate || seedEntity;
+  if (best !== seedEntity) {
+    console.warn("seed upgraded for universe build", seedEntity?.canonical_key, "->", best?.canonical_key);
+  }
+  return best;
 }
 
 async function buildNormalizationContext({ seedEntity, items, localRelations, libraryItems = [] }) {
@@ -1272,6 +1326,52 @@ function buildRelationRows(seedEntity, items = []) {
     });
 }
 
+function extractWikidataRelationTargetsFromClaims(claims = {}) {
+  const relationProps = ["P179", "P361", "P144", "P155", "P156"];
+  return uniqueArray(
+    relationProps.flatMap((prop) =>
+      safeArray(claims?.[prop])
+        .map((claim) => claim?.mainsnak?.datavalue?.value?.id)
+        .filter(Boolean)
+    )
+  );
+}
+
+function buildWikidataClaimRelations(seedEntity = {}, items = []) {
+  const seedWd = clean(seedEntity?.external_ids?.wikidata);
+  if (!seedWd) return [];
+
+  const byWikidata = new Map();
+  safeArray(items).forEach((row) => {
+    const entity = row.media_entities || row;
+    const wd = clean(entity?.external_ids?.wikidata);
+    if (wd && entity?.id) byWikidata.set(wd, entity);
+  });
+
+  const seedClaims = seedEntity?.meta?.wikidata_claims || {};
+  const targets = extractWikidataRelationTargetsFromClaims(seedClaims);
+
+  return targets
+    .map((targetWd, index) => {
+      const target = byWikidata.get(targetWd);
+      if (!target?.id) return null;
+      if (!isAllowedUniverseMemberForSeed(cleanLower(seedEntity.category), target)) return null;
+
+      return {
+        from_entity_id: seedEntity.id,
+        to_entity_id: target.id,
+        relation_type: "related_work",
+        source: "wikidata",
+        confidence: 0.88,
+        sort_order: index,
+        metadata_json: {
+          reason: "wikidata_claim_link"
+        }
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildReverseAiRelations(relations = []) {
   return safeArray(relations).map((relation) => ({
     from_entity_id: relation.to_entity_id,
@@ -1293,7 +1393,7 @@ async function fetchWikidataSearch(entity = {}) {
   const title = entity.title_primary || entity.title_en || entity.title_ru || entity.original_title || "";
   if (!title) return [];
 
-  return fetchJsonCached(
+  const searchItems = await fetchJsonCached(
     "wikidata",
     { type: "search", title },
     async () => {
@@ -1313,6 +1413,34 @@ async function fetchWikidataSearch(entity = {}) {
     },
     { ttlMs: 1000 * 60 * 60 * 24 * 7 }
   ).catch(() => []);
+
+  const ids = safeArray(searchItems).map((item) => item.id).filter(Boolean);
+  const details = await fetchWikidataEntityDetails(ids);
+  const seedCategory = cleanLower(entity.category);
+
+  return safeArray(searchItems)
+    .map((item) => {
+      const detail = details[item.id] || {};
+      const claims = detail.claims || {};
+      const typeIds = getWikidataTypeIds(claims);
+      const resolvedCategory = resolveCategoryFromWikidataClaims(claims, seedCategory);
+
+      if (!typeIds.length) {
+        console.warn("filtered wikidata item: missing P31", item.id);
+        return null;
+      }
+      if (!isAllowedWikidataForSeed(seedCategory, claims)) {
+        console.warn("filtered wikidata item: seed category mismatch", item.id, seedCategory, typeIds);
+        return null;
+      }
+
+      return {
+        ...item,
+        claims,
+        category: resolvedCategory || seedCategory
+      };
+    })
+    .filter(Boolean);
 }
 
 async function saveWikidataEntities(items = [], fallbackCategory = "unknown") {
@@ -1320,7 +1448,7 @@ async function saveWikidataEntities(items = [], fallbackCategory = "unknown") {
     .filter((item) => item?.id && item?.label)
     .map((item) => ({
       canonical_key: `${fallbackCategory}:wikidata:${item.id}`.toLowerCase(),
-      category: fallbackCategory || "unknown",
+      category: item.category || fallbackCategory || "unknown",
       primary_source: "wikidata",
       title_primary: item.label || item.id,
       title_en: item.label || "",
@@ -1334,7 +1462,8 @@ async function saveWikidataEntities(items = [], fallbackCategory = "unknown") {
         wikidata: item.id
       },
       meta: {
-        wikidata_search: item
+        wikidata_search: item,
+        wikidata_claims: item.claims || {}
       }
     }));
 
@@ -1393,13 +1522,14 @@ function preDedupeUniverseItems(seedEntity, items = [], limit = 40) {
 }
 
 function dedupeUniverseItems(items = []) {
-  const map = new Map();
+  const aliasToBucket = new Map();
+  const buckets = new Map();
 
   safeArray(items).forEach((item) => {
     const entity = item.media_entities || item;
     if (!entity) return;
 
-    const key = [
+    const keys = [
       cleanLower(entity.canonical_key),
       cleanLower(entity.external_ids?.wikidata),
       cleanLower(String(entity.external_ids?.tmdb || "")),
@@ -1408,15 +1538,19 @@ function dedupeUniverseItems(items = []) {
       cleanLower(String(entity.external_ids?.anilist || "")),
       cleanLower(String(entity.external_ids?.mal || "")),
       ...safeArray(entity.external_ids?.isbn).map((isbn) => cleanLower(String(isbn)))
-    ].find(Boolean) || `entity:${entity.id || Math.random()}`;
+    ].filter(Boolean);
+    const linkedKey = keys.map((candidate) => aliasToBucket.get(candidate)).find(Boolean);
+    const key = linkedKey || keys[0] || `entity:${entity.id || Math.random()}`;
+    const existing = buckets.get(key);
 
-    if (!map.has(key)) {
-      map.set(key, { ...item, media_entities: entity });
+    if (!existing) {
+      const row = { ...item, media_entities: entity };
+      buckets.set(key, row);
+      keys.forEach((k) => aliasToBucket.set(k, key));
       return;
     }
 
-    const existing = map.get(key);
-    map.set(key, {
+    buckets.set(key, {
       ...existing,
       ...item,
       media_entities: {
@@ -1434,9 +1568,10 @@ function dedupeUniverseItems(items = []) {
         }
       }
     });
+    keys.forEach((k) => aliasToBucket.set(k, key));
   });
 
-  return Array.from(map.values());
+  return Array.from(new Set(buckets.values()));
 }
 
 async function resolveAiEntitiesToDb(aiEntities = [], existingItems = []) {
@@ -1491,11 +1626,18 @@ async function resolveAiEntitiesToDb(aiEntities = [], existingItems = []) {
     .map((row) => row.media_entities || row);
 }
 
-function sanitizeAiRelations(relations = [], allowedEntityIds = new Set()) {
-  return safeArray(relations).filter((relation) => (
-    allowedEntityIds.has(Number(relation.from_entity_id)) &&
-    allowedEntityIds.has(Number(relation.to_entity_id))
-  ));
+function sanitizeAiRelations(relations = [], allowedEntityIds = new Set(), entityCategoryMap = new Map()) {
+  return safeArray(relations).filter((relation) => {
+    const fromId = Number(relation.from_entity_id);
+    const toId = Number(relation.to_entity_id);
+    if (!allowedEntityIds.has(fromId) || !allowedEntityIds.has(toId)) return false;
+    if (entityCategoryMap.size) {
+      const fromCategory = cleanLower(entityCategoryMap.get(fromId) || "");
+      const toCategory = cleanLower(entityCategoryMap.get(toId) || "");
+      if (fromCategory && toCategory && fromCategory !== toCategory) return false;
+    }
+    return true;
+  });
 }
 function buildOrderMap(aiOrder = [], fallbackItems = []) {
   const orderMap = new Map();
@@ -1627,27 +1769,31 @@ export async function buildUniverseForJob(job, entity) {
     });
 
     const allItems = dedupeUniverseItems(Array.from(allItemsMap.values()));
-    const localRelationRows = buildRelationRows(entity, allItems);
+    const seedResolved = pickBestSeedEntity(entity, allItems.map((row) => row.media_entities || row));
+    const localRelationRows = [
+      ...buildRelationRows(seedResolved, allItems),
+      ...buildWikidataClaimRelations(seedResolved, allItems)
+    ];
 
     await updateUniverseBuildJob(job.id, {
       progress_current: 6,
       progress_label: "Нормализуем через OpenAI"
     });
 
-    const aiCandidates = preDedupeUniverseItems(entity, allItems, 40);
+    const aiCandidates = preDedupeUniverseItems(seedResolved, allItems, 40);
 
     const aiPayload = await invokeUniverseNormalizeFunction({
-      seedEntity: entity,
+      seedEntity: seedResolved,
       items: aiCandidates,
       localRelations: localRelationRows,
       libraryItems
     });
 
     const aiResult = aiPayload
-      ? normalizeAiResult(aiPayload, entity)
+      ? normalizeAiResult(aiPayload, seedResolved)
       : null;
 
-    const fallbackUniverse = deriveUniverseInfo(entity);
+    const fallbackUniverse = deriveUniverseInfo(seedResolved);
     const universeKey = slugify(
       aiResult?.universe?.universe_key ||
         job.universe_key ||
@@ -1658,7 +1804,7 @@ export async function buildUniverseForJob(job, entity) {
     const universeTitle =
       aiResult?.universe?.title ||
       fallbackUniverse.title ||
-      resolveTitle(entity);
+      resolveTitle(seedResolved);
 
     const aiResolvedEntities = await resolveAiEntitiesToDb(aiResult?.deduped_entities || [], allItems);
     const aiResolvedItems = aiResolvedEntities.map((saved) => ({
@@ -1681,7 +1827,7 @@ export async function buildUniverseForJob(job, entity) {
     const orderMap = buildOrderMap(releaseOrderSource, mergedItems);
     const cover =
       mergedItems.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
-      entity.cover_url ||
+      seedResolved.cover_url ||
       "";
 
     await updateUniverseBuildJob(job.id, {
@@ -1692,12 +1838,12 @@ export async function buildUniverseForJob(job, entity) {
     const universe = await upsertUniverseGroup({
       universe_key: universeKey,
       title: universeTitle,
-      description: aiResult?.universe?.description || resolveDescription(entity),
+      description: aiResult?.universe?.description || resolveDescription(seedResolved),
       cover_url: cover,
       source: aiResult ? "wikidata" : "library",
       metadata_json: {
         job_id: job.id,
-        seed_entity_id: entity.id,
+        seed_entity_id: seedResolved.id,
         ai_used: Boolean(aiResult),
         fallback_used: !aiResult
       }
@@ -1710,7 +1856,10 @@ export async function buildUniverseForJob(job, entity) {
       progress_label: "Сохраняем связи"
     });
 
-    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds);
+    const entityCategoryMap = new Map(
+      mergedItems.map((item) => [Number(item.media_entities?.id || item.entity_id || item.id), cleanLower(item.media_entities?.category || "")])
+    );
+    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds, entityCategoryMap);
     const relationRows = aiRelations.length
       ? [...aiRelations, ...buildReverseAiRelations(aiRelations)]
       : localRelationRows;
@@ -1837,26 +1986,30 @@ export async function buildUniverseForEntity({ userId, entityId }) {
 
     const libraryItems = await fetchUserLibrary(userId, { mode: "full" });
     const universeItems = dedupeUniverseItems(getUniverseItemsForSeed(seedEntity, libraryItems));
-    const localRelationRows = buildRelationRows(seedEntity, universeItems);
+    const seedResolved = pickBestSeedEntity(seedEntity, universeItems.map((row) => row.media_entities || row));
+    const localRelationRows = [
+      ...buildRelationRows(seedResolved, universeItems),
+      ...buildWikidataClaimRelations(seedResolved, universeItems)
+    ];
 
-    const aiCandidates = preDedupeUniverseItems(seedEntity, universeItems, 40);
+    const aiCandidates = preDedupeUniverseItems(seedResolved, universeItems, 40);
 
     const aiPayload = await invokeUniverseNormalizeFunction({
-      seedEntity,
+      seedEntity: seedResolved,
       items: aiCandidates,
       localRelations: localRelationRows,
       libraryItems
     });
 
     const aiResult = aiPayload
-      ? normalizeAiResult(aiPayload, seedEntity)
+      ? normalizeAiResult(aiPayload, seedResolved)
       : null;
 
-    const fallbackInfo = deriveUniverseInfo(seedEntity);
+    const fallbackInfo = deriveUniverseInfo(seedResolved);
     const universeKey = slugify(
       aiResult?.universe?.universe_key ||
         fallbackInfo.universe_key ||
-        seedEntity.canonical_key
+        seedResolved.canonical_key
     );
 
     const aiResolvedEntities = await resolveAiEntitiesToDb(aiResult?.deduped_entities || [], universeItems);
@@ -1885,18 +2038,21 @@ export async function buildUniverseForEntity({ userId, entityId }) {
     const universe = await upsertUniverseGroup({
       universe_key: universeKey,
       title: aiResult?.universe?.title || fallbackInfo.title,
-      description: aiResult?.universe?.description || resolveDescription(seedEntity),
+      description: aiResult?.universe?.description || resolveDescription(seedResolved),
       cover_url: cover,
       source: aiResult ? "wikidata" : "library",
       metadata_json: {
-        seed_entity_id: seedEntity.id,
+        seed_entity_id: seedResolved.id,
         ai_used: Boolean(aiResult)
       }
     });
 
     await upsertUniverseMembers(universeKey, sortedItems, orderMap);
 
-    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds);
+    const entityCategoryMap = new Map(
+      sortedItems.map((item) => [Number(item.media_entities?.id || item.entity_id || item.id), cleanLower(item.media_entities?.category || "")])
+    );
+    const aiRelations = sanitizeAiRelations(safeArray(aiResult?.relations), allowedEntityIds, entityCategoryMap);
     const relationRows = aiRelations.length
       ? [...aiRelations, ...buildReverseAiRelations(aiRelations)]
       : localRelationRows;
