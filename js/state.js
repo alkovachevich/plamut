@@ -6,7 +6,9 @@ import {
 } from "./config.js";
 
 const listeners = new Set();
+
 const TEMP_CARD_STORAGE_KEY = "plamut_temp_card_item";
+const LAST_CARD_STORAGE_KEY = "plamut_last_card_item";
 
 export const state = {
   route: "/",
@@ -137,18 +139,43 @@ export function setCurrentUniverse(universe) {
   setState({ currentUniverse: universe });
 }
 
-export function setTemporaryCardItem(item) {
-  setCurrentItem(item || null);
+function readStoredCard(key) {
+  try {
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
+    if (!raw) return null;
 
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    console.warn("readStoredCard error:", error);
+    return null;
+  }
+}
+
+function writeStoredCard(key, item) {
   try {
     if (!item) {
-      sessionStorage.removeItem(TEMP_CARD_STORAGE_KEY);
+      sessionStorage.removeItem(key);
+      localStorage.removeItem(key);
       return;
     }
 
-    sessionStorage.setItem(TEMP_CARD_STORAGE_KEY, JSON.stringify(item));
+    const payload = JSON.stringify(item);
+
+    sessionStorage.setItem(key, payload);
+    localStorage.setItem(key, payload);
   } catch (error) {
-    console.warn("setTemporaryCardItem error:", error);
+    console.warn("writeStoredCard error:", error);
+  }
+}
+
+export function setTemporaryCardItem(item) {
+  setCurrentItem(item || null);
+
+  writeStoredCard(TEMP_CARD_STORAGE_KEY, item || null);
+
+  if (item?.canonical_key) {
+    writeStoredCard(LAST_CARD_STORAGE_KEY, item);
   }
 }
 
@@ -157,24 +184,36 @@ export function getTemporaryCardItem() {
     return state.currentItem;
   }
 
-  try {
-    const raw = sessionStorage.getItem(TEMP_CARD_STORAGE_KEY);
-    if (!raw) return null;
+  return readStoredCard(TEMP_CARD_STORAGE_KEY);
+}
 
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch (error) {
-    console.warn("getTemporaryCardItem error:", error);
-    return null;
+export function getLastCardItem() {
+  if (state.currentItem?.canonical_key) {
+    return state.currentItem;
   }
+
+  return readStoredCard(LAST_CARD_STORAGE_KEY);
+}
+
+export function getStoredCardItemByKey(canonicalKey = "") {
+  const key = String(canonicalKey || "").trim().toLowerCase();
+  if (!key) return null;
+
+  const candidates = [
+    state.currentItem,
+    readStoredCard(TEMP_CARD_STORAGE_KEY),
+    readStoredCard(LAST_CARD_STORAGE_KEY)
+  ];
+
+  return (
+    candidates.find((item) => {
+      return String(item?.canonical_key || "").trim().toLowerCase() === key;
+    }) || null
+  );
 }
 
 export function clearTemporaryCardItem() {
   setCurrentItem(null);
 
-  try {
-    sessionStorage.removeItem(TEMP_CARD_STORAGE_KEY);
-  } catch (error) {
-    console.warn("clearTemporaryCardItem error:", error);
-  }
+  writeStoredCard(TEMP_CARD_STORAGE_KEY, null);
 }
