@@ -1,10 +1,19 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 
-const CACHE_KEY = "plamut_library_cache_v2";
-const CACHE_TTL = 1000 * 60 * 10; // 10 минут
+const CACHE_KEY = "plamut_library_cache_v3";
+const LEGACY_CACHE_KEYS = ["plamut_library_cache_v2", "plamut_library_cache"];
+const CACHE_TTL = 1000 * 60 * 10;
 
 function now() {
   return Date.now();
+}
+
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
+function cleanLower(value = "") {
+  return clean(value).toLowerCase();
 }
 
 function safeJsonParse(value, fallback) {
@@ -15,7 +24,7 @@ function safeJsonParse(value, fallback) {
   }
 }
 
-function readCache() {
+function readRawCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return {};
@@ -27,7 +36,7 @@ function readCache() {
   }
 }
 
-function writeCache(cache) {
+function writeRawCache(cache) {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   } catch (error) {
@@ -35,18 +44,144 @@ function writeCache(cache) {
   }
 }
 
-function getUserBucket(cache, userId) {
-  if (!userId) return null;
+function cleanupLegacyCacheKeys() {
+  try {
+    LEGACY_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch (error) {
+    console.warn("library-cache: legacy cleanup skipped", error);
+  }
+}
 
-  if (!cache[userId]) {
-    cache[userId] = {
-      updated_at: 0,
-      full: [],
-      list: []
+cleanupLegacyCacheKeys();
+
+function normalizeBucket(input = {}) {
+  const categories = input.categories && typeof input.categories === "object"
+    ? input.categories
+    : {};
+
+  return {
+    updated_at: Number(input.updated_at || 0),
+    full: Array.isArray(input.full) ? input.full : [],
+    list: Array.isArray(input.list) ? input.list : [],
+    categories
+  };
+}
+
+function getUserBucket(cache, userId) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return null;
+
+  if (!cache[cleanUserId]) {
+    cache[cleanUserId] = normalizeBucket({});
+  }
+
+  cache[cleanUserId] = normalizeBucket(cache[cleanUserId]);
+  return cache[cleanUserId];
+}
+
+function ensureCategoryBucket(bucket, category = "") {
+  const cleanCategory = cleanLower(category);
+  if (!cleanCategory) return null;
+
+  if (!bucket.categories[cleanCategory]) {
+    bucket.categories[cleanCategory] = {
+      list: [],
+      full: []
     };
   }
 
-  return cache[userId];
+  const value = bucket.categories[cleanCategory];
+  bucket.categories[cleanCategory] = {
+    list: Array.isArray(value.list) ? value.list : [],
+    full: Array.isArray(value.full) ? value.full : []
+  };
+
+  return bucket.categories[cleanCategory];
+}
+
+function isExpired(updatedAt = 0) {
+  return now() - Number(updatedAt || 0) > CACHE_TTL;
+}
+
+function resolveItemCategory(item = {}) {
+  return cleanLower(item?.media_entities?.category || item?.category || "");
+}
+
+function itemDedupeKey(item = {}) {
+  const canonical = cleanLower(item?.media_entities?.canonical_key || "");
+  if (canonical) return `canonical:${canonical}`;
+
+  const entityId = Number(item?.entity_id || item?.media_entities?.id || 0);
+  if (entityId) return `entity:${entityId}`;
+
+  const userMediaId = Number(item?.id || 0);
+  if (userMediaId) return `user_media:${userMediaId}`;
+
+  return "";
+}
+
+function dedupeAndSort(items = []) {
+  const map = new Map();
+
+  for (const item of items) {
+    const key = itemDedupeKey(item);
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, item);
+      continue;
+    }
+
+    const prev = map.get(key) || {};
+    map.set(key, {
+      ...prev,
+      ...item,
+      media_entities: {
+        ...(prev.media_entities || {}),
+        ...(item.media_entities || {})
+      }
+    });
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const at = new Date(a?.created_at || 0).getTime();
+    const bt = new Date(b?.created_at || 0).getTime();
+    return bt - at;
+  });
+}
+
+function assignBucketItems(bucket, mode, items = []) {
+  const normalized = dedupeAndSort(items);
+  bucket[mode] = normalized;
+
+  const categories = {};
+  for (const item of normalized) {
+    const category = resolveItemCategory(item);
+    if (!category) continue;
+
+    if (!categories[category]) {
+      categories[category] = { list: [], full: [] };
+    }
+
+    categories[category][mode].push(item);
+  }
+
+  Object.entries(categories).forEach(([category, byMode]) => {
+    const categoryBucket = ensureCategoryBucket(bucket, category);
+    categoryBucket[mode] = dedupeAndSort(byMode[mode]);
+  });
+}
+
+function getBucketItems(bucket, { mode = "list", category = "" } = {}) {
+  const cleanMode = mode === "full" ? "full" : "list";
+  const cleanCategory = cleanLower(category);
+
+  if (!cleanCategory) {
+    return Array.isArray(bucket[cleanMode]) ? bucket[cleanMode] : [];
+  }
+
+  const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
+  return Array.isArray(categoryBucket?.[cleanMode]) ? categoryBucket[cleanMode] : [];
 }
 
 export function clearLibraryCache(userId = null) {
@@ -55,210 +190,225 @@ export function clearLibraryCache(userId = null) {
     return;
   }
 
-  const cache = readCache();
-  delete cache[userId];
-  writeCache(cache);
+  const cache = readRawCache();
+  delete cache[clean(userId)];
+  writeRawCache(cache);
 }
 
-export function getCachedLibrary(userId, { mode = "list" } = {}) {
-  if (!userId) return [];
+export function getCachedLibrary(userId, { mode = "list", category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
 
-  const cache = readCache();
-  const bucket = cache[userId];
+  const cache = readRawCache();
+  const bucket = normalizeBucket(cache[cleanUserId]);
 
-  if (!bucket) return [];
-
-  const isExpired = now() - Number(bucket.updated_at || 0) > CACHE_TTL;
-  if (isExpired) return [];
-
-  return Array.isArray(bucket[mode]) ? bucket[mode] : [];
-}
-
-export function getCachedLibraryItem(userId, canonicalKey, { mode = "list" } = {}) {
-  if (!userId || !canonicalKey) return null;
-
-  const list = getCachedLibrary(userId, { mode });
-  return list.find(
-    (item) =>
-      item?.media_entities?.canonical_key === canonicalKey
-  ) || null;
-}
-
-export function updateCachedLibraryItem(userId, item) {
-  if (!userId || !item?.media_entities?.canonical_key) return;
-
-  const cache = readCache();
-  const bucket = getUserBucket(cache, userId);
-
-  ["list", "full"].forEach((mode) => {
-    const arr = Array.isArray(bucket[mode]) ? bucket[mode] : [];
-
-    const index = arr.findIndex(
-      (i) =>
-        i?.media_entities?.canonical_key === item.media_entities.canonical_key
-    );
-
-    if (index >= 0) {
-      arr[index] = {
-        ...arr[index],
-        ...item,
-        media_entities: {
-          ...(arr[index].media_entities || {}),
-          ...(item.media_entities || {})
-        }
-      };
-    } else {
-      arr.unshift(item);
-    }
-
-    bucket[mode] = arr;
-  });
-
-  bucket.updated_at = now();
-  writeCache(cache);
-}
-
-export function removeCachedLibraryItem(userId, userMediaId) {
-  if (!userId || !userMediaId) return;
-
-  const cache = readCache();
-  const bucket = cache[userId];
-
-  if (!bucket) return;
-
-  ["list", "full"].forEach((mode) => {
-    const arr = Array.isArray(bucket[mode]) ? bucket[mode] : [];
-
-    bucket[mode] = arr.filter(
-      (item) => Number(item.id) !== Number(userMediaId)
-    );
-  });
-
-  bucket.updated_at = now();
-  writeCache(cache);
-}
-
-async function fetchUserLibraryFromDb(userId, { mode = "list" } = {}) {
-  if (!userId) return [];
-
-  const supabase = getSupabaseClient();
-
-  const select =
-    mode === "full"
-      ? `
-        id,
-        user_id,
-        entity_id,
-        category,
-        status,
-        folder_name,
-        created_at,
-        updated_at,
-        media_entities (
-          id,
-          canonical_key,
-          category,
-          primary_source,
-          title_primary,
-          title_ru,
-          title_en,
-          original_title,
-          year,
-          cover_url,
-          description_ru,
-          description_en,
-          external_ids,
-          meta,
-          universe_key,
-          relations_built_at,
-          relations_status
-        )
-      `
-      : `
-        id,
-        user_id,
-        entity_id,
-        category,
-        status,
-        folder_name,
-        created_at,
-        updated_at,
-        media_entities (
-          id,
-          canonical_key,
-          category,
-          title_primary,
-          title_ru,
-          title_en,
-          original_title,
-          year,
-          cover_url
-        )
-      `;
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from("user_media")
-      .select(select)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
-    "Загрузка библиотеки",
-    15000
-  );
-
-  if (error) {
-    console.warn("library-cache: DB load failed", error);
+  if (!bucket.updated_at || isExpired(bucket.updated_at)) {
     return [];
   }
 
-  return Array.isArray(data) ? data : [];
+  return getBucketItems(bucket, { mode, category });
+}
+
+export function getCachedLibraryItem(userId, canonicalKey, { mode = "list", category = "" } = {}) {
+  const key = cleanLower(canonicalKey);
+  if (!key) return null;
+
+  const list = getCachedLibrary(userId, { mode, category });
+
+  return list.find((item) => cleanLower(item?.media_entities?.canonical_key) === key) || null;
+}
+
+export function updateCachedLibraryItem(userId, item, { category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId || !item) return;
+
+  const cache = readRawCache();
+  const bucket = getUserBucket(cache, cleanUserId);
+
+  ["list", "full"].forEach((mode) => {
+    const source = Array.isArray(bucket[mode]) ? bucket[mode] : [];
+    const withItem = [item, ...source];
+    assignBucketItems(bucket, mode, withItem);
+  });
+
+  const scopedCategory = cleanLower(category || resolveItemCategory(item));
+  if (scopedCategory) {
+    const scopedBucket = ensureCategoryBucket(bucket, scopedCategory);
+    ["list", "full"].forEach((mode) => {
+      scopedBucket[mode] = dedupeAndSort([item, ...(scopedBucket[mode] || [])]);
+    });
+  }
+
+  bucket.updated_at = now();
+  writeRawCache(cache);
+}
+
+export function removeCachedLibraryItem(userId, userMediaId, { category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  const cleanId = Number(userMediaId || 0);
+  if (!cleanUserId || !cleanId) return;
+
+  const cache = readRawCache();
+  const bucket = cache[cleanUserId] ? normalizeBucket(cache[cleanUserId]) : null;
+  if (!bucket) return;
+
+  ["list", "full"].forEach((mode) => {
+    bucket[mode] = dedupeAndSort(
+      (bucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
+    );
+  });
+
+  const cleanCategory = cleanLower(category);
+  if (cleanCategory) {
+    const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
+    ["list", "full"].forEach((mode) => {
+      categoryBucket[mode] = dedupeAndSort(
+        (categoryBucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
+      );
+    });
+  } else {
+    Object.keys(bucket.categories || {}).forEach((bucketCategory) => {
+      const categoryBucket = ensureCategoryBucket(bucket, bucketCategory);
+      ["list", "full"].forEach((mode) => {
+        categoryBucket[mode] = dedupeAndSort(
+          (categoryBucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
+        );
+      });
+    });
+  }
+
+  bucket.updated_at = now();
+  cache[cleanUserId] = bucket;
+  writeRawCache(cache);
+}
+
+async function fetchUserLibraryFromDb(userId, { mode = "list", category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
+
+  const supabase = getSupabaseClient();
+
+  const select = mode === "full"
+    ? `
+      id,
+      user_id,
+      entity_id,
+      category,
+      status,
+      folder_name,
+      created_at,
+      updated_at,
+      media_entities (
+        id,
+        canonical_key,
+        category,
+        primary_source,
+        title_primary,
+        title_ru,
+        title_en,
+        original_title,
+        year,
+        cover_url,
+        description_ru,
+        description_en,
+        external_ids,
+        meta,
+        universe_key,
+        relations_built_at,
+        relations_status
+      )
+    `
+    : `
+      id,
+      user_id,
+      entity_id,
+      category,
+      status,
+      folder_name,
+      created_at,
+      updated_at,
+      media_entities (
+        id,
+        canonical_key,
+        category,
+        title_primary,
+        title_ru,
+        title_en,
+        original_title,
+        year,
+        cover_url
+      )
+    `;
+
+  let query = supabase
+    .from("user_media")
+    .select(select)
+    .eq("user_id", cleanUserId)
+    .order("created_at", { ascending: false });
+
+  const cleanCategory = cleanLower(category);
+  if (cleanCategory) {
+    query = query.eq("category", cleanCategory);
+  }
+
+  const { data, error } = await withTimeout(query, "Загрузка библиотеки", 15000);
+
+  if (error) {
+    throw error;
+  }
+
+  return dedupeAndSort(Array.isArray(data) ? data : []);
+}
+
+export async function refreshUserLibrary(userId, { mode = "full", category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
+
+  const cache = readRawCache();
+  const bucket = getUserBucket(cache, cleanUserId);
+
+  const fresh = await fetchUserLibraryFromDb(cleanUserId, {
+    mode: "full",
+    category: ""
+  });
+
+  assignBucketItems(bucket, "full", fresh);
+  assignBucketItems(bucket, "list", fresh);
+
+  bucket.updated_at = now();
+  writeRawCache(cache);
+
+  return getBucketItems(bucket, { mode, category });
 }
 
 export async function loadUserLibrary(
   userId,
   {
     mode = "list",
+    category = "",
     allowStale = true,
     backgroundRefresh = true
   } = {}
 ) {
-  if (!userId) return [];
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
 
-  const cache = readCache();
-  const bucket = getUserBucket(cache, userId);
-
-  const cached = getCachedLibrary(userId, { mode });
+  const cached = getCachedLibrary(cleanUserId, { mode, category });
 
   if (cached.length && allowStale) {
     if (backgroundRefresh) {
-      fetchUserLibraryFromDb(userId, { mode: "full" })
-        .then((fresh) => {
-          if (!fresh.length) return;
-
-          const nextCache = readCache();
-          const nextBucket = getUserBucket(nextCache, userId);
-
-          nextBucket.full = fresh;
-          nextBucket.list = fresh;
-          nextBucket.updated_at = now();
-
-          writeCache(nextCache);
-        })
-        .catch(() => {});
+      refreshUserLibrary(cleanUserId, { mode: "full" }).catch((error) => {
+        console.warn("library-cache: background refresh skipped", error);
+      });
     }
 
     return cached;
   }
 
-  const fresh = await fetchUserLibraryFromDb(userId, { mode: "full" });
-
-  if (!fresh.length) return cached;
-
-  bucket.full = fresh;
-  bucket.list = fresh;
-  bucket.updated_at = now();
-
-  writeCache(cache);
-
-  return mode === "full" ? fresh : fresh;
+  try {
+    return await refreshUserLibrary(cleanUserId, { mode, category });
+  } catch (error) {
+    console.warn("library-cache: DB load failed, using fallback cache", error);
+    return cached;
+  }
 }
