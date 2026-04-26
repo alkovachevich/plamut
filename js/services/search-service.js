@@ -161,7 +161,8 @@ function normalizeSearchResult(raw = {}) {
     aliases: uniqueArray(safeArray(raw.aliases).map(String).filter(Boolean)),
     description_ru: String(raw.description_ru || "").trim(),
     description_en: String(raw.description_en || "").trim(),
-    primary_source: String(raw.primary_source || "").trim()
+    primary_source: String(raw.primary_source || "").trim(),
+    meta: raw.meta && typeof raw.meta === "object" ? raw.meta : {}
   };
 }
 
@@ -200,7 +201,7 @@ function pickBetterText(existingValue = "", incomingValue = "") {
 
 function mergeItems(existing, incoming) {
   if (!existing?.category || !incoming?.category || existing.category !== incoming.category) {
-    return pickBestItem([existing, incoming]) || existing || incoming;
+    return existing || incoming || null;
   }
 
   const existingIds = existing.external_ids || {};
@@ -476,6 +477,9 @@ function mapOpenLibraryDoc(doc) {
       edition_key: editionKeys,
       ia: iaKeys
     },
+    meta: {
+      openlibrary_cover_i: doc?.cover_i || null
+    },
     score: 0
   };
 }
@@ -631,8 +635,58 @@ function mapWikidataBookEntity(searchItem, details) {
       openlibrary_work: openLibraryWork,
       isbn: isbns
     },
+    meta: {
+      wikidata_p18: safeArray(claims.P18).map((claim) => claim?.mainsnak?.datavalue?.value).find(Boolean) || ""
+    },
     score: 0
   };
+}
+
+function fallbackCoverResolver(entity = {}) {
+  const category = sanitizeCategory(entity.category);
+  const ids = entity.external_ids || {};
+
+  if (category === "books") {
+    const fromCoverId = openLibraryCoverUrlFromId(entity?.meta?.openlibrary_cover_i || ids.cover_i);
+    if (fromCoverId) return fromCoverId;
+
+    const isbn = safeArray(ids.isbn)[0] || "";
+    if (isbn) return openLibraryCoverUrlFromIsbn(isbn);
+
+    const edition = safeArray(ids.edition_key)[0] || "";
+    if (edition) return openLibraryCoverUrlFromOlid(edition);
+
+    const wdP18 = entity?.meta?.wikidata_p18 || "";
+    if (wdP18) return wikimediaFileUrl(wdP18);
+  }
+
+  if (category === "movies" || category === "series") {
+    if (entity?.meta?.tmdb_poster_path) {
+      return buildTmdbImage(entity.meta.tmdb_poster_path);
+    }
+  }
+
+  if (category === "anime" || category === "manga") {
+    if (entity?.meta?.anilist_cover) {
+      return entity.meta.anilist_cover;
+    }
+  }
+
+  return "";
+}
+
+function applyFinalCategoryFilter(items = [], category = "") {
+  const normalized = sanitizeCategory(category);
+  return safeArray(items).filter((item) => !normalized || sanitizeCategory(item.category) === normalized);
+}
+
+function applyBookScreenPenalty(item = {}) {
+  if (item.category !== "books") return item;
+  const desc = compactString(`${item.description_ru || ""} ${item.description_en || ""}`);
+  if (desc.includes("film") || desc.includes("movie") || desc.includes("series") || desc.includes("сериал") || desc.includes("фильм")) {
+    return { ...item, score: (item.score || 0) - 25 };
+  }
+  return item;
 }
 
 function scoreBookResult(query, item) {
@@ -767,6 +821,9 @@ function mapTmdbItem(item = {}, forcedCategory = "") {
     description_en: "",
     aliases: uniqueArray([title, originalTitle]),
     external_ids: { tmdb: item.id },
+    meta: {
+      tmdb_poster_path: item.poster_path || ""
+    },
     score: item.poster_path ? 20 : 0
   };
 }
@@ -916,6 +973,9 @@ function mapAniListItem(item = {}, category = "anime") {
       item?.title?.romaji
     ]),
     external_ids: { anilist: item.id },
+    meta: {
+      anilist_cover: item?.coverImage?.large || item?.coverImage?.medium || ""
+    },
     score: item?.coverImage?.large ? 20 : 0
   };
 }
@@ -1033,6 +1093,15 @@ export async function runGlobalSearch(query) {
       ...item,
       score: item.category === "books" ? scoreBookResult(cleanQuery, item) : scoreScreenResult(cleanQuery, item)
     }))
+    .map((item) => {
+      const cover = item.cover_url || fallbackCoverResolver(item);
+      return {
+        ...item,
+        cover_url: cover,
+        score: cover ? item.score : (item.score || 0) - 20
+      };
+    })
+    .map((item) => applyBookScreenPenalty(item))
     .map((item) => normalizeSearchResult(item))
     .filter((item) => item && item.title && item.canonical_key)
     .sort((a, b) => b.score - a.score);
@@ -1056,11 +1125,23 @@ export async function runCategorySearch(query, category) {
 
   let result = [];
 
-  if (normalizedCategory === "books") result = dedupeAll(await searchBooks(cleanQuery)).filter((item) => item.category === "books");
-  if (normalizedCategory === "movies") result = dedupeAll(await searchMovies(cleanQuery)).filter((item) => item.category === "movies");
-  if (normalizedCategory === "series") result = dedupeAll(await searchSeries(cleanQuery)).filter((item) => item.category === "series");
-  if (normalizedCategory === "anime") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "anime")).filter((item) => item.category === "anime");
-  if (normalizedCategory === "manga") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "manga")).filter((item) => item.category === "manga");
+  if (normalizedCategory === "books") result = dedupeAll(await searchBooks(cleanQuery));
+  if (normalizedCategory === "movies") result = dedupeAll(await searchMovies(cleanQuery));
+  if (normalizedCategory === "series") result = dedupeAll(await searchSeries(cleanQuery));
+  if (normalizedCategory === "anime") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "anime"));
+  if (normalizedCategory === "manga") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "manga"));
+
+  result = applyFinalCategoryFilter(result, normalizedCategory)
+    .map((item) => {
+      const cover = item.cover_url || fallbackCoverResolver(item);
+      return {
+        ...item,
+        cover_url: cover,
+        score: cover ? (item.score || 0) : (item.score || 0) - 20
+      };
+    })
+    .map((item) => applyBookScreenPenalty(item))
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
 
   setCachedSearchResult(cacheKey, result);
   return result;
