@@ -20,6 +20,49 @@ function getCover(entity = {}) {
   return cover;
 }
 
+
+const GROUP_TITLES = {
+  direct_sequel: "Прямые продолжения",
+  direct_prequel: "Прямые продолжения",
+  book_series: "Серия книг",
+  adaptation: "Экранизации",
+  source_material: "Экранизации",
+  spin_off: "Спинофы",
+  same_universe: "Одна вселенная",
+  release_order: "Порядок выхода",
+  story_chronology: "Хронология событий",
+  related_work: "Связанное",
+  alternate_version: "Связанное",
+  reboot: "Связанное",
+  remake: "Связанное"
+};
+
+function groupItemsByRelations(items = [], relations = [], seedId = null) {
+  const byId = new Map(safeArray(items).map((item) => [Number(item.media_entities?.id), item]));
+  const grouped = new Map();
+
+  safeArray(relations).forEach((rel) => {
+    if (seedId && Number(rel.from_entity_id) !== Number(seedId)) return;
+    const target = byId.get(Number(rel.to_entity_id));
+    if (!target) return;
+
+    const key = rel.relation_type || 'related_work';
+    const title = GROUP_TITLES[key] || 'Связанное';
+
+    if (!grouped.has(title)) grouped.set(title, []);
+    grouped.get(title).push({ item: target, relation: rel });
+  });
+
+  if (!grouped.size) {
+    grouped.set('Связанное', safeArray(items).map((item) => ({ item, relation: null })));
+  }
+
+  return Array.from(grouped.entries()).map(([title, entries]) => ({
+    title,
+    entries: entries.filter((entry, idx, arr) => idx === arr.findIndex((x) => x.item.media_entities?.id === entry.item.media_entities?.id))
+  })).filter((group) => group.entries.length);
+}
+
 function renderCover(entity = {}) {
   const cover = getCover(entity);
   const title = resolveTitle(entity);
@@ -44,12 +87,12 @@ function findRelationForItem(targetEntityId, relations = []) {
     .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null;
 }
 
-function renderItem(item, index, relations = []) {
+function renderItem(item, index, relation = null, relations = []) {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "Planned";
-  const relation = findRelationForItem(entity.id, relations);
-  const relationLabel = relation ? getRelationLabel(relation.relation_type) : "Участник";
+  const relationInfo = relation || findRelationForItem(entity.id, relations);
+  const relationLabel = relationInfo ? getRelationLabel(relationInfo.relation_type) : "Участник";
 
   return `
     <button
@@ -454,11 +497,14 @@ export async function renderUniversePage(root, params = {}) {
           </div>
         </div>
 
-        <div class="section-title">Порядок / состав</div>
-
-        <div class="timeline">
-          ${items.map((item, index) => renderItem(item, index, relations)).join("")}
-        </div>
+        ${groupItemsByRelations(items, relations, items[0]?.media_entities?.id)
+          .map((group) => `
+            <div class="section-title">${escapeHtml(group.title)}</div>
+            <div class="timeline">
+              ${group.entries.map((entry, index) => renderItem(entry.item, index, entry.relation, relations)).join("")}
+            </div>
+          `)
+          .join("")}
       </section>
     `;
 
