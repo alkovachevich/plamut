@@ -1,6 +1,6 @@
 import { navigate } from "../router.js";
 import { state, openAuthModal } from "../state.js";
-import { escapeHtml, clampText } from "../utils.js";
+import { escapeHtml, clampText, safeArray } from "../utils.js";
 import { getCategoryLabel, STATUS_LABELS } from "../config.js";
 import { getUniverseDetails, getRelationLabel } from "../services/universe-service.js";
 
@@ -14,13 +14,23 @@ function resolveTitle(entity = {}) {
   );
 }
 
+function getCover(entity = {}) {
+  const cover = entity.cover_url || "";
+  if (!cover || cover === "undefined" || cover === "null") return "";
+  return cover;
+}
+
 function renderCover(entity = {}) {
-  if (entity.cover_url) {
+  const cover = getCover(entity);
+  const title = resolveTitle(entity);
+
+  if (cover) {
     return `
       <img
-        src="${escapeHtml(entity.cover_url)}"
-        alt="${escapeHtml(resolveTitle(entity))}"
+        src="${escapeHtml(cover)}"
+        alt="${escapeHtml(title)}"
         loading="lazy"
+        onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
   }
@@ -28,23 +38,17 @@ function renderCover(entity = {}) {
   return `<div class="item-cover-fallback">?</div>`;
 }
 
-function findRelationForItem(seedEntityId, targetEntityId, relations = []) {
-  return relations.find((rel) => {
-    const from = Number(rel.from_entity_id);
-    const to = Number(rel.to_entity_id);
-
-    if (from === Number(seedEntityId) && to === Number(targetEntityId)) return true;
-    if (to === Number(seedEntityId) && from === Number(targetEntityId)) return true;
-
-    return false;
-  });
+function findRelationForItem(targetEntityId, relations = []) {
+  return safeArray(relations)
+    .filter((rel) => Number(rel.to_entity_id) === Number(targetEntityId))
+    .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null;
 }
 
 function renderItem(item, index, relations = []) {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "Planned";
-  const relation = findRelationForItem(null, entity.id, relations);
+  const relation = findRelationForItem(entity.id, relations);
   const relationLabel = relation ? getRelationLabel(relation.relation_type) : "Участник";
 
   return `
@@ -70,7 +74,7 @@ function renderItem(item, index, relations = []) {
         }
 
         <div class="item-badges">
-          <span>${escapeHtml(getCategoryLabel(state.language, entity.category))}</span>
+          <span>${escapeHtml(getCategoryLabel(state.language, entity.category || ""))}</span>
           ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
           <span>${escapeHtml(status)}</span>
           <span>${escapeHtml(relationLabel)}</span>
@@ -80,70 +84,8 @@ function renderItem(item, index, relations = []) {
   `;
 }
 
-function renderGuest(root) {
-  root.innerHTML = `
-    <style>
-      .page {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-      }
-
-      .title {
-        font-size: 28px;
-        font-weight: 900;
-        line-height: 1.15;
-        color: var(--text);
-      }
-
-      .empty-state {
-        padding: 28px;
-        border-radius: 20px;
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        color: var(--text-soft);
-      }
-
-      .empty-title {
-        color: var(--text);
-        font-size: 18px;
-        font-weight: 800;
-      }
-
-      .login-btn {
-        width: fit-content;
-        padding: 10px 16px;
-        border-radius: 999px;
-        background: var(--accent);
-        color: #fff;
-        font-weight: 700;
-      }
-    </style>
-
-    <section class="page">
-      <div class="title">Вселенная</div>
-
-      <div class="empty-state">
-        <div class="empty-title">Нужно войти</div>
-        <div class="empty-text">Вселенные строятся на основе твоей библиотеки.</div>
-        <button class="login-btn" type="button" data-action="login">Войти</button>
-      </div>
-    </section>
-  `;
-
-  root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
-    openAuthModal("login");
-  });
-}
-
-export async function renderUniversePage(root, params = {}) {
-  const userId = state.user?.id;
-  const universeKey = params.id || params.key || "";
-
-  root.innerHTML = `
+function renderStyles() {
+  return `
     <style>
       .page {
         display: flex;
@@ -273,6 +215,11 @@ export async function renderUniversePage(root, params = {}) {
         display: block;
       }
 
+      .item-cover.is-empty {
+        display: grid;
+        place-items: center;
+      }
+
       .item-cover-fallback {
         width: 100%;
         height: 100%;
@@ -365,6 +312,32 @@ export async function renderUniversePage(root, params = {}) {
         }
       }
     </style>
+  `;
+}
+
+function renderGuest(root) {
+  root.innerHTML = `
+    ${renderStyles()}
+
+    <section class="page">
+      <div class="title">Вселенная</div>
+
+      <div class="empty-state">
+        <div class="empty-title">Нужно войти</div>
+        <div class="empty-text">Вселенные строятся на основе твоей библиотеки.</div>
+        <button class="login-btn" type="button" data-action="login">Войти</button>
+      </div>
+    </section>
+  `;
+
+  root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
+    openAuthModal("login");
+  });
+}
+
+function renderLoading(root) {
+  root.innerHTML = `
+    ${renderStyles()}
 
     <section class="page">
       <div class="empty-state">
@@ -372,6 +345,53 @@ export async function renderUniversePage(root, params = {}) {
       </div>
     </section>
   `;
+}
+
+function renderNotFound(root, text = "Вселенная не найдена") {
+  root.innerHTML = `
+    ${renderStyles()}
+
+    <section class="page">
+      <div class="empty-state">
+        <div class="empty-title">${escapeHtml(text)}</div>
+        <div class="empty-text">Добавь связанные произведения в библиотеку и построй вселенную из карточки.</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderError(root) {
+  root.innerHTML = `
+    ${renderStyles()}
+
+    <section class="page">
+      <div class="empty-state">
+        <div class="empty-title">Ошибка загрузки</div>
+        <div class="empty-text">Не удалось открыть вселенную.</div>
+      </div>
+    </section>
+  `;
+}
+
+function bindItems(root) {
+  root.querySelectorAll("[data-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.key || "";
+      const category = button.dataset.category || "";
+
+      if (!key) return;
+
+      navigate("/card", {
+        key,
+        category
+      });
+    });
+  });
+}
+
+export async function renderUniversePage(root, params = {}) {
+  const userId = state.user?.id;
+  const universeKey = params.id || params.key || "";
 
   if (!userId) {
     renderGuest(root);
@@ -379,14 +399,11 @@ export async function renderUniversePage(root, params = {}) {
   }
 
   if (!universeKey) {
-    root.querySelector(".page").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-title">Вселенная не найдена</div>
-        <div class="empty-text">Нет ключа вселенной.</div>
-      </div>
-    `;
+    renderNotFound(root, "Нет ключа вселенной");
     return;
   }
+
+  renderLoading(root);
 
   try {
     const { universe, items, relations } = await getUniverseDetails({
@@ -395,72 +412,59 @@ export async function renderUniversePage(root, params = {}) {
     });
 
     if (!universe || !items.length) {
-      root.querySelector(".page").innerHTML = `
-        <div class="empty-state">
-          <div class="empty-title">Вселенная не найдена</div>
-          <div class="empty-text">Добавь связанные произведения в библиотеку и построй вселенную из карточки.</div>
-        </div>
-      `;
+      renderNotFound(root);
       return;
     }
 
-    const cover = universe.cover_url || items.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url || "";
+    const cover =
+      universe.cover_url ||
+      items.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
+      "";
+
     const done = items.filter((item) => item.status === "done").length;
 
-    root.querySelector(".page").innerHTML = `
-      <div class="hero">
-        <div class="hero-cover">
-          ${
-            cover
-              ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(universe.title)}" loading="lazy" />`
-              : `<div class="hero-cover-fallback">U</div>`
-          }
-        </div>
+    root.innerHTML = `
+      ${renderStyles()}
 
-        <div class="hero-meta">
-          <div class="title">${escapeHtml(universe.title)}</div>
+      <section class="page">
+        <div class="hero">
+          <div class="hero-cover">
+            ${
+              cover
+                ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(universe.title || "Universe")}" loading="lazy" />`
+                : `<div class="hero-cover-fallback">U</div>`
+            }
+          </div>
 
-          ${
-            universe.description
-              ? `<div class="description">${escapeHtml(clampText(universe.description, 220))}</div>`
-              : `<div class="description">Связанная структура произведений из твоей библиотеки.</div>`
-          }
+          <div class="hero-meta">
+            <div class="title">${escapeHtml(universe.title || universe.universe_key || "Вселенная")}</div>
 
-          <div class="stats">
-            <span class="stat">${escapeHtml(String(items.length))} элементов</span>
-            <span class="stat">готово ${escapeHtml(String(done))}</span>
+            ${
+              universe.description
+                ? `<div class="description">${escapeHtml(clampText(universe.description, 220))}</div>`
+                : `<div class="description">Связанная структура произведений из твоей библиотеки.</div>`
+            }
+
+            <div class="stats">
+              <span class="stat">${escapeHtml(String(items.length))} элементов</span>
+              <span class="stat">готово ${escapeHtml(String(done))}</span>
+              ${relations.length ? `<span class="stat">${escapeHtml(String(relations.length))} связей</span>` : ""}
+              ${universe.source ? `<span class="stat">${escapeHtml(universe.source === "openai" ? "OpenAI + БД" : "БД")}</span>` : ""}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="section-title">Порядок / состав</div>
+        <div class="section-title">Порядок / состав</div>
 
-      <div class="timeline">
-        ${items.map((item, index) => renderItem(item, index, relations)).join("")}
-      </div>
+        <div class="timeline">
+          ${items.map((item, index) => renderItem(item, index, relations)).join("")}
+        </div>
+      </section>
     `;
 
-    root.querySelectorAll("[data-key]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const key = button.dataset.key || "";
-        const category = button.dataset.category || "";
-
-        if (!key) return;
-
-        navigate("/card", {
-          key,
-          category
-        });
-      });
-    });
+    bindItems(root);
   } catch (error) {
     console.error("Universe details error:", error);
-
-    root.querySelector(".page").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-title">Ошибка загрузки</div>
-        <div class="empty-text">Не удалось открыть вселенную.</div>
-      </div>
-    `;
+    renderError(root);
   }
 }
