@@ -3,6 +3,20 @@ import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 const API_CACHE_TABLE = "api_cache";
 const DEFAULT_TIMEOUT_MS = 12000;
 
+function isPermissionError(error) {
+  const status = Number(error?.status || error?.code || 0);
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  if (status === 403) return true;
+  if (code === "42501") return true;
+  if (message.includes("permission denied")) return true;
+  if (message.includes("42501")) return true;
+
+  return false;
+}
+
+
 function cleanText(value = "") {
   return String(value || "").trim();
 }
@@ -68,6 +82,11 @@ export async function getApiCache(source, query) {
   ).catch((error) => ({ data: null, error }));
 
   if (error) {
+    if (isPermissionError(error)) {
+      console.warn("getApiCache permission denied, fallback to direct fetch");
+      return null;
+    }
+
     console.warn("getApiCache skipped:", error);
     return null;
   }
@@ -97,6 +116,11 @@ export async function setApiCache(source, query, payload, options = {}) {
   ).catch((error) => ({ data: null, error }));
 
   if (error) {
+    if (isPermissionError(error)) {
+      console.warn("setApiCache permission denied, skip cache write");
+      return null;
+    }
+
     console.warn("setApiCache skipped:", error);
     return null;
   }
@@ -111,13 +135,21 @@ export async function fetchJsonCached(source, query, fetcher, options = {}) {
   } = options;
 
   if (!force) {
-    const cached = await getApiCache(source, query);
-    if (cached) return cached;
+    try {
+      const cached = await getApiCache(source, query);
+      if (cached) return cached;
+    } catch (error) {
+      console.warn("fetchJsonCached read-through disabled:", error);
+    }
   }
 
   const payload = await fetcher();
 
-  await setApiCache(source, query, payload, { ttlMs });
+  try {
+    await setApiCache(source, query, payload, { ttlMs });
+  } catch (error) {
+    console.warn("fetchJsonCached write-through disabled:", error);
+  }
 
   return payload;
 }
