@@ -48,7 +48,7 @@ async function updateUserMedia(userMediaId, payload) {
     .update(payload)
     .eq("id", userMediaId)
     .select(USER_MEDIA_UPDATE_SELECT)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
   return data;
@@ -745,7 +745,7 @@ export async function renderCategoryPage(root, params = {}) {
 
           renderList();
         } catch (error) {
-          console.error("Update status error:", error);
+          console.warn("Update status error:", error);
           button.disabled = false;
         }
       });
@@ -792,7 +792,7 @@ export async function renderCategoryPage(root, params = {}) {
 
           renderList();
         } catch (error) {
-          console.error("Update folder error:", error);
+          console.warn("Update folder error:", error);
           button.disabled = false;
         }
       });
@@ -819,7 +819,7 @@ export async function renderCategoryPage(root, params = {}) {
 
           renderList();
         } catch (error) {
-          console.error("Remove from library error:", error);
+          console.warn("Remove from library error:", error);
           button.disabled = false;
         }
       });
@@ -827,7 +827,7 @@ export async function renderCategoryPage(root, params = {}) {
   }
 
   root.querySelector('[data-action="add"]')?.addEventListener("click", () => {
-    openSearchModal("");
+    openSearchModal("", { category });
   });
 
   sortSelect?.addEventListener("change", () => {
@@ -860,7 +860,7 @@ export async function renderCategoryPage(root, params = {}) {
     persistViewState();
     renderList();
   } catch (error) {
-    console.error("Category library load error:", error);
+    console.warn("Category library load error:", error);
 
     if (contentRoot) {
       contentRoot.innerHTML = renderErrorState();
