@@ -1,203 +1,125 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 
-const JOBS_TABLE = "universe_build_jobs";
-const DEFAULT_TIMEOUT_MS = 12000;
+const TABLE = "universe_build_jobs";
+const DEFAULT_TIMEOUT_MS = 10000;
 
 export const UNIVERSE_JOB_STATUS = {
-  QUEUED: "queued",
+  PENDING: "pending",
   BUILDING: "building",
   READY: "ready",
   FAILED: "failed"
 };
 
-function cleanText(value = "") {
+function clean(value = "") {
   return String(value || "").trim();
 }
 
-function normalizeJob(row = {}) {
-  if (!row) return null;
-
-  const current = Number(row.progress_current || 0);
-  const total = Number(row.progress_total || 0);
-  const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
-
-  return {
-    id: row.id,
-    owner_user_id: row.owner_user_id,
-    seed_entity_id: row.seed_entity_id,
-    seed_canonical_key: row.seed_canonical_key || "",
-    universe_key: row.universe_key || "",
-    status: row.status || UNIVERSE_JOB_STATUS.QUEUED,
-    progress_current: current,
-    progress_total: total,
-    progress_percent: percent,
-    progress_label: row.progress_label || "",
-    error_message: row.error_message || "",
-    result_payload: row.result_payload || {},
-    created_at: row.created_at || null,
-    updated_at: row.updated_at || null,
-    started_at: row.started_at || null,
-    finished_at: row.finished_at || null
-  };
+function nowIso() {
+  return new Date().toISOString();
 }
 
-export function getUniverseJobPercent(job = {}) {
-  if (!job) return 0;
-
-  const current = Number(job.progress_current || 0);
-  const total = Number(job.progress_total || 0);
-
-  if (!total) return 0;
-
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+function normalizeStatus(status) {
+  const s = clean(status).toLowerCase();
+  if (Object.values(UNIVERSE_JOB_STATUS).includes(s)) return s;
+  return UNIVERSE_JOB_STATUS.PENDING;
 }
 
-export function isUniverseJobActive(job = {}) {
-  return [UNIVERSE_JOB_STATUS.QUEUED, UNIVERSE_JOB_STATUS.BUILDING].includes(job?.status);
+function normalizeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-export function isUniverseJobFinished(job = {}) {
-  return [UNIVERSE_JOB_STATUS.READY, UNIVERSE_JOB_STATUS.FAILED].includes(job?.status);
+function normalizePayload(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  return payload;
 }
 
-export async function getLatestUniverseBuildJob({ userId, entityId, canonicalKey = "" }) {
-  const cleanUserId = cleanText(userId);
-  const cleanCanonicalKey = cleanText(canonicalKey);
-
-  if (!cleanUserId && !entityId && !cleanCanonicalKey) return null;
-
-  const supabase = getSupabaseClient();
-
-  let query = supabase
-    .from(JOBS_TABLE)
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (cleanUserId) {
-    query = query.eq("owner_user_id", cleanUserId);
-  }
-
-  if (entityId) {
-    query = query.eq("seed_entity_id", entityId);
-  } else if (cleanCanonicalKey) {
-    query = query.eq("seed_canonical_key", cleanCanonicalKey);
-  }
-
-  const { data, error } = await withTimeout(
-    query,
-    "Загрузка задачи построения",
-    DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
-
-  if (error) {
-    console.warn("getLatestUniverseBuildJob skipped:", error);
-    return null;
-  }
-
-  return normalizeJob(Array.isArray(data) ? data[0] : null);
-}
-
+/**
+ * Создание или получение уже существующей задачи
+ */
 export async function createUniverseBuildJob({
   userId,
   entityId,
-  canonicalKey = "",
-  universeKey = ""
+  universeKey = null
 }) {
-  const cleanUserId = cleanText(userId);
-  const cleanCanonicalKey = cleanText(canonicalKey);
-  const cleanUniverseKey = cleanText(universeKey);
-
-  if (!cleanUserId) {
-    throw new Error("Не найден пользователь");
-  }
-
-  if (!entityId && !cleanCanonicalKey) {
-    throw new Error("Не найдена карточка для построения");
-  }
-
-  const existing = await getLatestUniverseBuildJob({
-    userId: cleanUserId,
-    entityId,
-    canonicalKey: cleanCanonicalKey
-  });
-
-  if (existing && isUniverseJobActive(existing)) {
-    return {
-      created: false,
-      job: existing
-    };
-  }
-
-  if (existing?.status === UNIVERSE_JOB_STATUS.READY && existing.universe_key) {
-    return {
-      created: false,
-      job: existing
-    };
+  if (!userId || !entityId) {
+    throw new Error("createUniverseBuildJob: missing params");
   }
 
   const supabase = getSupabaseClient();
 
+  // проверяем есть ли уже активная задача
+  const { data: existing } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .select("*")
+      .eq("owner_user_id", userId)
+      .eq("entity_id", entityId)
+      .in("status", [UNIVERSE_JOB_STATUS.PENDING, UNIVERSE_JOB_STATUS.BUILDING])
+      .limit(1),
+    "Проверка существующей задачи",
+    DEFAULT_TIMEOUT_MS
+  ).catch(() => ({ data: null }));
+
+  if (existing && existing.length) {
+    return existing[0];
+  }
+
   const payload = {
-    owner_user_id: cleanUserId,
-    seed_entity_id: entityId || null,
-    seed_canonical_key: cleanCanonicalKey || null,
-    universe_key: cleanUniverseKey || null,
-    status: UNIVERSE_JOB_STATUS.QUEUED,
+    owner_user_id: userId,
+    entity_id: entityId,
+    universe_key: universeKey,
+    status: UNIVERSE_JOB_STATUS.PENDING,
     progress_current: 0,
-    progress_total: 8,
-    progress_label: "Задача поставлена в очередь",
-    error_message: null,
-    result_payload: {}
+    progress_total: 9,
+    progress_label: "Ожидание",
+    created_at: nowIso(),
+    updated_at: nowIso()
   };
 
   const { data, error } = await withTimeout(
     supabase
-      .from(JOBS_TABLE)
+      .from(TABLE)
       .insert(payload)
       .select("*")
       .single(),
-    "Создание задачи построения",
+    "Создание задачи",
     DEFAULT_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  return {
-    created: true,
-    job: normalizeJob(data)
-  };
+  return data;
 }
 
+/**
+ * Обновление задачи
+ */
 export async function updateUniverseBuildJob(jobId, patch = {}) {
   if (!jobId) return null;
 
   const supabase = getSupabaseClient();
 
-  const cleanPatch = {
+  const payload = {
     ...patch,
-    updated_at: new Date().toISOString()
+    status: normalizeStatus(patch.status),
+    progress_current: normalizeNumber(patch.progress_current),
+    progress_total: normalizeNumber(patch.progress_total || 9),
+    progress_label: clean(patch.progress_label),
+    universe_key: patch.universe_key || null,
+    result_payload: normalizePayload(patch.result_payload),
+    error_message: clean(patch.error_message),
+    updated_at: nowIso()
   };
-
-  if (patch.status === UNIVERSE_JOB_STATUS.BUILDING && !patch.started_at) {
-    cleanPatch.started_at = new Date().toISOString();
-  }
-
-  if (
-    [UNIVERSE_JOB_STATUS.READY, UNIVERSE_JOB_STATUS.FAILED].includes(patch.status) &&
-    !patch.finished_at
-  ) {
-    cleanPatch.finished_at = new Date().toISOString();
-  }
 
   const { data, error } = await withTimeout(
     supabase
-      .from(JOBS_TABLE)
-      .update(cleanPatch)
+      .from(TABLE)
+      .update(payload)
       .eq("id", jobId)
       .select("*")
       .single(),
-    "Обновление задачи построения",
+    "Обновление задачи",
     DEFAULT_TIMEOUT_MS
   ).catch((error) => ({ data: null, error }));
 
@@ -206,51 +128,145 @@ export async function updateUniverseBuildJob(jobId, patch = {}) {
     return null;
   }
 
-  return normalizeJob(data);
+  return data;
 }
 
-export async function pollUniverseBuildJob(jobId) {
+/**
+ * Получение одной задачи
+ */
+export async function getUniverseBuildJob(jobId) {
   if (!jobId) return null;
 
   const supabase = getSupabaseClient();
 
   const { data, error } = await withTimeout(
     supabase
-      .from(JOBS_TABLE)
+      .from(TABLE)
       .select("*")
       .eq("id", jobId)
       .maybeSingle(),
-    "Проверка задачи построения",
+    "Загрузка задачи",
     DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: null, error }));
+  );
 
-  if (error) {
-    console.warn("pollUniverseBuildJob skipped:", error);
-    return null;
-  }
+  if (error) throw error;
 
-  return normalizeJob(data);
+  return data || null;
 }
 
-export function renderUniverseJobProgress(job = {}) {
-  if (!job) return "";
+/**
+ * Получение всех активных задач пользователя
+ */
+export async function getActiveUniverseBuildJobs(userId) {
+  if (!userId) return [];
 
-  const percent = getUniverseJobPercent(job);
-  const current = Number(job.progress_current || 0);
-  const total = Number(job.progress_total || 0);
-  const label = job.progress_label || "Построение вселенной";
+  const supabase = getSupabaseClient();
 
-  if (job.status === UNIVERSE_JOB_STATUS.READY) {
-    return "Вселенная готова";
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .select("*")
+      .eq("owner_user_id", userId)
+      .in("status", [UNIVERSE_JOB_STATUS.PENDING, UNIVERSE_JOB_STATUS.BUILDING])
+      .order("created_at", { ascending: false }),
+    "Активные задачи",
+    DEFAULT_TIMEOUT_MS
+  ).catch((error) => ({ data: [], error }));
+
+  if (error) {
+    console.warn("getActiveUniverseBuildJobs skipped:", error);
+    return [];
   }
 
-  if (job.status === UNIVERSE_JOB_STATUS.FAILED) {
-    return job.error_message || "Ошибка построения";
+  return data || [];
+}
+
+/**
+ * Получение последних завершённых задач
+ */
+export async function getRecentUniverseBuildJobs(userId, limit = 10) {
+  if (!userId) return [];
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .select("*")
+      .eq("owner_user_id", userId)
+      .in("status", [UNIVERSE_JOB_STATUS.READY, UNIVERSE_JOB_STATUS.FAILED])
+      .order("updated_at", { ascending: false })
+      .limit(limit),
+    "История задач",
+    DEFAULT_TIMEOUT_MS
+  ).catch((error) => ({ data: [], error }));
+
+  if (error) {
+    console.warn("getRecentUniverseBuildJobs skipped:", error);
+    return [];
   }
 
-  if (total > 0) {
-    return `${label} · ${current} из ${total} · ${percent}%`;
+  return data || [];
+}
+
+/**
+ * Подписка на обновление задачи (realtime)
+ */
+export function subscribeToUniverseJob(jobId, callback) {
+  if (!jobId || typeof callback !== "function") {
+    return () => {};
   }
 
-  return label;
+  const supabase = getSupabaseClient();
+
+  const channel = supabase
+    .channel(`universe-job-${jobId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: TABLE,
+        filter: `id=eq.${jobId}`
+      },
+      (payload) => {
+        callback(payload.new);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Подписка на все задачи пользователя
+ */
+export function subscribeToUserUniverseJobs(userId, callback) {
+  if (!userId || typeof callback !== "function") {
+    return () => {};
+  }
+
+  const supabase = getSupabaseClient();
+
+  const channel = supabase
+    .channel(`universe-jobs-${userId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: TABLE,
+        filter: `owner_user_id=eq.${userId}`
+      },
+      (payload) => {
+        callback(payload.new);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
