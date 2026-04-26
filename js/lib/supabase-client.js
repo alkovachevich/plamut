@@ -106,13 +106,19 @@ export async function getCurrentSession() {
 }
 
 export async function getCurrentUser() {
+  const session = await getCurrentSession();
+
+  if (session?.user) {
+    return session.user;
+  }
+
   const supabase = getSupabaseClient();
 
   const { data, error } = await withRetry(
     () => supabase.auth.getUser(),
     "Получение пользователя",
     {
-      retries: 1,
+      retries: 0,
       timeoutMs: AUTH_TIMEOUT_MS,
       delayMs: 700
     }
@@ -180,6 +186,12 @@ export async function signOut() {
 export async function fetchUserProfile(userId) {
   if (!userId) return null;
 
+  const session = await getCurrentSession();
+
+  if (!session?.user?.id) {
+    return null;
+  }
+
   const supabase = getSupabaseClient();
 
   const { data, error } = await withRetry(
@@ -191,7 +203,7 @@ export async function fetchUserProfile(userId) {
         .maybeSingle(),
     "Загрузка профиля",
     {
-      retries: 1,
+      retries: 0,
       timeoutMs: DEFAULT_TIMEOUT_MS,
       delayMs: 700
     }
@@ -214,6 +226,12 @@ export async function fetchUserProfileSafe(userId) {
 export async function upsertUserProfile(profile) {
   if (!profile?.id) {
     throw new Error("upsertUserProfile: profile.id is required");
+  }
+
+  const session = await getCurrentSession();
+
+  if (!session?.user?.id || session.user.id !== profile.id) {
+    return null;
   }
 
   const supabase = getSupabaseClient();
@@ -242,7 +260,7 @@ export async function upsertUserProfile(profile) {
         .single(),
     "Сохранение профиля",
     {
-      retries: 1,
+      retries: 0,
       timeoutMs: DEFAULT_TIMEOUT_MS,
       delayMs: 700
     }
@@ -250,7 +268,7 @@ export async function upsertUserProfile(profile) {
 
   if (error) throw error;
 
-  return data;
+  return data || null;
 }
 
 export async function upsertUserProfileSafe(profile) {
@@ -265,6 +283,12 @@ export async function upsertUserProfileSafe(profile) {
 export async function updateUserPassword(newPassword) {
   if (!newPassword || newPassword.length < 6) {
     throw new Error("Пароль должен содержать минимум 6 символов");
+  }
+
+  const session = await getCurrentSession();
+
+  if (!session?.user?.id) {
+    throw new Error("Нужно войти в аккаунт");
   }
 
   const supabase = getSupabaseClient();
@@ -295,6 +319,12 @@ function sanitizeFilename(filename = "avatar") {
 export async function uploadAvatarImage(userId, file) {
   if (!userId) throw new Error("Не найден пользователь");
   if (!file) throw new Error("Файл не выбран");
+
+  const session = await getCurrentSession();
+
+  if (!session?.user?.id || session.user.id !== userId) {
+    throw new Error("Нужно войти в аккаунт");
+  }
 
   if (!String(file.type || "").startsWith("image/")) {
     throw new Error("Нужно выбрать изображение");
