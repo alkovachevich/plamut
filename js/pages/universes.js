@@ -472,7 +472,7 @@ export async function renderUniversesPage(root) {
 
     bindUniverseCards(root);
   } catch (error) {
-    console.error("Universes load error:", error);
+    console.warn("Universes load error:", error);
     renderError(root);
   }
 }
