@@ -216,21 +216,37 @@ function buildEntityPayload(entity) {
 }
 
 function mergeEntityPayload(existing = {}, incoming = {}) {
+  const pickBetterText = (a = "", b = "") => {
+    const left = cleanText(a);
+    const right = cleanText(b);
+    if (!left) return right;
+    if (!right) return left;
+    return right.length > left.length ? right : left;
+  };
+
+  const pickBetterCover = (a = "", b = "") => {
+    const left = cleanText(a);
+    const right = cleanText(b);
+    if (!left) return right;
+    if (!right) return left;
+    return left;
+  };
+
   return {
     canonical_key: existing.canonical_key || incoming.canonical_key,
-    category: incoming.category || existing.category || "",
+    category: existing.category || incoming.category || "",
     primary_source: incoming.primary_source || existing.primary_source || "manual",
 
-    title_primary: incoming.title_primary || existing.title_primary || "",
-    title_ru: incoming.title_ru || existing.title_ru || "",
-    title_en: incoming.title_en || existing.title_en || "",
-    original_title: incoming.original_title || existing.original_title || "",
+    title_primary: pickBetterText(existing.title_primary, incoming.title_primary),
+    title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
+    title_en: pickBetterText(existing.title_en, incoming.title_en),
+    original_title: pickBetterText(existing.original_title, incoming.original_title),
 
     year: incoming.year ?? existing.year ?? null,
-    cover_url: incoming.cover_url || existing.cover_url || "",
+    cover_url: pickBetterCover(existing.cover_url, incoming.cover_url),
 
-    description_ru: incoming.description_ru || existing.description_ru || "",
-    description_en: incoming.description_en || existing.description_en || "",
+    description_ru: pickBetterText(existing.description_ru, incoming.description_ru),
+    description_en: pickBetterText(existing.description_en, incoming.description_en),
 
     external_ids: {
       ...(existing.external_ids || {}),
