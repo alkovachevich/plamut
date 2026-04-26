@@ -26,8 +26,27 @@ import {
   UNIVERSE_JOB_STATUS
 } from "../services/universe-build-jobs.js";
 
-import { getSupabaseClient, withRetry } from "../lib/supabase-client.js";
-import { updateCachedLibraryItem } from "../services/library-cache.js";
+import {
+  getSupabaseClient,
+  withRetry
+} from "../lib/supabase-client.js";
+
+import {
+  getCachedLibraryItem,
+  loadUserLibrary,
+  updateCachedLibraryItem
+} from "../services/library-cache.js";
+
+const USER_MEDIA_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at
+`;
 
 function resolveTitle(entity = {}) {
   return (
@@ -55,11 +74,32 @@ function getCover(entity = {}) {
   return cover;
 }
 
+function normalizeKey(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getCachedEntityByKey(userId, key) {
+  if (!userId || !key) return null;
+
+  const cached =
+    getCachedLibraryItem(userId, key, { mode: "full" }) ||
+    getCachedLibraryItem(userId, key, { mode: "list" });
+
+  return cached?.media_entities || null;
+}
+
 async function loadEntity(params = {}) {
-  const key = params.key || "";
+  const key = normalizeKey(params.key || "");
+  const userId = state.user?.id || "";
+
+  const cachedEntity = getCachedEntityByKey(userId, key);
+  if (cachedEntity?.canonical_key) {
+    return cachedEntity;
+  }
+
   const temp = getTemporaryCardItem();
 
-  if (temp?.canonical_key && (!key || temp.canonical_key === key)) {
+  if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
     return temp;
   }
 
@@ -68,7 +108,11 @@ async function loadEntity(params = {}) {
       const fromDb = await withRetry(
         () => getEntityByCanonicalKey(key),
         "Загрузка карточки",
-        { retries: 1 }
+        {
+          retries: 1,
+          timeoutMs: 9000,
+          delayMs: 500
+        }
       );
 
       if (fromDb) {
@@ -90,7 +134,7 @@ async function loadUserMedia(userId, entityId) {
 
   const { data, error } = await supabase
     .from("user_media")
-    .select("*")
+    .select(USER_MEDIA_SELECT)
     .eq("user_id", userId)
     .eq("entity_id", entityId)
     .maybeSingle();
@@ -98,6 +142,27 @@ async function loadUserMedia(userId, entityId) {
   if (error) throw error;
 
   return data || null;
+}
+
+function getCachedUserMedia(userId, entity = {}) {
+  if (!userId || !entity?.canonical_key) return null;
+
+  const cached =
+    getCachedLibraryItem(userId, entity.canonical_key, { mode: "full" }) ||
+    getCachedLibraryItem(userId, entity.canonical_key, { mode: "list" });
+
+  if (!cached?.id) return null;
+
+  return {
+    id: cached.id,
+    user_id: cached.user_id,
+    entity_id: cached.entity_id,
+    category: cached.category,
+    status: cached.status,
+    folder_name: cached.folder_name,
+    created_at: cached.created_at,
+    updated_at: cached.updated_at
+  };
 }
 
 function renderCover(entity = {}) {
@@ -123,13 +188,13 @@ function renderStatusBadge(userMedia) {
 
   const label = STATUS_LABELS[userMedia.status] || userMedia.status;
 
-  return `<span class="card-badge">${escapeHtml(label)}</span>`;
+  return `<span class="card-badge" data-user-status>${escapeHtml(label)}</span>`;
 }
 
 function renderFolderBadge(userMedia) {
   if (!userMedia?.folder_name) return "";
 
-  return `<span class="card-badge folder">${escapeHtml(userMedia.folder_name)}</span>`;
+  return `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`;
 }
 
 function renderRelatedItem(item = {}) {
@@ -327,6 +392,10 @@ function renderStyles() {
         background: var(--surface);
       }
 
+      .card-section[hidden] {
+        display: none;
+      }
+
       .card-section__title {
         font-size: 17px;
         font-weight: 850;
@@ -468,13 +537,14 @@ function getProgressPercent(job = {}) {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 }
 
-function renderCard(root, { entity, userMedia, relatedItems }) {
+function renderCard(root, { entity, userMedia, relatedItems = [] }) {
   const title = resolveTitle(entity);
   const description = resolveDescription(entity);
   const categoryLabel = getCategoryLabel(state.language, entity.category || "");
-  const originalTitle = entity.original_title && entity.original_title !== title
-    ? entity.original_title
-    : "";
+  const originalTitle =
+    entity.original_title && entity.original_title !== title
+      ? entity.original_title
+      : "";
 
   root.innerHTML = `
     ${renderStyles()}
@@ -495,7 +565,7 @@ function renderCard(root, { entity, userMedia, relatedItems }) {
             }
           </div>
 
-          <div class="card-badges">
+          <div class="card-badges" data-card-badges>
             <span class="card-badge">${escapeHtml(categoryLabel)}</span>
             ${entity.year ? `<span class="card-badge">${escapeHtml(String(entity.year))}</span>` : ""}
             ${renderStatusBadge(userMedia)}
@@ -543,6 +613,44 @@ function renderCard(root, { entity, userMedia, relatedItems }) {
   `;
 }
 
+function updateUserMediaUI(root, userMedia) {
+  const addButton = root.querySelector('[data-action="add"]');
+  const badgesRoot = root.querySelector("[data-card-badges]");
+
+  if (addButton && userMedia?.id) {
+    addButton.textContent = "В библиотеке";
+    addButton.disabled = true;
+  }
+
+  if (!badgesRoot || !userMedia?.id) return;
+
+  badgesRoot.querySelector("[data-user-status]")?.remove();
+  badgesRoot.querySelector("[data-user-folder]")?.remove();
+
+  badgesRoot.insertAdjacentHTML("beforeend", renderStatusBadge(userMedia));
+
+  if (userMedia.folder_name) {
+    badgesRoot.insertAdjacentHTML("beforeend", renderFolderBadge(userMedia));
+  }
+}
+
+function renderRelated(root, relatedItems = []) {
+  const section = root.querySelector("[data-related-section]");
+  const grid = root.querySelector("[data-related-grid]");
+
+  if (!section || !grid) return;
+
+  if (!relatedItems.length) {
+    section.hidden = true;
+    grid.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  grid.innerHTML = relatedItems.map(renderRelatedItem).join("");
+  bindRelated(root);
+}
+
 function bindRelated(root) {
   root.querySelectorAll("[data-related]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -576,6 +684,51 @@ function updateProgressUI(root, job) {
   if (statusNode) statusNode.textContent = label;
 }
 
+async function hydrateUserMediaState(root, userId, entity) {
+  if (!userId || !entity?.id) return null;
+
+  const cached = getCachedUserMedia(userId, entity);
+  if (cached?.id) {
+    updateUserMediaUI(root, cached);
+    return cached;
+  }
+
+  try {
+    const loaded = await loadUserMedia(userId, entity.id);
+
+    if (loaded?.id) {
+      updateCachedLibraryItem(userId, {
+        ...loaded,
+        media_entities: entity
+      });
+
+      updateUserMediaUI(root, loaded);
+    }
+
+    return loaded || null;
+  } catch (error) {
+    console.warn("Card user media load skipped:", error);
+    return null;
+  }
+}
+
+async function hydrateRelatedItems(root, userId, entity, userMedia) {
+  if (!userId || !entity?.id || !userMedia?.id) return [];
+
+  try {
+    const relatedItems = await getRelatedItemsForEntity({
+      userId,
+      entityId: entity.id
+    });
+
+    renderRelated(root, relatedItems);
+    return relatedItems;
+  } catch (error) {
+    console.warn("Card related items skipped:", error);
+    return [];
+  }
+}
+
 export async function renderCardPage(root, params = {}) {
   renderLoading(root);
 
@@ -586,30 +739,15 @@ export async function renderCardPage(root, params = {}) {
     return;
   }
 
-  const userId = state.user?.id;
-  let userMedia = null;
-  let relatedItems = [];
+  const userId = state.user?.id || "";
+  let userMedia = getCachedUserMedia(userId, entity);
   let pollingTimer = null;
-
-  try {
-    if (userId && entity.id) {
-      userMedia = await loadUserMedia(userId, entity.id);
-
-      if (userMedia?.id) {
-        relatedItems = await getRelatedItemsForEntity({
-          userId,
-          entityId: entity.id
-        }).catch(() => []);
-      }
-    }
-  } catch (error) {
-    console.warn("Card library state skipped:", error);
-  }
+  let destroyed = false;
 
   renderCard(root, {
     entity,
     userMedia,
-    relatedItems
+    relatedItems: []
   });
 
   const statusNode = root.querySelector("[data-status]");
@@ -617,6 +755,25 @@ export async function renderCardPage(root, params = {}) {
   const buildButton = root.querySelector('[data-action="build"]');
 
   bindRelated(root);
+
+  if (userId) {
+    loadUserLibrary(userId, {
+      category: entity.category || "",
+      mode: "list",
+      allowStale: true,
+      backgroundRefresh: false
+    }).catch(() => []);
+
+    hydrateUserMediaState(root, userId, entity).then((loadedUserMedia) => {
+      if (destroyed) return;
+
+      userMedia = loadedUserMedia || userMedia;
+
+      if (userMedia?.id) {
+        hydrateRelatedItems(root, userId, entity, userMedia);
+      }
+    });
+  }
 
   function stopPolling() {
     if (pollingTimer) {
@@ -633,6 +790,11 @@ export async function renderCardPage(root, params = {}) {
     updateProgressUI(root, job);
 
     pollingTimer = setInterval(async () => {
+      if (destroyed) {
+        stopPolling();
+        return;
+      }
+
       const updated = await pollUniverseBuildJob(job.id);
 
       if (!updated) return;
@@ -657,6 +819,8 @@ export async function renderCardPage(root, params = {}) {
       return;
     }
 
+    if (userMedia?.id) return;
+
     try {
       addButton.disabled = true;
       statusNode.textContent = "Добавляем…";
@@ -673,11 +837,11 @@ export async function renderCardPage(root, params = {}) {
         media_entities: result.entity || entity
       });
 
+      updateUserMediaUI(root, userMedia);
+
       statusNode.textContent = result.alreadyExists
         ? "Уже есть в библиотеке"
         : "Добавлено в библиотеку";
-
-      addButton.textContent = "В библиотеке";
     } catch (error) {
       console.error("Add to library error:", error);
       statusNode.textContent = "Ошибка добавления";
@@ -697,7 +861,7 @@ export async function renderCardPage(root, params = {}) {
 
       let buildEntity = entity;
 
-      if (!buildEntity.id) {
+      if (!buildEntity.id || !userMedia?.id) {
         const added = await addToUserLibrary({
           userId,
           entity
@@ -711,7 +875,7 @@ export async function renderCardPage(root, params = {}) {
           media_entities: buildEntity
         });
 
-        addButton.textContent = "В библиотеке";
+        updateUserMediaUI(root, userMedia);
       }
 
       const { job } = await createUniverseBuildJob({
@@ -733,4 +897,9 @@ export async function renderCardPage(root, params = {}) {
       buildButton.disabled = false;
     }
   });
+
+  return () => {
+    destroyed = true;
+    stopPolling();
+  };
 }
