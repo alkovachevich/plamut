@@ -1,6 +1,11 @@
 import { STATUS_LABELS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
-import { openAuthModal, openSearchModal, state } from "../state.js";
+import {
+  openAuthModal,
+  openSearchModal,
+  state,
+  setTemporaryCardItem
+} from "../state.js";
 import { clampText, escapeHtml, safeArray } from "../utils.js";
 import { getSupabaseClient } from "../lib/supabase-client.js";
 import {
@@ -662,8 +667,14 @@ export async function renderCategoryPage(root, params = {}) {
       card.addEventListener("click", () => {
         const key = card.dataset.key || "";
         const itemCategory = card.dataset.category || category;
+        const userMediaId = Number(card.dataset.userMediaId);
+        const item = findItemById(userMediaId);
 
         if (!key) return;
+
+        if (item?.media_entities) {
+          setTemporaryCardItem(item.media_entities);
+        }
 
         navigate("/card", {
           key,
