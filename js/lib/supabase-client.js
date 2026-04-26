@@ -3,8 +3,6 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 let client = null;
 let sessionPromise = null;
 
-const DEFAULT_TIMEOUT_MS = 45000;
-
 function createClient() {
   if (!window.supabase) {
     throw new Error("Supabase SDK не загружен");
@@ -28,49 +26,6 @@ export function getSupabaseClient() {
   return client;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
-  let timer;
-
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${label}: превышено время ожидания`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timer);
-  });
-}
-
-export async function withRetry(factory, label = "Запрос", options = {}) {
-  const retries = options.retries ?? 1;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const delayMs = options.delayMs ?? 700;
-
-  let lastError;
-
-  for (let i = 0; i <= retries; i++) {
-    try {
-      return await withTimeout(factory(), label, timeoutMs);
-    } catch (err) {
-      lastError = err;
-      if (i < retries) {
-        await sleep(delayMs);
-      }
-    }
-  }
-
-  throw lastError;
-}
-
-//
-// 🔥 ГЛАВНЫЙ ФИКС
-// без timeout → без зависаний auth
-//
 export async function getCurrentSession() {
   if (sessionPromise) return sessionPromise;
 
@@ -82,10 +37,7 @@ export async function getCurrentSession() {
       if (error) throw error;
       return data?.session || null;
     })
-    .catch((error) => {
-      console.warn("getCurrentSession skipped:", error);
-      return null;
-    })
+    .catch(() => null)
     .finally(() => {
       sessionPromise = null;
     });
@@ -100,34 +52,22 @@ export async function getCurrentUser() {
 
 export async function signInWithEmail(email, password) {
   const supabase = getSupabaseClient();
-
-  const { data, error } = await withRetry(
-    () => supabase.auth.signInWithPassword({ email, password }),
-    "Вход"
-  );
-
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
 }
 
 export async function signUpWithEmail(email, password) {
   const supabase = getSupabaseClient();
-
-  const { data, error } = await withRetry(
-    () => supabase.auth.signUp({ email, password }),
-    "Регистрация"
-  );
-
+  const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
   return data;
 }
 
 export async function signOut() {
   const supabase = getSupabaseClient();
-
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
-
   return true;
 }
 
@@ -163,6 +103,30 @@ export async function upsertUserProfile(profile) {
     .upsert(profile, { onConflict: "id" })
     .select()
     .single();
+
+  if (error) throw error;
+
+  return data;
+}
+
+//
+// 🔥 ВОТ ЭТО БЫЛО ПОТЕРЯНО → ВЕРНУЛИ
+//
+export async function updateUserPassword(newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("Пароль минимум 6 символов");
+  }
+
+  const session = await getCurrentSession();
+  if (!session?.user?.id) {
+    throw new Error("Нужно войти в аккаунт");
+  }
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase.auth.updateUser({
+    password: newPassword
+  });
 
   if (error) throw error;
 
