@@ -46,6 +46,8 @@ let initialized = false;
 let authSubscription = null;
 let routeCleanup = null;
 let routeRenderToken = 0;
+let authHydrationPromise = null;
+let userApplyPromiseById = new Map();
 
 let lastHeaderSignature = null;
 let lastSidebarSignature = null;
@@ -234,49 +236,71 @@ async function applyAuthenticatedUser(user) {
     return;
   }
 
-  const fastUser = {
-    id: user.id,
-    email: user.email || null,
-    username: buildUsername(user),
-    display_name: buildDisplayName(user),
-    avatar_url: buildAvatarUrl(user),
-    preferred_theme: normalizeTheme(state.theme),
-    preferred_language: normalizeLanguage(state.language)
-  };
+  const existing = userApplyPromiseById.get(user.id);
+  if (existing) {
+    return existing;
+  }
 
-  setUserIfChanged(fastUser);
-  writeCachedUser(fastUser);
+  const applyPromise = (async () => {
+    const fastUser = {
+      id: user.id,
+      email: user.email || null,
+      username: buildUsername(user),
+      display_name: buildDisplayName(user),
+      avatar_url: buildAvatarUrl(user),
+      preferred_theme: normalizeTheme(state.theme),
+      preferred_language: normalizeLanguage(state.language)
+    };
 
-  const profile = await ensureUserProfile(user);
+    setUserIfChanged(fastUser);
+    writeCachedUser(fastUser);
 
-  const normalizedUser = {
-    id: user.id,
-    email: user.email || null,
-    username: profile?.username || fastUser.username,
-    display_name: profile?.display_name || fastUser.display_name,
-    avatar_url: profile?.avatar_url || fastUser.avatar_url,
-    preferred_theme: normalizeTheme(profile?.preferred_theme || fastUser.preferred_theme),
-    preferred_language: normalizeLanguage(profile?.preferred_language || fastUser.preferred_language)
-  };
+    const profile = await ensureUserProfile(user);
 
-  applyProfilePreferences(normalizedUser);
-  setUserIfChanged(normalizedUser);
-  writeCachedUser(normalizedUser);
+    const normalizedUser = {
+      id: user.id,
+      email: user.email || null,
+      username: profile?.username || fastUser.username,
+      display_name: profile?.display_name || fastUser.display_name,
+      avatar_url: profile?.avatar_url || fastUser.avatar_url,
+      preferred_theme: normalizeTheme(profile?.preferred_theme || fastUser.preferred_theme),
+      preferred_language: normalizeLanguage(profile?.preferred_language || fastUser.preferred_language)
+    };
+
+    applyProfilePreferences(normalizedUser);
+    setUserIfChanged(normalizedUser);
+    writeCachedUser(normalizedUser);
+  })().finally(() => {
+    userApplyPromiseById.delete(user.id);
+  });
+
+  userApplyPromiseById.set(user.id, applyPromise);
+  return applyPromise;
 }
 
 async function hydrateAuthStateSafely() {
-  try {
-    const session = await getCurrentSession();
-
-    if (!session?.user) {
-      return;
-    }
-
-    setCachedSession(session);
-    await applyAuthenticatedUser(session.user);
-  } catch (error) {
-    console.warn("Auth hydration skipped:", error);
+  if (authHydrationPromise) {
+    return authHydrationPromise;
   }
+
+  authHydrationPromise = (async () => {
+    try {
+      const session = await getCurrentSession();
+
+      if (!session?.user) {
+        return;
+      }
+
+      setCachedSession(session);
+      await applyAuthenticatedUser(session.user);
+    } catch (error) {
+      console.warn("Auth hydration skipped:", error);
+    } finally {
+      authHydrationPromise = null;
+    }
+  })();
+
+  return authHydrationPromise;
 }
 
 function bindAuthListenerSafely() {
@@ -302,6 +326,7 @@ function bindAuthListenerSafely() {
 
         if (!session?.user) return;
 
+        await hydrateAuthStateSafely();
         await applyAuthenticatedUser(session.user);
 
         if (
