@@ -129,7 +129,7 @@ function attachCardHandlers(root, items = []) {
           ? "Уже в библиотеке"
           : "Добавлено";
       } catch (error) {
-        console.error("Direct add from search page error:", error);
+        console.warn("Direct add from search page error:", error);
         button.disabled = false;
         button.textContent = "Ошибка";
       }
@@ -178,7 +178,7 @@ async function performSearch(resultsRoot, query, category = "") {
     resultsRoot.innerHTML = flat.map(renderCard).join("");
     attachCardHandlers(resultsRoot, flat);
   } catch (error) {
-    console.error("Search page error:", error);
+    console.warn("Search page error:", error);
 
     if (
       resultsRoot.dataset.requestId !== String(requestId) ||
