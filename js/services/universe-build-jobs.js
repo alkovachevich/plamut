@@ -38,11 +38,22 @@ function normalizeStatus(status = "") {
   return UNIVERSE_JOB_STATUS.QUEUED;
 }
 
-function normalizeJob(row = {}) {
+function unwrapRow(value) {
+  if (!value) return null;
+
+  if (value.job) return unwrapRow(value.job);
+  if (value.data) return unwrapRow(value.data);
+  if (Array.isArray(value)) return value[0] || null;
+
+  return value;
+}
+
+function normalizeJob(value = {}) {
+  const row = unwrapRow(value);
   if (!row) return null;
 
   const current = normalizeNumber(row.progress_current, 0);
-  const total = normalizeNumber(row.progress_total, 0);
+  const total = normalizeNumber(row.progress_total, 9);
   const percent = total > 0
     ? Math.max(0, Math.min(100, Math.round((current / total) * 100)))
     : 0;
@@ -68,28 +79,25 @@ function normalizeJob(row = {}) {
 }
 
 export function getUniverseJobPercent(job = {}) {
-  if (!job) return 0;
-
-  const current = normalizeNumber(job.progress_current, 0);
-  const total = normalizeNumber(job.progress_total, 0);
-
-  if (!total) return 0;
-
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+  return normalizeJob(job)?.progress_percent || 0;
 }
 
 export function isUniverseJobActive(job = {}) {
+  const normalized = normalizeJob(job);
+
   return [
     UNIVERSE_JOB_STATUS.QUEUED,
     UNIVERSE_JOB_STATUS.BUILDING
-  ].includes(job?.status);
+  ].includes(normalized?.status);
 }
 
 export function isUniverseJobFinished(job = {}) {
+  const normalized = normalizeJob(job);
+
   return [
     UNIVERSE_JOB_STATUS.READY,
     UNIVERSE_JOB_STATUS.FAILED
-  ].includes(job?.status);
+  ].includes(normalized?.status);
 }
 
 export async function getLatestUniverseBuildJob({
@@ -100,23 +108,20 @@ export async function getLatestUniverseBuildJob({
   const cleanUserId = cleanText(userId);
   const cleanCanonicalKey = cleanText(canonicalKey);
 
-  if (!cleanUserId && !entityId && !cleanCanonicalKey) return null;
+  if (!cleanUserId || (!entityId && !cleanCanonicalKey)) return null;
 
   const supabase = getSupabaseClient();
 
   let query = supabase
     .from(JOBS_TABLE)
     .select("*")
+    .eq("owner_user_id", cleanUserId)
     .order("created_at", { ascending: false })
     .limit(1);
 
-  if (cleanUserId) {
-    query = query.eq("owner_user_id", cleanUserId);
-  }
-
   if (entityId) {
     query = query.eq("seed_entity_id", entityId);
-  } else if (cleanCanonicalKey) {
+  } else {
     query = query.eq("seed_canonical_key", cleanCanonicalKey);
   }
 
@@ -131,7 +136,7 @@ export async function getLatestUniverseBuildJob({
     return null;
   }
 
-  return normalizeJob(Array.isArray(data) ? data[0] : null);
+  return normalizeJob(data);
 }
 
 export async function createUniverseBuildJob({
@@ -193,7 +198,14 @@ export async function createUniverseBuildJob({
 
   if (error) throw error;
 
-  return normalizeJob(data);
+  const job = normalizeJob(data);
+
+  if (!job?.id) {
+    console.error("createUniverseBuildJob invalid response:", data);
+    throw new Error("Задача построения не была создана");
+  }
+
+  return job;
 }
 
 export async function updateUniverseBuildJob(jobId, patch = {}) {
@@ -301,140 +313,21 @@ export async function pollUniverseBuildJob(jobId) {
   return getUniverseBuildJob(jobId);
 }
 
-export async function getActiveUniverseBuildJobs(userId) {
-  const cleanUserId = cleanText(userId);
-  if (!cleanUserId) return [];
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(JOBS_TABLE)
-      .select("*")
-      .eq("owner_user_id", cleanUserId)
-      .in("status", [
-        UNIVERSE_JOB_STATUS.QUEUED,
-        UNIVERSE_JOB_STATUS.BUILDING
-      ])
-      .order("created_at", { ascending: false }),
-    "Активные задачи построения",
-    DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
-
-  if (error) {
-    console.warn("getActiveUniverseBuildJobs skipped:", error);
-    return [];
-  }
-
-  return Array.isArray(data) ? data.map(normalizeJob).filter(Boolean) : [];
-}
-
-export async function getRecentUniverseBuildJobs(userId, limit = 10) {
-  const cleanUserId = cleanText(userId);
-  if (!cleanUserId) return [];
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(JOBS_TABLE)
-      .select("*")
-      .eq("owner_user_id", cleanUserId)
-      .in("status", [
-        UNIVERSE_JOB_STATUS.READY,
-        UNIVERSE_JOB_STATUS.FAILED
-      ])
-      .order("updated_at", { ascending: false })
-      .limit(limit),
-    "История задач построения",
-    DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
-
-  if (error) {
-    console.warn("getRecentUniverseBuildJobs skipped:", error);
-    return [];
-  }
-
-  return Array.isArray(data) ? data.map(normalizeJob).filter(Boolean) : [];
-}
-
-export function subscribeToUniverseJob(jobId, callback) {
-  if (!jobId || typeof callback !== "function") {
-    return () => {};
-  }
-
-  const supabase = getSupabaseClient();
-
-  const channel = supabase
-    .channel(`universe-job-${jobId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "UPDATE",
-        schema: "public",
-        table: JOBS_TABLE,
-        filter: `id=eq.${jobId}`
-      },
-      (payload) => {
-        callback(normalizeJob(payload.new));
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}
-
-export function subscribeToUserUniverseJobs(userId, callback) {
-  const cleanUserId = cleanText(userId);
-
-  if (!cleanUserId || typeof callback !== "function") {
-    return () => {};
-  }
-
-  const supabase = getSupabaseClient();
-
-  const channel = supabase
-    .channel(`universe-jobs-${cleanUserId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: JOBS_TABLE,
-        filter: `owner_user_id=eq.${cleanUserId}`
-      },
-      (payload) => {
-        callback(normalizeJob(payload.new));
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}
-
 export function renderUniverseJobProgress(job = {}) {
-  if (!job) return "";
+  const normalized = normalizeJob(job);
+  if (!normalized) return "";
 
-  const percent = getUniverseJobPercent(job);
-  const current = normalizeNumber(job.progress_current, 0);
-  const total = normalizeNumber(job.progress_total, 0);
-  const label = job.progress_label || "Построение вселенной";
-
-  if (job.status === UNIVERSE_JOB_STATUS.READY) {
+  if (normalized.status === UNIVERSE_JOB_STATUS.READY) {
     return "Вселенная готова";
   }
 
-  if (job.status === UNIVERSE_JOB_STATUS.FAILED) {
-    return job.error_message || "Ошибка построения";
+  if (normalized.status === UNIVERSE_JOB_STATUS.FAILED) {
+    return normalized.error_message || "Ошибка построения";
   }
 
-  if (total > 0) {
-    return `${label} · ${current} из ${total} · ${percent}%`;
+  if (normalized.progress_total > 0) {
+    return `${normalized.progress_label || "Построение вселенной"} · ${normalized.progress_current} из ${normalized.progress_total} · ${normalized.progress_percent}%`;
   }
 
-  return label;
+  return normalized.progress_label || "Построение вселенной";
 }
