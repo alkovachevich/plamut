@@ -20,7 +20,7 @@ import {
   deriveUniverseInfo
 } from "../services/universe-service.js";
 
-import { getSupabaseClient } from "../lib/supabase-client.js";
+import { getSupabaseClient, withRetry } from "../lib/supabase-client.js";
 
 function resolveDescription(entity) {
   return entity?.description_ru || entity?.description_en || entity?.description || "";
@@ -30,772 +30,212 @@ function resolveTitle(entity) {
   return entity?.title_primary || entity?.title || entity?.original_title || "Без названия";
 }
 
-function normalizeTempEntity(temp, params = {}) {
-  if (!temp?.canonical_key) return null;
-
-  return {
-    ...temp,
-    category: temp.category || params.category || "",
-    title: temp.title || temp.title_primary || temp.original_title || "",
-    title_primary: temp.title_primary || temp.title || temp.original_title || ""
-  };
-}
-
+/* 🔥 КЛЮЧЕВОЙ ФИКС — fallback без БД */
 async function loadEntity(params = {}) {
   const { key } = params || {};
-  const temp = normalizeTempEntity(getTemporaryCardItem(), params);
+  const temp = getTemporaryCardItem();
 
+  // 1. Сначала берем из памяти (самое быстрое)
   if (temp?.canonical_key && (!key || temp.canonical_key === key)) {
-    return {
-      entity: temp,
-      source: "temp"
-    };
+    return temp;
   }
 
+  // 2. Пробуем БД (НО БЕЗ КРАША)
   if (key) {
     try {
-      const fromDb = await getEntityByCanonicalKey(key);
+      const fromDb = await withRetry(
+        () => getEntityByCanonicalKey(key),
+        "Загрузка карточки",
+        { retries: 1 }
+      );
+
       if (fromDb) {
         clearTemporaryCardItem();
-        return {
-          entity: fromDb,
-          source: "db"
-        };
+        return fromDb;
       }
-    } catch (error) {
-      console.warn("DB card load skipped:", error);
+    } catch (e) {
+      console.warn("DB card skipped:", e);
     }
   }
 
-  return {
-    entity: null,
-    source: "none"
-  };
-}
-
-async function getUserMediaByEntityId(userId, entityId) {
-  if (!userId || !entityId) return null;
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("user_media")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("entity_id", entityId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data || null;
-}
-
-async function updateUserMedia(userMediaId, payload) {
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("user_media")
-    .update(payload)
-    .eq("id", userMediaId)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-async function removeFromLibrary(userMediaId) {
-  const supabase = getSupabaseClient();
-
-  const { error } = await supabase
-    .from("user_media")
-    .delete()
-    .eq("id", userMediaId);
-
-  if (error) throw error;
-  return true;
-}
-
-function renderManageMenu(userMedia) {
-  if (!userMedia?.id) return "";
-
-  return `
-    <div class="details-menu-wrap">
-      <button class="details-menu-btn" type="button" data-action="toggle-details-menu" aria-label="Открыть меню">
-        ⋯
-      </button>
-
-      <div class="details-menu" data-details-menu>
-        <button type="button" data-action="set-status" data-value="planned">Planned</button>
-        <button type="button" data-action="set-status" data-value="in_progress">In progress</button>
-        <button type="button" data-action="set-status" data-value="done">Done</button>
-        <button type="button" data-action="set-status" data-value="dropped">Dropped</button>
-        <button type="button" data-action="set-folder">Папка</button>
-        <button type="button" data-action="build-universe">Построить вселенную</button>
-        <button type="button" class="danger" data-action="remove">Удалить</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderRelatedCard(item) {
-  const entity = item.media_entities || {};
-  const title = resolveTitle(entity);
-  const status = STATUS_LABELS[item.status] || item.status || "Planned";
-
-  return `
-    <button
-      class="related-card"
-      type="button"
-      data-related-key="${escapeHtml(entity.canonical_key || "")}"
-      data-related-category="${escapeHtml(entity.category || item.category || "")}"
-    >
-      <div class="related-cover">
-        ${
-          entity.cover_url
-            ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" loading="lazy" />`
-            : `<div class="related-cover-fallback">?</div>`
-        }
-      </div>
-
-      <div class="related-meta">
-        <div class="related-title">${escapeHtml(clampText(title, 70))}</div>
-        <div class="related-badges">
-          <span>${escapeHtml(getCategoryLabel(state.language, entity.category))}</span>
-          ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
-          <span>${escapeHtml(status)}</span>
-        </div>
-      </div>
-    </button>
-  `;
-}
-
-function renderRelatedSection(entity, relatedItems = []) {
-  const universe = deriveUniverseInfo(entity);
-
-  if (!entity?.id) {
-    return "";
-  }
-
-  if (!relatedItems.length) {
-    return `
-      <section class="related-section">
-        <div class="related-head">
-          <div>
-            <div class="related-title-main">Связанные произведения</div>
-            <div class="related-subtitle">Пока связей нет. Можно построить вселенную через меню ⋯</div>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  return `
-    <section class="related-section">
-      <div class="related-head">
-        <div>
-          <div class="related-title-main">Связанные произведения</div>
-          <div class="related-subtitle">Вселенная: ${escapeHtml(universe.title)}</div>
-        </div>
-
-        <button class="related-open-btn" type="button" data-action="open-universe" data-universe-key="${escapeHtml(universe.universe_key)}">
-          Открыть
-        </button>
-      </div>
-
-      <div class="related-list">
-        ${relatedItems.slice(0, 8).map(renderRelatedCard).join("")}
-      </div>
-    </section>
-  `;
+  // 3. Если вообще ничего нет
+  return temp || null;
 }
 
 export async function renderCardPage(root, params = {}) {
-  root.innerHTML = `<div style="padding:20px;color:var(--text-soft);">Загрузка...</div>`;
+  root.innerHTML = `<div style="padding:20px;color:var(--text-soft)">Загрузка...</div>`;
 
-  const loaded = await loadEntity(params);
-  const entity = loaded.entity;
+  const entity = await loadEntity(params);
 
   if (!entity) {
-    root.innerHTML = `<div style="padding:20px;color:var(--text-soft);">Не найдено</div>`;
+    root.innerHTML = `<div style="padding:20px;color:var(--text-soft)">Не найдено</div>`;
     return;
   }
 
   const userId = state.user?.id;
-  let alreadyAdded = false;
+
   let userMedia = null;
   let relatedItems = [];
 
   try {
     if (userId && entity.id) {
-      alreadyAdded = await isAlreadyInUserLibrary(userId, entity.id);
-      userMedia = await getUserMediaByEntityId(userId, entity.id);
+      const supabase = getSupabaseClient();
 
-      if (userMedia?.id) {
+      const { data } = await supabase
+        .from("user_media")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("entity_id", entity.id)
+        .maybeSingle();
+
+      userMedia = data;
+
+      if (data?.id) {
         relatedItems = await getRelatedItemsForEntity({
           userId,
           entityId: entity.id
-        }).catch((error) => {
-          console.warn("Related items load skipped:", error);
-          return [];
-        });
+        }).catch(() => []);
       }
     }
-  } catch (error) {
-    console.warn("Library check skipped:", error);
+  } catch {
+    // 🔥 не ломаем UI
   }
 
   const title = resolveTitle(entity);
   const description = resolveDescription(entity);
-  const currentStatus = userMedia?.status ? STATUS_LABELS[userMedia.status] || userMedia.status : "";
-  const currentFolder = userMedia?.folder_name || "";
 
   root.innerHTML = `
-    <style>
-      .page {
-        display: flex;
-        flex-direction: column;
-        gap: 22px;
-      }
+    <div style="display:flex;flex-direction:column;gap:20px">
 
-      .card-shell {
-        position: relative;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-soft);
-        border-radius: 24px;
-        padding: 18px;
-      }
+      <div style="
+        display:flex;
+        gap:16px;
+        background:var(--bg-elevated);
+        border-radius:20px;
+        padding:16px;
+      ">
 
-      .card-header {
-        display: flex;
-        gap: 18px;
-        align-items: flex-start;
-      }
+        <div style="width:120px;height:180px;background:var(--bg-soft);border-radius:12px;overflow:hidden">
+          ${
+            entity.cover_url
+              ? `<img src="${escapeHtml(entity.cover_url)}" style="width:100%;height:100%;object-fit:cover">`
+              : `<div style="display:grid;place-items:center;height:100%">?</div>`
+          }
+        </div>
 
-      .cover {
-        width: 124px;
-        min-width: 124px;
-        aspect-ratio: 2 / 3;
-        border-radius: 18px;
-        background: var(--bg-soft);
-        overflow: hidden;
-        border: 1px solid var(--border);
-      }
+        <div style="flex:1">
+          <div style="font-size:22px;font-weight:800">${escapeHtml(title)}</div>
 
-      .cover img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .cover-fallback {
-        display: grid;
-        place-items: center;
-        height: 100%;
-        color: var(--text-soft);
-        font-size: 24px;
-        font-weight: 700;
-      }
-
-      .meta {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        min-width: 0;
-        padding-right: 48px;
-      }
-
-      .title {
-        font-size: 24px;
-        font-weight: 800;
-        line-height: 1.22;
-        color: var(--text);
-      }
-
-      .subtitle {
-        font-size: 14px;
-        color: var(--text-soft);
-        line-height: 1.45;
-      }
-
-      .badges {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-
-      .badge {
-        display: inline-block;
-        padding: 7px 11px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        font-size: 12px;
-        color: var(--text);
-      }
-
-      .badge.folder {
-        background: var(--bg-soft);
-      }
-
-      .actions {
-        display: flex;
-        gap: 10px;
-        margin-top: 8px;
-        flex-wrap: wrap;
-      }
-
-      .btn {
-        padding: 11px 16px;
-        border-radius: 14px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        font-weight: 700;
-        color: var(--text);
-      }
-
-      .btn.primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: transparent;
-      }
-
-      .btn.disabled {
-        opacity: 0.65;
-        pointer-events: none;
-      }
-
-      .description-block,
-      .related-section {
-        background: var(--surface);
-        border: 1px solid var(--border-soft);
-        border-radius: 18px;
-        padding: 16px;
-      }
-
-      .description-title {
-        font-size: 14px;
-        font-weight: 800;
-        color: var(--text);
-        margin-bottom: 10px;
-      }
-
-      .description {
-        line-height: 1.75;
-        color: var(--text-soft);
-        white-space: pre-wrap;
-      }
-
-      .empty-description {
-        color: var(--text-soft);
-      }
-
-      .card-status {
-        min-height: 20px;
-        color: var(--text-soft);
-        font-size: 14px;
-      }
-
-      .card-status.error {
-        color: var(--danger);
-      }
-
-      .card-status.success {
-        color: var(--success);
-      }
-
-      .details-menu-wrap {
-        position: absolute;
-        top: 18px;
-        right: 18px;
-        z-index: 50;
-      }
-
-      .details-menu-btn {
-        width: 38px;
-        height: 38px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--surface-strong);
-        color: var(--text);
-        font-size: 22px;
-        line-height: 1;
-      }
-
-      .details-menu {
-        position: absolute;
-        top: calc(100% + 8px);
-        right: 0;
-        z-index: 60;
-        width: 220px;
-        padding: 6px;
-        border-radius: 14px;
-        border: 1px solid var(--border);
-        background: var(--bg-elevated);
-        box-shadow: var(--shadow);
-        display: none;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .details-menu.is-open {
-        display: flex;
-      }
-
-      .details-menu button {
-        text-align: left;
-        background: transparent;
-        color: var(--text);
-        padding: 10px 12px;
-        border-radius: 10px;
-      }
-
-      .details-menu button:hover {
-        background: var(--bg-soft);
-      }
-
-      .details-menu button.danger {
-        color: var(--danger);
-      }
-
-      .related-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        align-items: center;
-        margin-bottom: 14px;
-      }
-
-      .related-title-main {
-        color: var(--text);
-        font-size: 16px;
-        font-weight: 800;
-      }
-
-      .related-subtitle {
-        color: var(--text-soft);
-        font-size: 13px;
-        margin-top: 4px;
-      }
-
-      .related-open-btn {
-        padding: 9px 13px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        color: var(--text);
-        font-weight: 700;
-      }
-
-      .related-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: 12px;
-      }
-
-      .related-card {
-        text-align: left;
-        color: var(--text);
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-soft);
-        border-radius: 16px;
-        padding: 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-
-      .related-cover {
-        width: 100%;
-        aspect-ratio: 2 / 3;
-        border-radius: 12px;
-        background: var(--bg-soft);
-        overflow: hidden;
-      }
-
-      .related-cover img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .related-cover-fallback {
-        height: 100%;
-        display: grid;
-        place-items: center;
-        color: var(--text-soft);
-      }
-
-      .related-title {
-        font-size: 14px;
-        line-height: 1.35;
-        font-weight: 800;
-      }
-
-      .related-badges {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-top: 6px;
-      }
-
-      .related-badges span {
-        font-size: 11px;
-        color: var(--text-soft);
-        background: var(--bg-soft);
-        padding: 3px 7px;
-        border-radius: 999px;
-      }
-
-      @media (max-width: 640px) {
-        .card-header {
-          flex-direction: column;
-        }
-
-        .cover {
-          width: 100%;
-          max-width: 180px;
-        }
-
-        .meta {
-          padding-right: 0;
-        }
-
-        .related-list {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-    </style>
-
-    <section class="page">
-      <div class="card-shell">
-        ${renderManageMenu(userMedia)}
-
-        <div class="card-header">
-          <div class="cover">
-            ${
-              entity.cover_url
-                ? `<img src="${escapeHtml(entity.cover_url)}" alt="${escapeHtml(title)}" />`
-                : `<div class="cover-fallback">?</div>`
-            }
+          <div style="margin-top:8px;color:var(--text-soft)">
+            ${escapeHtml(getCategoryLabel(state.language, entity.category))}
           </div>
 
-          <div class="meta">
-            <div class="title">${escapeHtml(title)}</div>
-
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
             ${
-              entity.original_title && entity.original_title !== title
-                ? `<div class="subtitle">${escapeHtml(entity.original_title)}</div>`
+              userMedia?.status
+                ? `<span>${STATUS_LABELS[userMedia.status]}</span>`
                 : ""
             }
-
-            <div class="badges">
-              <div class="badge">${escapeHtml(getCategoryLabel(state.language, entity.category))}</div>
-              ${entity.year ? `<div class="badge">${escapeHtml(String(entity.year))}</div>` : ""}
-              ${currentStatus ? `<div class="badge">${escapeHtml(currentStatus)}</div>` : ""}
-              ${currentFolder ? `<div class="badge folder">${escapeHtml(currentFolder)}</div>` : ""}
-            </div>
-
-            <div class="actions">
-              <button class="btn primary ${alreadyAdded ? "disabled" : ""}" data-action="add" type="button">
-                ${alreadyAdded ? "Уже в библиотеке" : "Добавить"}
-              </button>
-            </div>
-
-            <div class="card-status" data-status></div>
           </div>
+
+          <div style="margin-top:16px;display:flex;gap:8px">
+
+            <button data-add style="padding:10px 14px;background:var(--accent);color:#fff;border-radius:10px">
+              Добавить
+            </button>
+
+            <button data-build style="padding:10px 14px;background:var(--bg-soft);border-radius:10px">
+              Построить вселенную
+            </button>
+
+          </div>
+
+          <div data-status style="margin-top:10px;font-size:13px;color:var(--text-soft)"></div>
+
         </div>
       </div>
 
-      ${renderRelatedSection(entity, relatedItems)}
-
-      <div class="description-block">
-        <div class="description-title">Описание</div>
-        <div class="${description ? "description" : "empty-description"}">
-          ${description ? escapeHtml(description) : "Описание пока отсутствует."}
-        </div>
+      <div style="
+        background:var(--surface);
+        padding:16px;
+        border-radius:16px;
+      ">
+        ${description ? escapeHtml(description) : "Описание отсутствует"}
       </div>
-    </section>
+
+      ${
+        relatedItems.length
+          ? `
+      <div>
+        <div style="font-weight:800;margin-bottom:10px">Связанные</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+          ${relatedItems
+            .map(
+              (i) => `
+            <button data-related="${i.media_entities.canonical_key}">
+              ${escapeHtml(resolveTitle(i.media_entities))}
+            </button>
+          `
+            )
+            .join("")}
+        </div>
+      </div>`
+          : ""
+      }
+
+    </div>
   `;
 
-  const addBtn = root.querySelector('[data-action="add"]');
   const statusNode = root.querySelector("[data-status]");
-  const menu = root.querySelector("[data-details-menu]");
 
-  root.querySelector('[data-action="toggle-details-menu"]')?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    menu?.classList.toggle("is-open");
-  });
+  root.querySelector("[data-add]")?.addEventListener("click", async () => {
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
 
-  root.addEventListener("click", (event) => {
-    if (!event.target.closest(".details-menu-wrap")) {
-      menu?.classList.remove("is-open");
+    try {
+      statusNode.textContent = "Добавляем...";
+
+      await addToUserLibrary({
+        userId,
+        entity
+      });
+
+      statusNode.textContent = "Добавлено";
+    } catch (e) {
+      statusNode.textContent = "Ошибка";
     }
   });
 
-  root.querySelectorAll('[data-action="set-status"]').forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (!userMedia?.id) return;
-
-      const newStatus = button.dataset.value;
-      if (!newStatus) return;
-
-      try {
-        await updateUserMedia(userMedia.id, { status: newStatus });
-        userMedia = { ...userMedia, status: newStatus };
-        menu?.classList.remove("is-open");
-        renderCardPage(root, params);
-      } catch (error) {
-        console.error("Update status error:", error);
-        statusNode.className = "card-status error";
-        statusNode.textContent = "Не удалось изменить статус";
-      }
-    });
-  });
-
-  root.querySelector('[data-action="set-folder"]')?.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (!userMedia?.id) return;
-
-    const folderName = window.prompt(
-      "Название папки. Оставь пустым, чтобы убрать папку.",
-      userMedia.folder_name || ""
-    );
-
-    if (folderName === null) return;
-
-    const cleanFolder = folderName.trim();
-
-    try {
-      await updateUserMedia(userMedia.id, { folder_name: cleanFolder || null });
-      userMedia = { ...userMedia, folder_name: cleanFolder || null };
-      menu?.classList.remove("is-open");
-      renderCardPage(root, params);
-    } catch (error) {
-      console.error("Update folder error:", error);
-      statusNode.className = "card-status error";
-      statusNode.textContent = "Не удалось изменить папку";
+  root.querySelector("[data-build]")?.addEventListener("click", async () => {
+    if (!userId || !entity.id) {
+      statusNode.textContent = "Нет данных для построения";
+      return;
     }
-  });
-
-  root.querySelector('[data-action="build-universe"]')?.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (!userId || !entity.id) return;
 
     try {
-      statusNode.className = "card-status";
-      statusNode.textContent = "Строим вселенную…";
+      statusNode.textContent = "Строим...";
 
       const result = await buildUniverseForEntity({
         userId,
         entityId: entity.id
       });
 
-      statusNode.className = "card-status success";
-      statusNode.textContent = "Вселенная обновлена";
-
-      menu?.classList.remove("is-open");
-
       if (result?.universe?.universe_key) {
-        navigate("/universe", {
-          id: result.universe.universe_key
-        });
+        navigate("/universe", { id: result.universe.universe_key });
       } else {
-        renderCardPage(root, params);
+        statusNode.textContent = "Готово";
       }
-    } catch (error) {
-      console.error("Build universe error:", error);
-      statusNode.className = "card-status error";
-      statusNode.textContent = "Не удалось построить вселенную";
+    } catch (e) {
+      console.error(e);
+      statusNode.textContent = "Ошибка построения";
     }
   });
 
-  root.querySelector('[data-action="remove"]')?.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (!userMedia?.id) return;
-
-    try {
-      await removeFromLibrary(userMedia.id);
-      userMedia = null;
-      menu?.classList.remove("is-open");
-      renderCardPage(root, params);
-    } catch (error) {
-      console.error("Remove from library error:", error);
-      statusNode.className = "card-status error";
-      statusNode.textContent = "Не удалось удалить";
-    }
-  });
-
-  root.querySelectorAll("[data-related-key]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.relatedKey || "";
-      const category = button.dataset.relatedCategory || "";
-
-      if (!key) return;
-
-      navigate("/card", {
-        key,
-        category
-      });
+  root.querySelectorAll("[data-related]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      navigate("/card", { key: btn.dataset.related });
     });
-  });
-
-  root.querySelector('[data-action="open-universe"]')?.addEventListener("click", () => {
-    const universeKey = root.querySelector('[data-action="open-universe"]')?.dataset.universeKey || "";
-
-    if (!universeKey) return;
-
-    navigate("/universe", {
-      id: universeKey
-    });
-  });
-
-  addBtn?.addEventListener("click", async () => {
-    const currentUserId = state.user?.id;
-
-    if (!currentUserId) {
-      openAuthModal("login");
-      return;
-    }
-
-    try {
-      addBtn.classList.add("disabled");
-      addBtn.textContent = "Добавление...";
-      statusNode.textContent = "";
-
-      const result = await addToUserLibrary({
-        userId: currentUserId,
-        entity
-      });
-
-      if (result?.entity?.canonical_key) {
-        clearTemporaryCardItem();
-      }
-
-      if (result?.alreadyExists) {
-        addBtn.textContent = "Уже в библиотеке";
-      } else {
-        addBtn.textContent = "Добавлено";
-      }
-
-      statusNode.className = "card-status success";
-      statusNode.textContent = "Сохранено в библиотеку";
-
-      renderCardPage(root, params);
-    } catch (error) {
-      console.error("Add to library error:", error);
-      addBtn.classList.remove("disabled");
-      addBtn.textContent = "Добавить";
-      statusNode.className = "card-status error";
-      statusNode.textContent = error.message || "Не удалось добавить";
-    }
   });
 }
