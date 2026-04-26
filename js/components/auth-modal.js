@@ -1,15 +1,11 @@
 import {
   state,
   closeAuthModal,
-  setAuthMode,
-  setUser
+  setAuthMode
 } from "../state.js";
-import { navigate } from "../router.js";
 import {
   signInWithEmail,
-  signUpWithEmail,
-  fetchUserProfile,
-  upsertUserProfile
+  signUpWithEmail
 } from "../lib/supabase-client.js";
 
 function escapeHtml(value = "") {
@@ -41,64 +37,6 @@ function getSwitchLabel(mode) {
   return mode === "login"
     ? "Нет аккаунта? Зарегистрироваться"
     : "Уже есть аккаунт? Войти";
-}
-
-function buildUsername(user) {
-  const source = user?.email?.split("@")[0] || "user";
-
-  return (
-    String(source)
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 32) || "user"
-  );
-}
-
-function buildDisplayName(user) {
-  return user?.email?.split("@")[0] || "User";
-}
-
-async function syncProfileInBackground(user) {
-  if (!user?.id) return;
-
-  try {
-    const existing = await fetchUserProfile(user.id).catch(() => null);
-
-    const payload = {
-      id: user.id,
-      username: existing?.username || buildUsername(user),
-      display_name: existing?.display_name || buildDisplayName(user),
-      avatar_url: existing?.avatar_url || null
-    };
-
-    const profile = await upsertUserProfile(payload);
-
-    setUser({
-      id: user.id,
-      email: user.email || null,
-      username: profile?.username || payload.username,
-      display_name: profile?.display_name || payload.display_name,
-      avatar_url: profile?.avatar_url || null
-    });
-  } catch (error) {
-    console.error("Profile sync error:", error);
-  }
-}
-
-function applyAuthUserImmediately(user) {
-  if (!user?.id) return;
-
-  setUser({
-    id: user.id,
-    email: user.email || null,
-    username: buildUsername(user),
-    display_name: buildDisplayName(user),
-    avatar_url: null
-  });
-
-  syncProfileInBackground(user);
 }
 
 export function renderAuthModal(root) {
@@ -169,6 +107,7 @@ export function renderAuthModal(root) {
 
       .auth-button:disabled {
         opacity: 0.7;
+        cursor: default;
       }
 
       .auth-switch {
@@ -257,7 +196,7 @@ export function renderAuthModal(root) {
 
     try {
       submitButton.disabled = true;
-      submitButton.textContent = mode === "login" ? "Входим..." : "Создаём...";
+      submitButton.textContent = mode === "login" ? "Входим…" : "Создаём…";
 
       const result =
         mode === "login"
@@ -268,7 +207,9 @@ export function renderAuthModal(root) {
 
       if (!user?.id) {
         if (mode === "register") {
-          messageBox.innerHTML = renderNote("Аккаунт создан. Проверь email, если включено подтверждение почты.");
+          messageBox.innerHTML = renderNote(
+            "Аккаунт создан. Проверь email, если включено подтверждение почты."
+          );
           submitButton.disabled = false;
           submitButton.textContent = getSubmitLabel(mode);
           return;
@@ -277,9 +218,7 @@ export function renderAuthModal(root) {
         throw new Error("Не удалось войти.");
       }
 
-      applyAuthUserImmediately(user);
       closeAuthModal();
-      navigate("/");
     } catch (error) {
       console.error("Auth submit error:", error);
       messageBox.innerHTML = renderError(error.message || "Ошибка авторизации");
