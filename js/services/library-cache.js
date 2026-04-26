@@ -5,7 +5,7 @@ import {
 } from "../lib/supabase-client.js";
 import { safeArray } from "../utils.js";
 
-const USER_MEDIA_SELECT = `
+const USER_MEDIA_LIST_SELECT = `
   id,
   user_id,
   entity_id,
@@ -24,9 +24,34 @@ const USER_MEDIA_SELECT = `
     original_title,
     year,
     cover_url,
+    universe_key
+  )
+`;
+
+const USER_MEDIA_FULL_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at,
+  media_entities (
+    id,
+    canonical_key,
+    category,
+    primary_source,
+    title_primary,
+    title_ru,
+    title_en,
+    original_title,
+    year,
+    cover_url,
     description_ru,
     description_en,
     external_ids,
+    meta,
     universe_key,
     relations_built_at,
     relations_status
@@ -49,10 +74,11 @@ function cleanText(value = "") {
   return String(value || "").trim();
 }
 
-function buildCacheKey(userId, category = "") {
+function buildCacheKey(userId, category = "", mode = "list") {
   const cleanUserId = cleanText(userId);
   const cleanCategory = cleanText(category) || "all";
-  return `${cleanUserId}:${cleanCategory}`;
+  const cleanMode = cleanText(mode) || "list";
+  return `${cleanUserId}:${cleanCategory}:${cleanMode}`;
 }
 
 function getItemEntity(item = {}) {
@@ -67,11 +93,7 @@ function getStableItemKey(item = {}) {
     cleanText(item.canonical_key) ||
     [
       cleanText(entity.category || item.category),
-      cleanText(entity.external_ids?.wikidata),
-      cleanText(entity.external_ids?.tmdb),
-      cleanText(entity.external_ids?.imdb),
-      cleanText(entity.external_ids?.openlibrary_work),
-      cleanText(entity.external_ids?.anilist),
+      cleanText(entity.id || item.entity_id),
       cleanText(entity.title_primary || entity.title_ru || entity.title_en || entity.original_title),
       cleanText(entity.year)
     ]
@@ -164,6 +186,10 @@ async function hasValidSessionForUser(userId) {
   return Boolean(session?.user?.id && session.user.id === userId);
 }
 
+function getSelectByMode(mode = "list") {
+  return mode === "full" ? USER_MEDIA_FULL_SELECT : USER_MEDIA_LIST_SELECT;
+}
+
 export function clearLibraryCache(userId = null) {
   if (!userId) {
     cache.byKey.clear();
@@ -183,7 +209,8 @@ export function clearLibraryCache(userId = null) {
 }
 
 export function getCachedLibrary(userId, options = {}) {
-  const cacheKey = buildCacheKey(userId, options.category);
+  const mode = cleanText(options.mode) || "list";
+  const cacheKey = buildCacheKey(userId, options.category, mode);
   const entry = readCache(cacheKey);
   return entry?.items || [];
 }
@@ -192,10 +219,14 @@ export function getCachedLibraryItem(userId, canonicalKey, options = {}) {
   const key = cleanText(canonicalKey);
   if (!key) return null;
 
-  return getCachedLibrary(userId, options).find((item) => {
-    const entity = item.media_entities || {};
-    return entity.canonical_key === key;
-  }) || null;
+  const mode = cleanText(options.mode) || "list";
+
+  return (
+    getCachedLibrary(userId, { ...options, mode }).find((item) => {
+      const entity = item.media_entities || {};
+      return entity.canonical_key === key;
+    }) || null
+  );
 }
 
 export async function fetchUserLibraryFromDb(userId, options = {}) {
@@ -203,6 +234,7 @@ export async function fetchUserLibraryFromDb(userId, options = {}) {
   if (!cleanUserId) return [];
 
   const category = cleanText(options.category);
+  const mode = cleanText(options.mode) || "list";
 
   const sessionOk = await hasValidSessionForUser(cleanUserId);
   if (!sessionOk) return [];
@@ -211,7 +243,7 @@ export async function fetchUserLibraryFromDb(userId, options = {}) {
 
   let query = supabase
     .from("user_media")
-    .select(USER_MEDIA_SELECT)
+    .select(getSelectByMode(mode))
     .eq("user_id", cleanUserId)
     .order("created_at", { ascending: false });
 
@@ -237,18 +269,20 @@ export async function loadUserLibrary(userId, options = {}) {
   if (!cleanUserId) return [];
 
   const category = cleanText(options.category);
+  const mode = cleanText(options.mode) || "list";
   const force = Boolean(options.force);
-  const backgroundRefresh = options.backgroundRefresh !== false;
-  const cacheKey = buildCacheKey(cleanUserId, category);
+  const allowStale = options.allowStale !== false;
+  const backgroundRefresh = Boolean(options.backgroundRefresh);
+  const cacheKey = buildCacheKey(cleanUserId, category, mode);
   const cached = readCache(cacheKey);
 
   if (!force && cached?.items?.length && !cached.expired) {
     return cached.items;
   }
 
-  if (!force && cached?.items?.length) {
+  if (!force && allowStale && cached?.items?.length) {
     if (backgroundRefresh) {
-      refreshUserLibrary(cleanUserId, { category }).catch((error) => {
+      refreshUserLibrary(cleanUserId, { category, mode }).catch((error) => {
         console.warn("Library background refresh skipped:", error);
       });
     }
@@ -257,10 +291,10 @@ export async function loadUserLibrary(userId, options = {}) {
   }
 
   try {
-    return await refreshUserLibrary(cleanUserId, { category });
+    return await refreshUserLibrary(cleanUserId, { category, mode });
   } catch (error) {
     console.warn("Library initial load skipped:", error);
-    return [];
+    return cached?.items || [];
   }
 }
 
@@ -269,13 +303,14 @@ export async function refreshUserLibrary(userId, options = {}) {
   if (!cleanUserId) return [];
 
   const category = cleanText(options.category);
-  const cacheKey = buildCacheKey(cleanUserId, category);
+  const mode = cleanText(options.mode) || "list";
+  const cacheKey = buildCacheKey(cleanUserId, category, mode);
 
   if (cache.pending.has(cacheKey)) {
     return cache.pending.get(cacheKey);
   }
 
-  const promise = fetchUserLibraryFromDb(cleanUserId, { category })
+  const promise = fetchUserLibraryFromDb(cleanUserId, { category, mode })
     .then((items) => writeCache(cacheKey, items))
     .catch((error) => {
       console.warn("Library refresh failed:", error);
@@ -295,10 +330,19 @@ export function updateCachedLibraryItem(userId, updatedItem, options = {}) {
   if (!cleanUserId || !updatedItem) return [];
 
   const category = cleanText(options.category || updatedItem.category);
-  const cacheKeys = [
-    buildCacheKey(cleanUserId, ""),
-    category ? buildCacheKey(cleanUserId, category) : ""
-  ].filter(Boolean);
+  const updatedKey = getStableItemKey(updatedItem);
+
+  const cacheKeys = Array.from(cache.byKey.keys()).filter((key) => {
+    if (!key.startsWith(`${cleanUserId}:`)) return false;
+    if (!category) return true;
+
+    return (
+      key === buildCacheKey(cleanUserId, "", "list") ||
+      key === buildCacheKey(cleanUserId, "", "full") ||
+      key === buildCacheKey(cleanUserId, category, "list") ||
+      key === buildCacheKey(cleanUserId, category, "full")
+    );
+  });
 
   let result = [];
 
@@ -306,7 +350,6 @@ export function updateCachedLibraryItem(userId, updatedItem, options = {}) {
     const entry = readCache(cacheKey);
     const items = entry?.items || [];
 
-    const updatedKey = getStableItemKey(updatedItem);
     const nextItems = dedupeLibraryItems([
       updatedItem,
       ...items.filter((item) => getStableItemKey(item) !== updatedKey)
@@ -330,10 +373,18 @@ export function removeCachedLibraryItem(userId, userMediaId, options = {}) {
   if (!cleanUserId || !cleanId) return [];
 
   const category = cleanText(options.category);
-  const cacheKeys = [
-    buildCacheKey(cleanUserId, ""),
-    category ? buildCacheKey(cleanUserId, category) : ""
-  ].filter(Boolean);
+
+  const cacheKeys = Array.from(cache.byKey.keys()).filter((key) => {
+    if (!key.startsWith(`${cleanUserId}:`)) return false;
+    if (!category) return true;
+
+    return (
+      key === buildCacheKey(cleanUserId, "", "list") ||
+      key === buildCacheKey(cleanUserId, "", "full") ||
+      key === buildCacheKey(cleanUserId, category, "list") ||
+      key === buildCacheKey(cleanUserId, category, "full")
+    );
+  });
 
   let result = [];
 
