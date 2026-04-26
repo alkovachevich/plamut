@@ -1,9 +1,10 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
 let client = null;
+let sessionPromise = null;
 
 const DEFAULT_TIMEOUT_MS = 45000;
-const AUTH_TIMEOUT_MS = 60000;
+const AUTH_TIMEOUT_MS = 20000;
 
 function createClient() {
   if (!window.supabase) {
@@ -14,8 +15,9 @@ function createClient() {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      detectSessionInUrl: false,
       storage: window.localStorage,
+      storageKey: "plamut-auth-token",
       flowType: "pkce"
     },
     global: {
@@ -75,28 +77,32 @@ export async function withRetry(factory, label = "Запрос", options = {}) {
 }
 
 export async function getCurrentSession() {
+  if (sessionPromise) return sessionPromise;
+
   const supabase = getSupabaseClient();
 
-  try {
-    const { data, error } = await withRetry(
-      () => supabase.auth.getSession(),
-      "Получение session",
-      {
-        retries: 2,
-        timeoutMs: AUTH_TIMEOUT_MS,
-        delayMs: 700
-      }
-    );
-
-    if (error) {
-      throw error;
+  sessionPromise = withRetry(
+    () => supabase.auth.getSession(),
+    "Получение session",
+    {
+      retries: 0,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
     }
+  )
+    .then(({ data, error }) => {
+      if (error) throw error;
+      return data?.session || null;
+    })
+    .catch((error) => {
+      console.warn("getCurrentSession skipped:", error);
+      return null;
+    })
+    .finally(() => {
+      sessionPromise = null;
+    });
 
-    return data?.session || null;
-  } catch (error) {
-    console.warn("getCurrentSession skipped:", error);
-    return null;
-  }
+  return sessionPromise;
 }
 
 export async function getCurrentUser() {
@@ -106,15 +112,13 @@ export async function getCurrentUser() {
     () => supabase.auth.getUser(),
     "Получение пользователя",
     {
-      retries: 2,
+      retries: 1,
       timeoutMs: AUTH_TIMEOUT_MS,
       delayMs: 700
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data?.user || null;
 }
@@ -132,9 +136,7 @@ export async function signInWithEmail(email, password) {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data;
 }
@@ -152,9 +154,7 @@ export async function signUpWithEmail(email, password) {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data;
 }
@@ -172,9 +172,7 @@ export async function signOut() {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return true;
 }
@@ -199,9 +197,7 @@ export async function fetchUserProfile(userId) {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data || null;
 }
@@ -252,9 +248,7 @@ export async function upsertUserProfile(profile) {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data;
 }
@@ -285,9 +279,7 @@ export async function updateUserPassword(newPassword) {
     }
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   return data;
 }
@@ -301,13 +293,8 @@ function sanitizeFilename(filename = "avatar") {
 }
 
 export async function uploadAvatarImage(userId, file) {
-  if (!userId) {
-    throw new Error("Не найден пользователь");
-  }
-
-  if (!file) {
-    throw new Error("Файл не выбран");
-  }
+  if (!userId) throw new Error("Не найден пользователь");
+  if (!file) throw new Error("Файл не выбран");
 
   if (!String(file.type || "").startsWith("image/")) {
     throw new Error("Нужно выбрать изображение");
@@ -334,9 +321,7 @@ export async function uploadAvatarImage(userId, file) {
     }
   );
 
-  if (uploadError) {
-    throw uploadError;
-  }
+  if (uploadError) throw uploadError;
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);
   const publicUrl = data?.publicUrl || "";
