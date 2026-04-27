@@ -10,7 +10,7 @@ import {
   openAuthModal,
   setTemporaryCardItem
 } from "../state.js";
-import { debounce, escapeHtml, clampText } from "../utils.js";
+import { debounce, escapeHtml, clampText, safeArray } from "../utils.js";
 
 let activeSearchPageRequestId = 0;
 
@@ -120,6 +120,54 @@ function renderCard(item) {
   `;
 }
 
+function groupBooksBySeries(items = []) {
+  const grouped = new Map();
+  const singles = [];
+
+  safeArray(items).forEach((item) => {
+    const seriesName = getBookSeriesName(item);
+    if (!seriesName) {
+      singles.push(item);
+      return;
+    }
+    if (!grouped.has(seriesName)) grouped.set(seriesName, []);
+    grouped.get(seriesName).push(item);
+  });
+
+  return {
+    series: Array.from(grouped.entries()).map(([seriesName, books]) => ({ seriesName, books })),
+    singles
+  };
+}
+
+function renderBooksGroup(items = []) {
+  const { series, singles } = groupBooksBySeries(items);
+
+  return `
+    ${series.map((entry) => `
+      <section class="books-series-block">
+        <div class="books-series-block__top">
+          <div class="books-series-block__title">${escapeHtml(entry.seriesName)}</div>
+          <div class="books-series-block__actions">
+            <span class="badge">${escapeHtml(String(entry.books.length))}</span>
+            <button
+              class="result-add-btn is-series"
+              type="button"
+              data-add-series="${escapeHtml(entry.seriesName)}"
+            >
+              Добавить серию
+            </button>
+          </div>
+        </div>
+        <div class="books-series-block__list">
+          ${entry.books.map(renderCard).join("")}
+        </div>
+      </section>
+    `).join("")}
+    ${singles.map(renderCard).join("")}
+  `;
+}
+
 function renderEmpty(message) {
   return `<div class="empty">${escapeHtml(message)}</div>`;
 }
@@ -153,7 +201,7 @@ function renderGroupedResults(grouped = {}, category = "") {
         </div>
 
         <div class="results-grid">
-          ${grouped[key].map(renderCard).join("")}
+          ${key === "books" ? renderBooksGroup(grouped[key]) : grouped[key].map(renderCard).join("")}
         </div>
       </section>
     `)
@@ -162,6 +210,15 @@ function renderGroupedResults(grouped = {}, category = "") {
 
 function attachCardHandlers(root, items = []) {
   const byKey = new Map(items.map((item) => [item.canonical_key, item]));
+  const booksBySeries = new Map();
+  safeArray(items)
+    .filter((item) => item.category === "books")
+    .forEach((item) => {
+      const series = getBookSeriesName(item);
+      if (!series) return;
+      if (!booksBySeries.has(series)) booksBySeries.set(series, []);
+      booksBySeries.get(series).push(item);
+    });
 
   root.querySelectorAll("[data-key]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -209,6 +266,31 @@ function attachCardHandlers(root, items = []) {
           : "Добавлено";
       } catch (error) {
         console.warn("Direct add from search page error:", error);
+        button.disabled = false;
+        button.textContent = "Ошибка";
+      }
+    });
+  });
+
+  root.querySelectorAll("[data-add-series]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const seriesName = button.dataset.addSeries || "";
+      const seriesItems = booksBySeries.get(seriesName) || [];
+      if (!seriesItems.length) return;
+
+      const userId = state.user?.id;
+      if (!userId) {
+        openAuthModal("login");
+        return;
+      }
+
+      try {
+        button.disabled = true;
+        button.textContent = "Добавляем…";
+        await Promise.allSettled(seriesItems.map((item) => addSearchResultDirectlyToLibrary({ userId, item })));
+        button.textContent = "Серия добавлена";
+      } catch (error) {
+        console.warn("Direct add series from search page error:", error);
         button.disabled = false;
         button.textContent = "Ошибка";
       }
@@ -336,6 +418,38 @@ export function renderSearchPage(root, params = {}) {
         border-radius: 16px;
         background: var(--surface);
         border: 1px solid var(--border);
+      }
+
+      .books-series-block {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 12px;
+        background: color-mix(in srgb, var(--surface) 86%, var(--accent-soft));
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .books-series-block__top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .books-series-block__title {
+        font-weight: 800;
+      }
+
+      .books-series-block__actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .books-series-block__list {
+        display: grid;
+        gap: 10px;
       }
 
       .result-card__main {
