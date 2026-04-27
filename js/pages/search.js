@@ -1,9 +1,6 @@
 import {
   runGlobalSearch,
   runCategorySearch,
-  flattenResults,
-  sortByScore,
-  limitResults,
   addSearchResultDirectlyToLibrary
 } from "../services/search-service.js";
 import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
@@ -16,6 +13,29 @@ import {
 import { debounce, escapeHtml, clampText } from "../utils.js";
 
 let activeSearchPageRequestId = 0;
+
+function getOrderedCategories(category = "") {
+  if (category) return [category];
+  return ["books", "movies", "series", "anime", "manga"];
+}
+
+function getBookAuthors(item = {}) {
+  return (
+    item?.meta?.author_names ||
+    item?.meta?.authors ||
+    item?.authors ||
+    []
+  ).filter(Boolean);
+}
+
+function getBookSeriesName(item = {}) {
+  return (
+    item?.meta?.series_name ||
+    item?.meta?.series ||
+    item?.series_name ||
+    ""
+  );
+}
 
 function renderCover(item) {
   if (item.cover_url) {
@@ -30,6 +50,27 @@ function renderCover(item) {
   }
 
   return `<div class="result-cover-fallback">?</div>`;
+}
+
+function renderBookExtraMeta(item = {}) {
+  if (item.category !== "books") return "";
+
+  const authors = getBookAuthors(item);
+  const seriesName = getBookSeriesName(item);
+
+  return `
+    ${
+      authors.length
+        ? `<div class="result-subtitle">Автор: ${escapeHtml(authors.join(", "))}</div>`
+        : ""
+    }
+
+    ${
+      seriesName
+        ? `<span class="badge">Часть серии: ${escapeHtml(seriesName)}</span>`
+        : ""
+    }
+  `;
 }
 
 function renderCard(item) {
@@ -59,10 +100,12 @@ function renderCard(item) {
           </div>
 
           ${
-            item.original_title
+            item.original_title && item.original_title !== item.title
               ? `<div class="result-subtitle">${escapeHtml(clampText(item.original_title, 100))}</div>`
               : ""
           }
+
+          ${renderBookExtraMeta(item)}
 
           <div class="result-footer">
             <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category))}</span>
@@ -79,6 +122,42 @@ function renderCard(item) {
 
 function renderEmpty(message) {
   return `<div class="empty">${escapeHtml(message)}</div>`;
+}
+
+function flattenGroupedResults(grouped = {}, category = "") {
+  const categories = getOrderedCategories(category);
+  const items = [];
+
+  categories.forEach((key) => {
+    (grouped?.[key] || []).forEach((item) => {
+      items.push(item);
+    });
+  });
+
+  return items;
+}
+
+function renderGroupedResults(grouped = {}, category = "") {
+  const categories = getOrderedCategories(category)
+    .filter((key) => grouped?.[key]?.length);
+
+  if (!categories.length) {
+    return renderEmpty("Ничего не найдено");
+  }
+
+  return categories
+    .map((key) => `
+      <section class="search-group">
+        <div class="search-group__title">
+          ${escapeHtml(getCategoryLabel(state.language, key))}
+        </div>
+
+        <div class="results-grid">
+          ${grouped[key].map(renderCard).join("")}
+        </div>
+      </section>
+    `)
+    .join("");
 }
 
 function attachCardHandlers(root, items = []) {
@@ -165,17 +244,14 @@ async function performSearch(resultsRoot, query, category = "") {
       return;
     }
 
-    const flat = limitResults(
-      sortByScore(flattenResults(grouped)),
-      SEARCH_LIMITS.PAGE_RESULTS
-    );
+    const flat = flattenGroupedResults(grouped, category);
 
     if (!flat.length) {
       resultsRoot.innerHTML = renderEmpty("Ничего не найдено");
       return;
     }
 
-    resultsRoot.innerHTML = flat.map(renderCard).join("");
+    resultsRoot.innerHTML = renderGroupedResults(grouped, category);
     attachCardHandlers(resultsRoot, flat);
   } catch (error) {
     console.warn("Search page error:", error);
@@ -224,6 +300,26 @@ export function renderSearchPage(root, params = {}) {
         color: var(--text);
         padding: 0 16px;
         outline: none;
+      }
+
+      .search-results {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+
+      .search-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .search-group__title {
+        font-size: 14px;
+        font-weight: 800;
+        color: var(--text-soft);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
       }
 
       .results-grid {
@@ -328,6 +424,7 @@ export function renderSearchPage(root, params = {}) {
 
       .result-footer {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
         margin-top: 2px;
         font-size: 12px;
@@ -335,9 +432,12 @@ export function renderSearchPage(root, params = {}) {
       }
 
       .badge {
+        width: fit-content;
         background: var(--accent-soft);
         padding: 4px 8px;
         border-radius: 999px;
+        font-size: 12px;
+        color: var(--text-soft);
       }
 
       .empty {
@@ -362,7 +462,7 @@ export function renderSearchPage(root, params = {}) {
 
     <section class="page">
       <div class="search-header">
-        <div class="search-title">Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ''}</div>
+        <div class="search-title">Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}</div>
 
         <input
           class="search-input"
@@ -374,7 +474,7 @@ export function renderSearchPage(root, params = {}) {
         />
       </div>
 
-      <div class="results-grid" data-results>
+      <div class="search-results" data-results>
         ${renderEmpty("Введите запрос...")}
       </div>
     </section>
