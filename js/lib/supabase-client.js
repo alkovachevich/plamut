@@ -13,6 +13,14 @@ const SESSION_RESTORE_GRACE_MS = 12000;
 
 let profilePromiseByUserId = new Map();
 let sessionRestoreStartedAt = 0;
+let authStatePromise = null;
+
+const AUTH_STATUSES = {
+  RESTORING: "restoring",
+  AUTHENTICATED: "authenticated",
+  GUEST: "guest",
+  ERROR: "error"
+};
 
 function createClient() {
   if (!window.supabase) {
@@ -71,6 +79,11 @@ export function setCachedSession(session) {
 export function clearCachedSession() {
   cachedSession = null;
   sessionPromise = null;
+  authStatePromise = null;
+}
+
+function isTimeoutError(error) {
+  return /превышено время ожидания/i.test(String(error?.message || ""));
 }
 
 export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -112,47 +125,104 @@ export async function withRetry(factory, label = "Запрос", options = {}) {
 }
 
 export async function getCurrentSession() {
+  const authState = await getCurrentAuthState();
+  return authState?.session || null;
+}
+
+export async function getCurrentAuthState() {
   if (cachedSession?.user?.id) {
-    return cachedSession;
+    return {
+      status: AUTH_STATUSES.AUTHENTICATED,
+      session: cachedSession,
+      error: null
+    };
+  }
+
+  if (authStatePromise) {
+    return authStatePromise;
   }
 
   if (sessionPromise) {
-    return sessionPromise;
+    const pendingSession = await sessionPromise;
+    return {
+      status: pendingSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.RESTORING,
+      session: pendingSession || null,
+      error: null
+    };
   }
 
-  sessionPromise = (async () => {
-    sessionRestoreStartedAt = Date.now();
-    try {
-      const supabase = getSupabaseClient();
-      const { data, error } = await withTimeout(
-        supabase.auth.getSession(),
-        "Получение сессии",
-        SESSION_TIMEOUT_MS
-      );
+  authStatePromise = (async () => {
+    const authStateStartedAt = Date.now();
+    sessionPromise = (async () => {
+      sessionRestoreStartedAt = Date.now();
+      try {
+        const supabase = getSupabaseClient();
+        const { data, error } = await withTimeout(
+          supabase.auth.getSession(),
+          "Получение сессии",
+          SESSION_TIMEOUT_MS
+        );
 
-      if (error) {
-        console.warn("getCurrentSession: auth.getSession returned error", error);
-        return cachedSession || null;
+        if (error) {
+          console.warn("getCurrentSession: auth.getSession returned error", error);
+          return cachedSession || null;
+        }
+
+        cachedSession = data?.session || null;
+        return cachedSession;
+      } catch (error) {
+        const restoreInProgress = Date.now() - sessionRestoreStartedAt < SESSION_RESTORE_GRACE_MS;
+        if (restoreInProgress && isTimeoutError(error)) {
+          console.info("getCurrentSession pending: auth state is still restoring");
+          return cachedSession || null;
+        }
+
+        throw error;
+      } finally {
+        sessionRestoreStartedAt = 0;
+        sessionPromise = null;
+      }
+    })();
+
+    try {
+      const session = await sessionPromise;
+      if (session?.user?.id) {
+        return {
+          status: AUTH_STATUSES.AUTHENTICATED,
+          session,
+          error: null
+        };
       }
 
-      cachedSession = data?.session || null;
-      return cachedSession;
+      return {
+        status: AUTH_STATUSES.GUEST,
+        session: null,
+        error: null
+      };
     } catch (error) {
-      const restoreInProgress = Date.now() - sessionRestoreStartedAt < SESSION_RESTORE_GRACE_MS;
-      if (restoreInProgress) {
+      const restoreInProgress = Date.now() - authStateStartedAt < SESSION_RESTORE_GRACE_MS;
+      if (restoreInProgress && isTimeoutError(error)) {
         console.info("getCurrentSession pending: auth state is still restoring");
-        return cachedSession || null;
+        return {
+          status: AUTH_STATUSES.RESTORING,
+          session: cachedSession || null,
+          error
+        };
       }
 
       console.warn("getCurrentSession skipped:", error);
-      return cachedSession || null;
+      return {
+        status: cachedSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.ERROR,
+        session: cachedSession || null,
+        error
+      };
     } finally {
       sessionRestoreStartedAt = 0;
-      sessionPromise = null;
+      authStatePromise = null;
     }
   })();
 
-  return sessionPromise;
+  return authStatePromise;
 }
 
 export async function getCurrentUser() {
@@ -247,8 +317,13 @@ export async function fetchUserProfile(userId) {
 }
 
 export async function fetchUserProfileSafe(userId) {
+  const result = await fetchUserProfileResultSafe(userId);
+  return result?.profile || null;
+}
+
+export async function fetchUserProfileResultSafe(userId) {
   const cleanUserId = cleanText(userId);
-  if (!cleanUserId) return null;
+  if (!cleanUserId) return { status: "empty", profile: null, error: null };
 
   if (profilePromiseByUserId.has(cleanUserId)) {
     return profilePromiseByUserId.get(cleanUserId);
@@ -256,10 +331,19 @@ export async function fetchUserProfileSafe(userId) {
 
   const profilePromise = (async () => {
     try {
-      return await fetchUserProfile(cleanUserId);
+      const profile = await fetchUserProfile(cleanUserId);
+      return {
+        status: profile?.id ? "found" : "not_found",
+        profile: profile || null,
+        error: null
+      };
     } catch (error) {
       console.warn("fetchUserProfileSafe skipped:", error);
-      return null;
+      return {
+        status: isTimeoutError(error) ? "timeout" : "error",
+        profile: null,
+        error
+      };
     } finally {
       profilePromiseByUserId.delete(cleanUserId);
     }
