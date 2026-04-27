@@ -23,6 +23,8 @@ function cleanupOldStorage() {
       sessionStorage.removeItem(key);
       localStorage.removeItem(key);
     });
+    localStorage.removeItem(ROUTE_STATE_KEY);
+    localStorage.removeItem(CATEGORY_VIEW_STATE_KEY);
   } catch (error) {
     console.warn("state: old storage cleanup skipped", error);
   }
@@ -32,7 +34,7 @@ cleanupOldStorage();
 
 function readJsonStorage(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : fallback;
@@ -44,11 +46,11 @@ function readJsonStorage(key, fallback) {
 function writeJsonStorage(key, value) {
   try {
     if (value === null || value === undefined) {
-      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
       return;
     }
 
-    localStorage.setItem(key, JSON.stringify(value));
+    sessionStorage.setItem(key, JSON.stringify(value));
   } catch (error) {
     console.warn("state: write storage skipped", error);
   }
@@ -81,6 +83,7 @@ export const state = {
   language: localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE) || DEFAULT_LANGUAGE,
 
   user: { ...DEFAULT_USER },
+  authStatus: "restoring",
 
   currentCategory: null,
   categoryViewState: persistedCategoryViewState && typeof persistedCategoryViewState === "object" ? persistedCategoryViewState : {},
@@ -226,6 +229,13 @@ export function setUser(user) {
   });
 }
 
+export function setAuthStatus(status = "guest") {
+  const normalized = ["restoring", "authenticated", "guest", "error"].includes(status)
+    ? status
+    : "guest";
+  setState({ authStatus: normalized });
+}
+
 export function logoutUser() {
   clearTemporaryCardItem();
 
@@ -299,7 +309,7 @@ function normalizeStoredCard(item) {
 
 function readStoredCard(key) {
   try {
-    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -318,7 +328,6 @@ function writeStoredCard(key, item) {
   try {
     if (!item) {
       sessionStorage.removeItem(key);
-      localStorage.removeItem(key);
       return;
     }
 
@@ -328,7 +337,6 @@ function writeStoredCard(key, item) {
     const payload = JSON.stringify(normalized);
 
     sessionStorage.setItem(key, payload);
-    localStorage.setItem(key, payload);
   } catch (error) {
     console.warn("state: writeStoredCard skipped", error);
   }
@@ -390,7 +398,6 @@ export function clearAllPersistentUiCache() {
 
   try {
     sessionStorage.removeItem(LAST_CARD_STORAGE_KEY);
-    localStorage.removeItem(LAST_CARD_STORAGE_KEY);
   } catch (error) {
     console.warn("state: clear persistent UI cache skipped", error);
   }
