@@ -4,6 +4,7 @@ import { addToUserLibrary } from "./entity-db.js";
 
 const SEARCH_TIMEOUT_MS = 9000;
 const BOOKS_LIMIT = 18;
+const BOOKS_AUTHOR_LIMIT = 18;
 const WIKIDATA_LIMIT = 10;
 const TMDB_LIMIT = 12;
 const ANILIST_LIMIT = 10;
@@ -239,6 +240,14 @@ function mergeItems(existing, incoming) {
 
   const existingIds = existing.external_ids || {};
   const incomingIds = incoming.external_ids || {};
+  const existingMeta = existing.meta && typeof existing.meta === "object" ? existing.meta : {};
+  const incomingMeta = incoming.meta && typeof incoming.meta === "object" ? incoming.meta : {};
+  const resolvedBookSearchMode =
+    existing.category === "books"
+      ? (existingMeta.book_search_mode === "title" || incomingMeta.book_search_mode === "title"
+          ? "title"
+          : (incomingMeta.book_search_mode || existingMeta.book_search_mode || ""))
+      : "";
 
   return {
     ...existing,
@@ -277,7 +286,12 @@ function mergeItems(existing, incoming) {
       ])
     },
     primary_source: resolveBooksPrimarySource(existing, incoming),
-    score: Math.max(existing.score || 0, incoming.score || 0)
+    score: Math.max(existing.score || 0, incoming.score || 0),
+    meta: {
+      ...existingMeta,
+      ...incomingMeta,
+      ...(resolvedBookSearchMode ? { book_search_mode: resolvedBookSearchMode } : {})
+    }
   };
 }
 
@@ -437,11 +451,13 @@ async function fetchOpenLibraryByTitle(query) {
       "subtitle",
       "alternative_title",
       "author_name",
+      "author_key",
       "first_publish_year",
       "cover_i",
       "isbn",
       "edition_key",
-      "ia"
+      "ia",
+      "subject"
     ].join(",")
   );
 
@@ -457,6 +473,47 @@ async function fetchOpenLibraryByTitle(query) {
   return payload?.docs || [];
 }
 
+async function fetchOpenLibraryByAuthor(query) {
+  const url = new URL("https://openlibrary.org/search.json");
+
+  url.searchParams.set("author", query);
+  url.searchParams.set("limit", String(BOOKS_AUTHOR_LIMIT));
+  url.searchParams.set(
+    "fields",
+    [
+      "key",
+      "title",
+      "subtitle",
+      "alternative_title",
+      "author_name",
+      "author_key",
+      "first_publish_year",
+      "cover_i",
+      "isbn",
+      "edition_key",
+      "ia"
+    ].join(",")
+  );
+
+  const response = await fetchWithTimeout(url.toString(), {
+    headers: { Accept: "application/json" }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Open Library author failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload?.docs || [];
+}
+
+function extractOpenLibrarySeriesName(doc = {}) {
+  const subjects = safeArray(doc?.subject).map((value) => String(value || "").trim()).filter(Boolean);
+  const explicitSeries = subjects.find((value) => /(^|[\s:(-])series([\s):,-]|$)/i.test(value));
+  if (explicitSeries) return explicitSeries;
+  return "";
+}
+
 function mapOpenLibraryDoc(doc) {
   const workKey = typeof doc?.key === "string" ? doc.key : "";
   const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
@@ -464,6 +521,9 @@ function mapOpenLibraryDoc(doc) {
   const isbnList = uniqueArray([...safeArray(doc?.isbn).slice(0, 8)]);
   const editionKeys = uniqueArray([...safeArray(doc?.edition_key).slice(0, 8)]);
   const iaKeys = uniqueArray([...safeArray(doc?.ia).slice(0, 5)]);
+  const authorNames = uniqueArray([...safeArray(doc?.author_name).map(String).filter(Boolean)]);
+  const authorKeys = uniqueArray([...safeArray(doc?.author_key).map(String).filter(Boolean)]);
+  const seriesName = extractOpenLibrarySeriesName(doc);
 
   return {
     canonical_key: normalizedWorkKey
@@ -481,7 +541,7 @@ function mapOpenLibraryDoc(doc) {
       doc?.title,
       ...safeArray(doc?.alternative_title),
       ...(doc?.subtitle ? [doc.subtitle] : []),
-      ...safeArray(doc?.author_name)
+      ...authorNames
     ]),
     external_ids: {
       openlibrary_work: normalizedWorkKey || null,
@@ -490,7 +550,10 @@ function mapOpenLibraryDoc(doc) {
       ia: iaKeys
     },
     meta: {
-      openlibrary_cover_i: doc?.cover_i || null
+      openlibrary_cover_i: doc?.cover_i || null,
+      author_names: authorNames,
+      author_keys: authorKeys,
+      series_name: seriesName
     },
     score: 0
   };
@@ -735,21 +798,33 @@ function applyBookScreenPenalty(item = {}) {
 function scoreBookResult(query, item) {
   const q = compactString(query);
   const title = compactString(item.title || "");
+  const searchMode = String(item?.meta?.book_search_mode || "").trim().toLowerCase();
   const aliases = safeArray(item.aliases).map(compactString);
+  const authorNames = uniqueArray([
+    ...safeArray(item?.meta?.author_names),
+    ...safeArray(item?.meta?.authors),
+    ...safeArray(item?.authors)
+  ])
+    .map(compactString)
+    .filter(Boolean);
 
   let score = 0;
 
-  if (title === q) score += 150;
+  if (title === q) score += 220;
   if (aliases.includes(q)) score += 100;
   if (title.startsWith(q) || aliases.some((alias) => alias.startsWith(q))) score += 50;
   if (title.includes(q) || aliases.some((alias) => alias.includes(q))) score += 20;
+  if (authorNames.includes(q)) score += 70;
+  if (authorNames.some((author) => author.startsWith(q))) score += 35;
+  if (authorNames.some((author) => author.includes(q))) score += 20;
+  if (searchMode === "title") score += 30;
+  if (searchMode === "author") score += 8;
   if (item.cover_url) score += 40;
   if (item.year) score += 10;
   if (Object.keys(item.external_ids || {}).some((key) => {
     const value = item.external_ids?.[key];
     return Array.isArray(value) ? value.length : Boolean(value);
   })) score += 15;
-  if (!item.cover_url) score -= 35;
   if ((item.title || "").trim().length < 2) score -= 50;
 
   return score;
@@ -783,14 +858,38 @@ async function searchBooks(query) {
     return [];
   }
 
-  const [olResult, wdResult] = await Promise.allSettled([
+  const [olTitleResult, olAuthorResult, wdResult] = await Promise.allSettled([
     fetchOpenLibraryByTitle(cleanQuery),
+    fetchOpenLibraryByAuthor(cleanQuery),
     fetchWikidataCandidates(cleanQuery)
   ]);
 
-  const openLibraryItems =
-    olResult.status === "fulfilled"
-      ? safeArray(olResult.value).map(mapOpenLibraryDoc)
+  const openLibraryTitleItems =
+    olTitleResult.status === "fulfilled"
+      ? safeArray(olTitleResult.value).map((doc) => {
+          const mapped = mapOpenLibraryDoc(doc);
+          return {
+            ...mapped,
+            meta: {
+              ...(mapped.meta || {}),
+              book_search_mode: "title"
+            }
+          };
+        })
+      : [];
+
+  const openLibraryAuthorItems =
+    olAuthorResult.status === "fulfilled"
+      ? safeArray(olAuthorResult.value).map((doc) => {
+          const mapped = mapOpenLibraryDoc(doc);
+          return {
+            ...mapped,
+            meta: {
+              ...(mapped.meta || {}),
+              book_search_mode: "author"
+            }
+          };
+        })
       : [];
 
   let wikidataItems = [];
@@ -825,9 +924,10 @@ async function searchBooks(query) {
       .filter(Boolean);
   }
 
+  const openLibraryItems = [...openLibraryTitleItems, ...openLibraryAuthorItems];
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
 
-  return dedupeBooks([...openLibraryItems, ...enrichedWikidata])
+  return dedupeBooks([...openLibraryTitleItems, ...openLibraryAuthorItems, ...enrichedWikidata])
     .map((item) => ({
       ...item,
       score: scoreBookResult(cleanQuery, item)
