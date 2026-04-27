@@ -265,6 +265,54 @@ function mergeItems(existing, incoming) {
   const incomingIds = incoming.external_ids || {};
   const existingMeta = existing.meta && typeof existing.meta === "object" ? existing.meta : {};
   const incomingMeta = incoming.meta && typeof incoming.meta === "object" ? incoming.meta : {};
+  const resolvedWikidataRelations = {
+    series: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.series),
+      ...safeArray(incomingMeta.wikidata_relations?.series)
+    ]),
+    follows: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.follows),
+      ...safeArray(incomingMeta.wikidata_relations?.follows)
+    ]),
+    followed_by: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.followed_by),
+      ...safeArray(incomingMeta.wikidata_relations?.followed_by)
+    ]),
+    based_on: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.based_on),
+      ...safeArray(incomingMeta.wikidata_relations?.based_on)
+    ]),
+    derivative_work: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.derivative_work),
+      ...safeArray(incomingMeta.wikidata_relations?.derivative_work)
+    ]),
+    editions_or_translations: uniqueArray([
+      ...safeArray(existingMeta.wikidata_relations?.editions_or_translations),
+      ...safeArray(incomingMeta.wikidata_relations?.editions_or_translations)
+    ])
+  };
+  const resolvedAuthorNames = uniqueArray([
+    ...safeArray(existingMeta.author_names),
+    ...safeArray(incomingMeta.author_names)
+  ]);
+  const resolvedAuthorKeys = uniqueArray([
+    ...safeArray(existingMeta.author_keys),
+    ...safeArray(incomingMeta.author_keys)
+  ]);
+  const resolvedWikidataLabels = {
+    ru: pickBetterText(existingMeta?.wikidata_labels?.ru, incomingMeta?.wikidata_labels?.ru),
+    en: pickBetterText(existingMeta?.wikidata_labels?.en, incomingMeta?.wikidata_labels?.en)
+  };
+  const resolvedWikidataAliases = {
+    ru: uniqueArray([
+      ...safeArray(existingMeta?.wikidata_aliases?.ru),
+      ...safeArray(incomingMeta?.wikidata_aliases?.ru)
+    ]),
+    en: uniqueArray([
+      ...safeArray(existingMeta?.wikidata_aliases?.en),
+      ...safeArray(incomingMeta?.wikidata_aliases?.en)
+    ])
+  };
   const resolvedSeriesCandidates = uniqueArray([
     existingMeta.wikidata_series_name,
     incomingMeta.wikidata_series_name,
@@ -330,8 +378,13 @@ function mergeItems(existing, incoming) {
     meta: {
       ...existingMeta,
       ...incomingMeta,
+      author_names: resolvedAuthorNames,
+      author_keys: resolvedAuthorKeys,
+      wikidata_labels: resolvedWikidataLabels,
+      wikidata_aliases: resolvedWikidataAliases,
       series_name: resolvedSeriesName,
       series_candidates: resolvedSeriesCandidates,
+      wikidata_relations: resolvedWikidataRelations,
       ...(resolvedBookSearchMode ? { book_search_mode: resolvedBookSearchMode } : {})
     }
   };
@@ -740,16 +793,50 @@ function hasStrictSharedIds(a = {}, b = {}) {
   return false;
 }
 
-function hasBookMergeSignal(a = {}, b = {}) {
-  if (a.category !== "books" || b.category !== "books") return false;
-  if (hasStrictSharedIds(a, b)) return true;
+function tokenizeNormalizedTitle(value = "") {
+  return uniqueArray(
+    compactString(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+}
 
-  const aIds = a.external_ids || {};
-  const bIds = b.external_ids || {};
-  const aWork = normalizeOpenLibraryWorkKey(aIds.openlibrary_work || "");
-  const bWork = normalizeOpenLibraryWorkKey(bIds.openlibrary_work || "");
-  if (aWork && bWork && aWork === bWork) return true;
-  if (hasSharedValue(aIds.isbn, bIds.isbn)) return true;
+function calcTitleSimilarity(a = "", b = "") {
+  const left = tokenizeNormalizedTitle(a);
+  const right = tokenizeNormalizedTitle(b);
+  if (!left.length || !right.length) return 0;
+
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  let intersection = 0;
+  leftSet.forEach((token) => {
+    if (rightSet.has(token)) intersection += 1;
+  });
+
+  return (2 * intersection) / (leftSet.size + rightSet.size);
+}
+
+function collectBookAuthors(item = {}) {
+  const meta = item?.meta && typeof item.meta === "object" ? item.meta : {};
+  return uniqueArray([
+    ...safeArray(meta.author_names),
+    ...safeArray(meta.author_keys),
+    ...safeArray(meta.authors),
+    ...safeArray(item.authors)
+  ].map((value) => compactString(value)).filter(Boolean));
+}
+
+function hasBookAuthorOverlap(a = {}, b = {}) {
+  const authorsA = collectBookAuthors(a);
+  const authorsB = collectBookAuthors(b);
+  if (!authorsA.length || !authorsB.length) return false;
+  return hasSharedValue(authorsA, authorsB);
+}
+
+function hasBookSoftMergeSignal(a = {}, b = {}) {
+  if (a.category !== "books" || b.category !== "books") return false;
+  if (!hasBookAuthorOverlap(a, b)) return false;
 
   const aTitles = getTitleKeys(a);
   const bTitles = getTitleKeys(b);
@@ -757,9 +844,15 @@ function hasBookMergeSignal(a = {}, b = {}) {
 
   return aTitles.some((left) => bTitles.some((right) => {
     if (left === right) return true;
-    if (left.length > 6 && right.length > 6 && (left.includes(right) || right.includes(left))) return true;
-    return false;
+    return calcTitleSimilarity(left, right) > 0.9;
   }));
+}
+
+function hasBookMergeSignal(a = {}, b = {}) {
+  if (a.category !== "books" || b.category !== "books") return false;
+  if (hasStrictSharedIds(a, b)) return true;
+  if (hasBookScreenDescriptionNoise(a) || hasBookScreenDescriptionNoise(b)) return false;
+  return hasBookSoftMergeSignal(a, b);
 }
 
 function resolveBooksPrimarySource(existing = {}, incoming = {}) {
@@ -1473,6 +1566,7 @@ function validateFinalItem(item = {}) {
 
 export async function runGlobalSearch(query) {
   const cleanQuery = normalizeQuery(query);
+  const language = getSystemLanguage();
   const cacheKey = getSearchCacheKey("global", cleanQuery);
   const cached = getCachedSearchResult(cacheKey);
   if (cached) return cached;
@@ -1498,6 +1592,7 @@ export async function runGlobalSearch(query) {
   };
 
   const merged = dedupeAll(flattenGroups(grouped))
+    .map((item) => item?.category === "books" ? normalizeBookDisplayLanguage(item, language) : item)
     .map((item) => ({
       ...item,
       score: item.category === "books" ? scoreBookResult(cleanQuery, item) : scoreScreenResult(cleanQuery, item)
@@ -1524,6 +1619,7 @@ export async function runGlobalSearch(query) {
 
 export async function runCategorySearch(query, category) {
   const cleanQuery = normalizeQuery(query);
+  const language = getSystemLanguage();
   const normalizedCategory = sanitizeCategory(category);
   const cacheKey = getSearchCacheKey("category", cleanQuery, normalizedCategory);
   const cached = getCachedSearchResult(cacheKey);
@@ -1542,6 +1638,7 @@ export async function runCategorySearch(query, category) {
   if (normalizedCategory === "manga") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "manga"));
 
   result = applyFinalCategoryFilter(result, normalizedCategory)
+    .map((item) => item?.category === "books" ? normalizeBookDisplayLanguage(item, language) : item)
     .map((item) => {
       const cover = item.cover_url || fallbackCoverResolver(item);
       const missingCoverPenalty = item.category === "books" ? 0 : 20;
