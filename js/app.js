@@ -7,7 +7,8 @@ import {
   logoutUser,
   closeAuthModal,
   setTheme,
-  setLanguage
+  setLanguage,
+  setAuthStatus
 } from "./state.js";
 
 import { renderHeader } from "./components/header.js";
@@ -27,8 +28,8 @@ import { renderGuestPage } from "./pages/guest.js";
 
 import {
   getSupabaseClient,
-  getCurrentSession,
-  fetchUserProfileSafe,
+  getCurrentAuthState,
+  fetchUserProfileResultSafe,
   upsertUserProfileSafe,
   setCachedSession,
   clearCachedSession
@@ -78,6 +79,10 @@ function normalizeTheme(value = "") {
 
 function normalizeLanguage(value = "") {
   return value === "en" || value === "ru" ? value : "ru";
+}
+
+function isTimeoutError(error) {
+  return /превышено время ожидания/i.test(String(error?.message || ""));
 }
 
 function applyTheme() {
@@ -206,35 +211,41 @@ function applyProfilePreferences(profile = null) {
   }
 }
 
-async function ensureUserProfile(user) {
-  if (!user?.id) return null;
+async function ensureUserProfile(user, fastUser) {
+  if (!user?.id) return { ...fastUser };
 
-  const existingProfile = await fetchUserProfileSafe(user.id);
+  const result = await fetchUserProfileResultSafe(user.id);
 
   const fallbackProfile = {
     id: user.id,
-    username: existingProfile?.username || buildUsername(user),
-    display_name: existingProfile?.display_name || buildDisplayName(user, existingProfile),
-    avatar_url: existingProfile?.avatar_url || buildAvatarUrl(user, existingProfile),
-    preferred_theme: normalizeTheme(existingProfile?.preferred_theme || state.theme),
-    preferred_language: normalizeLanguage(existingProfile?.preferred_language || state.language)
+    username: result?.profile?.username || fastUser.username,
+    display_name: result?.profile?.display_name || fastUser.display_name,
+    avatar_url: result?.profile?.avatar_url || fastUser.avatar_url,
+    preferred_theme: normalizeTheme(result?.profile?.preferred_theme || fastUser.preferred_theme),
+    preferred_language: normalizeLanguage(
+      result?.profile?.preferred_language || fastUser.preferred_language
+    )
   };
 
-  if (existingProfile?.id) {
+  if (result?.status === "found") {
     return fallbackProfile;
   }
 
-  const savedProfile = await upsertUserProfileSafe(fallbackProfile);
-  return savedProfile || fallbackProfile;
+  if (result?.status === "not_found") {
+    const savedProfile = await upsertUserProfileSafe(fallbackProfile);
+    return savedProfile || fallbackProfile;
+  }
+
+  if (result?.status === "timeout" || result?.status === "error") {
+    console.info("ensureUserProfile: use fast user while profile API is unstable");
+    return fallbackProfile;
+  }
+
+  return fallbackProfile;
 }
 
 async function applyAuthenticatedUser(user) {
-  if (!user?.id) {
-    logoutUser();
-    clearCachedUser();
-    clearCachedSession();
-    return;
-  }
+  if (!user?.id) return;
 
   const existing = userApplyPromiseById.get(user.id);
   if (existing) {
@@ -253,9 +264,10 @@ async function applyAuthenticatedUser(user) {
     };
 
     setUserIfChanged(fastUser);
+    setAuthStatus("authenticated");
     writeCachedUser(fastUser);
 
-    const profile = await ensureUserProfile(user);
+    const profile = await ensureUserProfile(user, fastUser);
 
     const normalizedUser = {
       id: user.id,
@@ -269,6 +281,7 @@ async function applyAuthenticatedUser(user) {
 
     applyProfilePreferences(normalizedUser);
     setUserIfChanged(normalizedUser);
+    setAuthStatus("authenticated");
     writeCachedUser(normalizedUser);
   })().finally(() => {
     userApplyPromiseById.delete(user.id);
@@ -285,16 +298,42 @@ async function hydrateAuthStateSafely() {
 
   authHydrationPromise = (async () => {
     try {
-      const session = await getCurrentSession();
+      setAuthStatus("restoring");
+      const authState = await getCurrentAuthState();
 
-      if (!session?.user) {
+      if (authState?.status === "authenticated" && authState?.session?.user) {
+        setCachedSession(authState.session);
+        await applyAuthenticatedUser(authState.session.user);
         return;
       }
 
-      setCachedSession(session);
-      await applyAuthenticatedUser(session.user);
+      if (authState?.status === "guest") {
+        setAuthStatus("guest");
+        logoutUser();
+        clearCachedUser();
+        return;
+      }
+
+      if (authState?.status === "restoring") {
+        const cachedUser = readCachedUser();
+        if (cachedUser?.id) {
+          setUserIfChanged(cachedUser);
+        }
+        setAuthStatus("restoring");
+        return;
+      }
+
+      setAuthStatus("error");
+
+      if (!state.user?.id) {
+        const cachedUser = readCachedUser();
+        if (cachedUser?.id) {
+          setUserIfChanged(cachedUser);
+        }
+      }
     } catch (error) {
       console.warn("Auth hydration skipped:", error);
+      setAuthStatus(isTimeoutError(error) ? "restoring" : "error");
     } finally {
       authHydrationPromise = null;
     }
@@ -317,6 +356,7 @@ function bindAuthListenerSafely() {
         setCachedSession(session || null);
 
         if (event === "SIGNED_OUT") {
+          setAuthStatus("guest");
           logoutUser();
           clearCachedUser();
           clearCachedSession();
@@ -324,9 +364,14 @@ function bindAuthListenerSafely() {
           return;
         }
 
-        if (!session?.user) return;
+        if (!session?.user) {
+          if (event === "INITIAL_SESSION") {
+            setAuthStatus("guest");
+          }
+          return;
+        }
 
-        await hydrateAuthStateSafely();
+        setAuthStatus("authenticated");
         await applyAuthenticatedUser(session.user);
 
         if (
@@ -385,10 +430,16 @@ function getAuthModalSignature() {
 }
 
 function getRouteSignature() {
+  const authBucket = state.authStatus === "authenticated"
+    ? "authenticated"
+    : state.authStatus === "guest" || state.authStatus === "error"
+      ? "guest"
+      : "restoring";
+
   return JSON.stringify({
     route: state.route,
     routeParams: state.routeParams,
-    userId: state.user?.id || null,
+    authBucket,
     language: state.language,
     theme: state.theme
   });
@@ -431,7 +482,21 @@ async function resolveRouteRenderer(route, params) {
   }
 }
 
+function renderBootShell() {
+  mainRoot.innerHTML = `
+    <section style="padding:16px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
+      Загрузка сессии…
+    </section>
+  `;
+}
+
 function renderRouteSafely() {
+  if (state.authStatus === "restoring") {
+    cleanupCurrentRoute();
+    renderBootShell();
+    return;
+  }
+
   const route = state.route;
   const params = state.routeParams || {};
   const token = routeRenderToken + 1;
@@ -539,13 +604,19 @@ async function init() {
     setUserIfChanged(cachedUser);
   }
 
+  setAuthStatus("restoring");
   renderApp();
   bindAuthListenerSafely();
 
-  Promise.resolve().then(() => {
-    hydrateAuthStateSafely().catch((error) => {
-      console.warn("Auth hydration deferred skipped:", error);
-    });
+  Promise.resolve().then(async () => {
+    await hydrateAuthStateSafely();
+
+    if (state.authStatus === "restoring") {
+      setAuthStatus(state.user?.id ? "authenticated" : "guest");
+    }
+  }).catch((error) => {
+    console.warn("Auth hydration deferred skipped:", error);
+    setAuthStatus("error");
   });
 }
 
