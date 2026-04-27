@@ -11,6 +11,7 @@ const ANILIST_LIMIT = 10;
 
 const SEARCH_CACHE_TTL_MS = 1000 * 60 * 3;
 const searchCache = new Map();
+const PLACEHOLDER_COVER_URL = "/placeholder.jpg";
 
 function getSearchCacheKey(scope = "global", query = "", category = "") {
   return `${scope}:${compactString(query)}:${category}`;
@@ -178,7 +179,9 @@ function normalizeSearchResult(raw = {}) {
     title_en: String(raw.title_en || "").trim(),
     original_title: originalTitle,
     year: safeNumberYear(raw.year),
-    cover_url: String(raw.cover_url || "").trim(),
+    cover_url: category === "books"
+      ? String(raw.cover_url || PLACEHOLDER_COVER_URL).trim()
+      : String(raw.cover_url || "").trim(),
     external_ids,
     score: Number.isFinite(Number(raw.score)) ? Number(raw.score) : 0,
     aliases: uniqueArray(safeArray(raw.aliases).map(String).filter(Boolean)),
@@ -299,6 +302,7 @@ function mergeItems(existing, incoming) {
     ...safeArray(existingMeta.author_keys),
     ...safeArray(incomingMeta.author_keys)
   ]);
+  const resolvedAuthorWikidataId = existingMeta.author_wikidata_id || incomingMeta.author_wikidata_id || null;
   const resolvedWikidataLabels = {
     ru: pickBetterText(existingMeta?.wikidata_labels?.ru, incomingMeta?.wikidata_labels?.ru),
     en: pickBetterText(existingMeta?.wikidata_labels?.en, incomingMeta?.wikidata_labels?.en)
@@ -336,6 +340,14 @@ function mergeItems(existing, incoming) {
           ? "title"
           : (incomingMeta.book_search_mode || existingMeta.book_search_mode || ""))
       : "";
+  const resolvedSeriesItems = Array.from(new Map(
+    [...safeArray(existingMeta.series_items), ...safeArray(incomingMeta.series_items)]
+      .filter((row) => row && row.wikidata)
+      .map((row) => [row.wikidata, row])
+  ).values());
+  const resolvedSeriesOrder = Number.isFinite(Number(existingMeta.series_order))
+    ? Number(existingMeta.series_order)
+    : (Number.isFinite(Number(incomingMeta.series_order)) ? Number(incomingMeta.series_order) : null);
 
   return {
     ...existing,
@@ -380,9 +392,12 @@ function mergeItems(existing, incoming) {
       ...incomingMeta,
       author_names: resolvedAuthorNames,
       author_keys: resolvedAuthorKeys,
+      author_wikidata_id: resolvedAuthorWikidataId,
       wikidata_labels: resolvedWikidataLabels,
       wikidata_aliases: resolvedWikidataAliases,
       series_name: resolvedSeriesName,
+      series_items: resolvedSeriesItems,
+      series_order: resolvedSeriesOrder,
       series_candidates: resolvedSeriesCandidates,
       wikidata_relations: resolvedWikidataRelations,
       ...(resolvedBookSearchMode ? { book_search_mode: resolvedBookSearchMode } : {})
@@ -426,7 +441,9 @@ function identityKeys(item = {}) {
   if (ids.openlibrary_work) {
     keys.push(`${categoryPrefix}olwork:${normalizeOpenLibraryWorkKey(ids.openlibrary_work)}`);
   }
-  safeArray(ids.isbn).forEach((isbn) => keys.push(`${categoryPrefix}isbn:${String(isbn)}`));
+  if (item.category !== "books") {
+    safeArray(ids.isbn).forEach((isbn) => keys.push(`${categoryPrefix}isbn:${String(isbn)}`));
+  }
 
   return uniqueArray(keys.filter(Boolean));
 }
@@ -681,27 +698,35 @@ function mapOpenLibraryDoc(doc, { mode = "title", language = "ru" } = {}) {
 }
 
 async function fetchWikidataCandidates(query) {
-  const url = new URL("https://www.wikidata.org/w/api.php");
+  const runSearch = async (language = "ru") => {
+    const url = new URL("https://www.wikidata.org/w/api.php");
+    url.searchParams.set("action", "wbsearchentities");
+    url.searchParams.set("format", "json");
+    url.searchParams.set("language", language);
+    url.searchParams.set("uselang", language);
+    url.searchParams.set("type", "item");
+    url.searchParams.set("origin", "*");
+    url.searchParams.set("limit", String(WIKIDATA_LIMIT));
+    url.searchParams.set("search", query);
 
-  url.searchParams.set("action", "wbsearchentities");
-  url.searchParams.set("format", "json");
-  url.searchParams.set("language", "ru");
-  url.searchParams.set("uselang", "ru");
-  url.searchParams.set("type", "item");
-  url.searchParams.set("origin", "*");
-  url.searchParams.set("limit", String(WIKIDATA_LIMIT));
-  url.searchParams.set("search", query);
+    const response = await fetchWithTimeout(url.toString(), {
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) throw new Error(`Wikidata failed: ${response.status}`);
+    const payload = await response.json();
+    return payload?.search || [];
+  };
 
-  const response = await fetchWithTimeout(url.toString(), {
-    headers: { Accept: "application/json" }
-  });
+  const [ru, en] = await Promise.allSettled([runSearch("ru"), runSearch("en")]);
+  const merged = uniqueArray([
+    ...safeArray(ru.status === "fulfilled" ? ru.value : []).map((row) => row?.id).filter(Boolean),
+    ...safeArray(en.status === "fulfilled" ? en.value : []).map((row) => row?.id).filter(Boolean)
+  ]);
 
-  if (!response.ok) {
-    throw new Error(`Wikidata failed: ${response.status}`);
-  }
-
-  const payload = await response.json();
-  return payload?.search || [];
+  const dict = new Map();
+  safeArray(ru.status === "fulfilled" ? ru.value : []).forEach((row) => row?.id && dict.set(row.id, row));
+  safeArray(en.status === "fulfilled" ? en.value : []).forEach((row) => row?.id && !dict.has(row.id) && dict.set(row.id, row));
+  return merged.map((id) => dict.get(id)).filter(Boolean).slice(0, WIKIDATA_LIMIT * 2);
 }
 
 async function fetchWikidataEntityDetails(ids = []) {
@@ -746,7 +771,8 @@ const WIKIDATA_ALLOWED_BOOK_TYPES = new Set([
   "Q8261", // novel
   "Q7725634", // literary work
   "Q47461344", // written work
-  "Q277759" // book series
+  "Q277759", // book series
+  "Q3331189" // version, edition, or translation
 ]);
 
 const WIKIDATA_BANNED_BOOK_TYPES = new Set([
@@ -789,7 +815,7 @@ function hasStrictSharedIds(a = {}, b = {}) {
   }
   if (aIds.wikidata && bIds.wikidata && aIds.wikidata === bIds.wikidata) return true;
   if (aIds.tmdb && bIds.tmdb && String(aIds.tmdb) === String(bIds.tmdb)) return true;
-  if (hasSharedValue(aIds.isbn, bIds.isbn)) return true;
+  if (a.category !== "books" && b.category !== "books" && hasSharedValue(aIds.isbn, bIds.isbn)) return true;
   return false;
 }
 
@@ -860,8 +886,8 @@ function resolveBooksPrimarySource(existing = {}, incoming = {}) {
     return existing.primary_source || incoming.primary_source || "";
   }
 
-  if (existing.primary_source === "openlibrary" || incoming.primary_source === "openlibrary") {
-    return "openlibrary";
+  if (existing.primary_source === "wikidata" || incoming.primary_source === "wikidata") {
+    return "wikidata";
   }
 
   return existing.primary_source || incoming.primary_source || "";
@@ -902,7 +928,7 @@ function resolveWikidataEntityRefs(ids = [], entities = {}) {
   return uniqueArray(ids.map((id) => {
     const entity = entities?.[id];
     const label = entity?.labels?.ru?.value || entity?.labels?.en?.value || "";
-    return label || id;
+    return label || "";
   }));
 }
 
@@ -916,6 +942,10 @@ function normalizeBookDisplayLanguage(item = {}, language = "ru") {
   const wikidataLabels = item?.meta?.wikidata_labels || {};
   const wikidataAliases = item?.meta?.wikidata_aliases || {};
   const alternativeTitles = safeArray(item?.meta?.openlibrary_alternative_titles).map(String).filter(Boolean);
+  const authorNames = safeArray(item?.meta?.author_names).map(String).filter(Boolean);
+  const localizedAuthorName = language === "en"
+    ? (authorNames.find((name) => !hasCyrillic(name)) || authorNames[0] || "")
+    : (authorNames.find((name) => hasCyrillic(name)) || authorNames[0] || "");
 
   const ruAlias = uniqueArray([
     ...safeArray(wikidataAliases?.ru),
@@ -956,12 +986,61 @@ function normalizeBookDisplayLanguage(item = {}, language = "ru") {
     original_title: originalTitle || titleEn || titleRu || item.title || "",
     meta: {
       ...(item.meta || {}),
+      author_display_name: localizedAuthorName,
       normalization_ready: true
     }
   };
 }
 
-function mapWikidataBookEntity(searchItem, details, entities = {}) {
+function extractSeriesOrderFromClaims(claims = {}) {
+  const values = safeArray(claims?.P179)
+    .map((claim) => safeArray(claim?.qualifiers?.P1545).map((row) => row?.datavalue?.value).find(Boolean))
+    .filter(Boolean)
+    .map((value) => Number(String(value).replace(",", ".")))
+    .filter((value) => Number.isFinite(value));
+
+  return values.length ? values[0] : null;
+}
+
+function getEntityDisplayLabel(entity = {}) {
+  return String(entity?.labels?.ru?.value || entity?.labels?.en?.value || "").trim();
+}
+
+function extractSeriesItemsFromSeriesEntity(seriesEntity = {}, entities = {}) {
+  const seriesClaims = seriesEntity?.claims || {};
+  const partOfSeriesIds = extractEntityIdsFromClaims(seriesClaims, "P527");
+
+  const mapped = partOfSeriesIds.map((id) => {
+    const entity = entities?.[id] || {};
+    const label = getEntityDisplayLabel(entity);
+    const itemClaims = entity?.claims || {};
+    const year = extractYearFromWikidataClaims(itemClaims);
+    const rawOrder = safeArray(itemClaims?.P179)
+      .filter((claim) => claim?.mainsnak?.datavalue?.value?.id === seriesEntity?.id)
+      .map((claim) => safeArray(claim?.qualifiers?.P1545).map((row) => row?.datavalue?.value).find(Boolean))
+      .find(Boolean) || "";
+    const order = Number(String(rawOrder).replace(",", "."));
+
+    return {
+      wikidata: id,
+      title: label,
+      year: Number.isFinite(year) ? year : null,
+      order: Number.isFinite(order) ? order : null
+    };
+  }).filter((row) => row.wikidata && row.title);
+
+  return mapped.sort((a, b) => {
+    const aOrder = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
+    const bOrder = Number.isFinite(b.order) ? b.order : Number.POSITIVE_INFINITY;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    const aYear = Number.isFinite(a.year) ? a.year : Number.POSITIVE_INFINITY;
+    const bYear = Number.isFinite(b.year) ? b.year : Number.POSITIVE_INFINITY;
+    if (aYear !== bYear) return aYear - bYear;
+    return a.title.localeCompare(b.title, "ru");
+  });
+}
+
+function mapWikidataBookEntity(searchItem, details, entities = {}, seriesItemsById = {}) {
   const labels = details?.labels || {};
   const aliases = details?.aliases || {};
   const claims = details?.claims || {};
@@ -986,6 +1065,13 @@ function mapWikidataBookEntity(searchItem, details, entities = {}) {
   ]);
   const resolvedSeries = resolveWikidataEntityRefs(seriesIds, entities);
   const resolvedSeriesName = resolvedSeries[0] || "";
+  const authorNames = resolveWikidataEntityRefs(authorIds, entities);
+  const authorId = authorIds[0] || null;
+  const seriesId = seriesIds[0] || null;
+  const seriesItems = seriesId ? safeArray(seriesItemsById?.[seriesId]) : [];
+  const seriesOrder = extractSeriesOrderFromClaims(claims);
+  const followsLabel = resolveWikidataEntityRefs(followsIds, entities);
+  const followedByLabel = resolveWikidataEntityRefs(followedByIds, entities);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
@@ -996,7 +1082,7 @@ function mapWikidataBookEntity(searchItem, details, entities = {}) {
     title_en: titleEn,
     original_title: titleEn || titleRu || searchItem?.label || "",
     year: extractYearFromWikidataClaims(claims),
-    cover_url: openLibraryCoverUrlFromIsbn(isbns[0]) || wikidataImage,
+    cover_url: openLibraryCoverUrlFromIsbn(isbns[0]) || wikidataImage || PLACEHOLDER_COVER_URL,
     description_ru: descriptions?.ru?.value || "",
     description_en: descriptions?.en?.value || "",
     aliases: uniqueArray([
@@ -1023,17 +1109,20 @@ function mapWikidataBookEntity(searchItem, details, entities = {}) {
         en: aliasesEn
       },
       author_keys: authorIds,
-      author_names: resolveWikidataEntityRefs(authorIds, entities),
+      author_names: authorNames,
+      author_wikidata_id: authorId,
       wikidata_series_name: resolvedSeriesName,
       series_name: resolvedSeriesName,
+      series_items: seriesItems,
+      series_order: seriesOrder,
       series_candidates: uniqueArray([
         ...resolvedSeries,
         ...seriesIds
       ]),
       wikidata_relations: {
         series: uniqueArray([...resolvedSeries, ...seriesIds]),
-        follows: uniqueArray([...resolveWikidataEntityRefs(followsIds, entities), ...followsIds]),
-        followed_by: uniqueArray([...resolveWikidataEntityRefs(followedByIds, entities), ...followedByIds]),
+        follows: uniqueArray([...followsLabel, ...followsIds]),
+        followed_by: uniqueArray([...followedByLabel, ...followedByIds]),
         based_on: uniqueArray([...resolveWikidataEntityRefs(basedOnIds, entities), ...basedOnIds]),
         derivative_work: uniqueArray([...resolveWikidataEntityRefs(derivativeIds, entities), ...derivativeIds]),
         editions_or_translations: uniqueArray([...resolveWikidataEntityRefs(editionsOrTranslationsIds, entities), ...editionsOrTranslationsIds])
@@ -1131,17 +1220,28 @@ function scoreBookResult(query, item) {
 
 function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
   return safeArray(wikidataItems).map((item) => {
-    const match = safeArray(openLibraryItems).find((candidate) => {
-      return hasBookMergeSignal(item, candidate);
-    });
-
-    if (!match) return item;
-
-    return mergeItems(match, item);
+    const match = safeArray(openLibraryItems).find((candidate) => hasBookMergeSignal(item, candidate));
+    return match ? mergeItems(item, match) : item;
   });
 }
 
-async function searchBooks(query) {
+function sortBooksSeriesAware(items = []) {
+  return [...safeArray(items)].sort((a, b) => {
+    const aSeries = compactString(a?.meta?.series_name || "");
+    const bSeries = compactString(b?.meta?.series_name || "");
+    if (aSeries && bSeries && aSeries === bSeries) {
+      const aOrder = Number.isFinite(Number(a?.meta?.series_order)) ? Number(a.meta.series_order) : Number.POSITIVE_INFINITY;
+      const bOrder = Number.isFinite(Number(b?.meta?.series_order)) ? Number(b.meta.series_order) : Number.POSITIVE_INFINITY;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      const aYear = Number.isFinite(Number(a?.year)) ? Number(a.year) : Number.POSITIVE_INFINITY;
+      const bYear = Number.isFinite(Number(b?.year)) ? Number(b.year) : Number.POSITIVE_INFINITY;
+      if (aYear !== bYear) return aYear - bYear;
+    }
+    return (b.score || 0) - (a.score || 0);
+  });
+}
+
+async function searchBooks(query, { modal = true } = {}) {
   const cleanQuery = normalizeQuery(query);
   const language = getSystemLanguage();
 
@@ -1166,48 +1266,71 @@ async function searchBooks(query) {
       : [];
 
   let wikidataItems = [];
+  let openLibraryItems = [...openLibraryTitleItems, ...openLibraryAuthorItems];
 
   if (wdResult.status === "fulfilled") {
-    const ids = safeArray(wdResult.value)
+    const ids = uniqueArray(safeArray(wdResult.value)
       .map((item) => item.id)
-      .filter(Boolean);
+      .filter(Boolean));
 
     const detailsResult = await fetchWikidataEntityDetails(ids).catch(() => ({}));
+    const filteredCandidates = safeArray(wdResult.value).filter((candidate) => {
+      const details = detailsResult[candidate.id] || {};
+      const claims = details?.claims || {};
+      const typeIds = getWikidataTypeIds(claims);
+      const allowed = isAllowedWikidataBook(claims);
+      if (!typeIds.length) return false;
+      if (!allowed) return false;
+      return true;
+    });
 
-    wikidataItems = safeArray(wdResult.value)
+    const bookEntityIds = filteredCandidates.map((candidate) => candidate.id);
+    const authorIds = uniqueArray(bookEntityIds.flatMap((id) => extractEntityIdsFromClaims(detailsResult?.[id]?.claims || {}, "P50")));
+    const seriesIds = uniqueArray(bookEntityIds.flatMap((id) => extractEntityIdsFromClaims(detailsResult?.[id]?.claims || {}, "P179")));
+    const relationIds = uniqueArray(bookEntityIds.flatMap((id) => {
+      const claims = detailsResult?.[id]?.claims || {};
+      return [
+        ...extractEntityIdsFromClaims(claims, "P155"),
+        ...extractEntityIdsFromClaims(claims, "P156"),
+        ...extractEntityIdsFromClaims(claims, "P144"),
+        ...extractEntityIdsFromClaims(claims, "P4969"),
+        ...extractEntityIdsFromClaims(claims, "P629"),
+        ...extractEntityIdsFromClaims(claims, "P747")
+      ];
+    }));
+    const firstLevelRefIds = uniqueArray([...authorIds, ...seriesIds, ...relationIds]);
+    const firstLevelRefs = await fetchWikidataEntityDetails(firstLevelRefIds).catch(() => ({}));
+    const seriesItemIds = uniqueArray(seriesIds.flatMap((seriesId) => extractEntityIdsFromClaims(firstLevelRefs?.[seriesId]?.claims || {}, "P527")));
+    const seriesItemEntities = await fetchWikidataEntityDetails(seriesItemIds).catch(() => ({}));
+    const mergedRefs = { ...firstLevelRefs, ...seriesItemEntities };
+    const seriesItemsById = {};
+    seriesIds.forEach((seriesId) => {
+      const seriesEntity = firstLevelRefs?.[seriesId];
+      if (!seriesEntity) return;
+      seriesItemsById[seriesId] = extractSeriesItemsFromSeriesEntity(seriesEntity, mergedRefs);
+    });
+
+    wikidataItems = filteredCandidates
       .map((candidate) => {
         const details = detailsResult[candidate.id] || {};
-        const claims = details?.claims || {};
-        const typeIds = getWikidataTypeIds(claims);
-        const allowed = isAllowedWikidataBook(claims);
-        const mapped = mapWikidataBookEntity(candidate, details, detailsResult);
-
-        if (!typeIds.length) {
-          console.debug("filtered wikidata item: missing P31", candidate.id);
-          return null;
-        }
-
-        if (!allowed) {
-          console.debug("filtered wikidata item: banned/non-book P31", candidate.id, typeIds);
-          return null;
-        }
-
-        return mapped;
+        return mapWikidataBookEntity(candidate, details, mergedRefs, seriesItemsById);
       })
       .filter(Boolean);
   }
 
-  const openLibraryItems = [...openLibraryTitleItems, ...openLibraryAuthorItems];
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
-
-  return dedupeBooks([...openLibraryTitleItems, ...openLibraryAuthorItems, ...enrichedWikidata])
+  const sourcePool = enrichedWikidata.length ? enrichedWikidata : openLibraryItems;
+  const deduped = dedupeBooks(sourcePool)
     .map((item) => normalizeBookDisplayLanguage(item, language))
     .map((item) => ({
       ...item,
+      cover_url: item.cover_url || PLACEHOLDER_COVER_URL,
       score: scoreBookResult(cleanQuery, item)
     }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
+    .sort((a, b) => b.score - a.score);
+
+  const ordered = sortBooksSeriesAware(deduped);
+  return modal ? ordered.slice(0, SEARCH_LIMITS.MODAL_RESULTS) : ordered;
 }
 
 /* =========================
@@ -1631,7 +1754,7 @@ export async function runCategorySearch(query, category) {
 
   let result = [];
 
-  if (normalizedCategory === "books") result = dedupeAll(await searchBooks(cleanQuery));
+  if (normalizedCategory === "books") result = dedupeAll(await searchBooks(cleanQuery, { modal: false }));
   if (normalizedCategory === "movies") result = dedupeAll(await searchMovies(cleanQuery));
   if (normalizedCategory === "series") result = dedupeAll(await searchSeries(cleanQuery));
   if (normalizedCategory === "anime") result = dedupeAll(await searchAnimeOrManga(cleanQuery, "anime"));
