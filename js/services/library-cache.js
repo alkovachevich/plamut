@@ -5,9 +5,11 @@ const LEGACY_CACHE_KEYS = ["plamut_library_cache_v2", "plamut_library_cache"];
 const CACHE_TTL = 1000 * 60 * 10;
 const LIBRARY_DB_TIMEOUT_MS = 14000;
 const RETRY_AFTER_TIMEOUT_MS = 2500;
+const MAX_DEFERRED_RETRIES = 2;
 
 const loadPromisesByUserId = new Map();
 const retryTimersByUserId = new Map();
+const retryAttemptsByUserId = new Map();
 
 function now() {
   return Date.now();
@@ -70,6 +72,17 @@ function normalizeBucket(input = {}) {
     list: Array.isArray(input.list) ? input.list : [],
     categories
   };
+}
+
+function hasValidItems(items) {
+  return Array.isArray(items) && items.every((item) => item && typeof item === "object");
+}
+
+function isBrokenBucket(bucket = {}) {
+  if (!bucket || typeof bucket !== "object") return true;
+  if (!Array.isArray(bucket.list) || !Array.isArray(bucket.full)) return true;
+  if (!bucket.categories || typeof bucket.categories !== "object") return true;
+  return false;
 }
 
 function getUserBucket(cache, userId) {
@@ -195,6 +208,7 @@ function getLocalLibrarySnapshot(userId, { mode = "list", category = "" } = {}) 
 
   const cache = readRawCache();
   const bucket = normalizeBucket(cache[cleanUserId]);
+  if (isBrokenBucket(bucket)) return [];
   return getBucketItems(bucket, { mode, category });
 }
 
@@ -205,11 +219,17 @@ function isTimeoutError(error) {
 function scheduleRetry(userId) {
   const cleanUserId = clean(userId);
   if (!cleanUserId || retryTimersByUserId.has(cleanUserId)) return;
+  const attempts = Number(retryAttemptsByUserId.get(cleanUserId) || 0);
+  if (attempts >= MAX_DEFERRED_RETRIES) return;
 
   const timerId = setTimeout(() => {
     retryTimersByUserId.delete(cleanUserId);
+    retryAttemptsByUserId.set(cleanUserId, attempts + 1);
     refreshUserLibrary(cleanUserId, { mode: "full", category: "" }).catch((error) => {
       console.warn("library-cache: deferred DB retry skipped", error);
+      if (isTimeoutError(error)) {
+        scheduleRetry(cleanUserId);
+      }
     });
   }, RETRY_AFTER_TIMEOUT_MS);
 
@@ -233,6 +253,7 @@ export function getCachedLibrary(userId, { mode = "list", category = "" } = {}) 
 
   const cache = readRawCache();
   const bucket = normalizeBucket(cache[cleanUserId]);
+  if (isBrokenBucket(bucket)) return [];
 
   if (!bucket.updated_at || isExpired(bucket.updated_at)) {
     return [];
@@ -404,11 +425,16 @@ export async function refreshUserLibrary(userId, { mode = "full", category = "" 
     category: ""
   });
 
+  if (!hasValidItems(fresh)) {
+    throw new Error("library-cache: invalid DB payload");
+  }
+
   assignBucketItems(bucket, "full", fresh);
   assignBucketItems(bucket, "list", fresh);
 
   bucket.updated_at = now();
   writeRawCache(cache);
+  retryAttemptsByUserId.set(cleanUserId, 0);
 
   return getBucketItems(bucket, { mode, category });
 }
@@ -425,8 +451,9 @@ export async function loadUserLibrary(
   const cleanUserId = clean(userId);
   if (!cleanUserId) return [];
 
-  if (loadPromisesByUserId.has(cleanUserId)) {
-    return loadPromisesByUserId.get(cleanUserId);
+  const loadKey = `${cleanUserId}::${mode}::${cleanLower(category)}`;
+  if (loadPromisesByUserId.has(loadKey)) {
+    return loadPromisesByUserId.get(loadKey);
   }
 
   const cached = getCachedLibrary(cleanUserId, { mode, category });
@@ -455,10 +482,10 @@ export async function loadUserLibrary(
 
       return localSnapshot;
     } finally {
-      loadPromisesByUserId.delete(cleanUserId);
+      loadPromisesByUserId.delete(loadKey);
     }
   })();
 
-  loadPromisesByUserId.set(cleanUserId, loadPromise);
+  loadPromisesByUserId.set(loadKey, loadPromise);
   return loadPromise;
 }
