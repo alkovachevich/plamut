@@ -246,17 +246,18 @@ function pickBooksDescription(existing = {}, incoming = {}, field = "description
 
 function mergeItems(existing, incoming) {
   if (!existing?.category || !incoming?.category || existing.category !== incoming.category) {
-    console.warn("merge conflict: category mismatch", existing?.canonical_key, incoming?.canonical_key);
+    console.debug("merge conflict: category mismatch", existing?.canonical_key, incoming?.canonical_key);
     return existing || incoming || null;
   }
 
-  if (!hasStrictSharedIds(existing, incoming)) {
-    console.warn("merge conflict: no strict shared ids", existing?.canonical_key, incoming?.canonical_key);
+  const canMergeBooks = existing.category === "books" && hasBookMergeSignal(existing, incoming);
+  if (!hasStrictSharedIds(existing, incoming) && !canMergeBooks) {
+    console.debug("merge conflict: no shared ids/signals", existing?.canonical_key, incoming?.canonical_key);
     return existing;
   }
 
   if (existing.category === "books" && (hasBookScreenDescriptionNoise(existing) || hasBookScreenDescriptionNoise(incoming))) {
-    console.warn("merge conflict: books with screen-like description", existing?.canonical_key, incoming?.canonical_key);
+    console.debug("merge conflict: books with screen-like description", existing?.canonical_key, incoming?.canonical_key);
     return existing || incoming || null;
   }
 
@@ -265,6 +266,8 @@ function mergeItems(existing, incoming) {
   const existingMeta = existing.meta && typeof existing.meta === "object" ? existing.meta : {};
   const incomingMeta = incoming.meta && typeof incoming.meta === "object" ? incoming.meta : {};
   const resolvedSeriesCandidates = uniqueArray([
+    existingMeta.wikidata_series_name,
+    incomingMeta.wikidata_series_name,
     ...safeArray(existingMeta.series_candidates),
     ...safeArray(incomingMeta.series_candidates),
     ...safeArray(existingMeta.wikidata_relations?.series),
@@ -272,7 +275,13 @@ function mergeItems(existing, incoming) {
     existingMeta.series_name,
     incomingMeta.series_name
   ].filter(Boolean));
-  const resolvedSeriesName = existingMeta.series_name || incomingMeta.series_name || resolvedSeriesCandidates[0] || "";
+  const resolvedSeriesName =
+    existingMeta.wikidata_series_name ||
+    incomingMeta.wikidata_series_name ||
+    existingMeta.series_name ||
+    incomingMeta.series_name ||
+    resolvedSeriesCandidates[0] ||
+    "";
   const resolvedBookSearchMode =
     existing.category === "books"
       ? (existingMeta.book_search_mode === "title" || incomingMeta.book_search_mode === "title"
@@ -330,7 +339,7 @@ function mergeItems(existing, incoming) {
 
 function areSameBook(a = {}, b = {}) {
   if (a.category !== "books" || b.category !== "books") return false;
-  return hasStrictSharedIds(a, b);
+  return hasBookMergeSignal(a, b);
 }
 
 function dedupeBooks(items = []) {
@@ -609,6 +618,7 @@ function mapOpenLibraryDoc(doc, { mode = "title", language = "ru" } = {}) {
       openlibrary_cover_i: doc?.cover_i || null,
       author_names: authorNames,
       author_keys: authorKeys,
+      openlibrary_alternative_titles: openLibraryAlternatives,
       series_name: seriesName,
       series_candidates: uniqueArray([seriesName].filter(Boolean)),
       book_search_mode: mode
@@ -730,6 +740,28 @@ function hasStrictSharedIds(a = {}, b = {}) {
   return false;
 }
 
+function hasBookMergeSignal(a = {}, b = {}) {
+  if (a.category !== "books" || b.category !== "books") return false;
+  if (hasStrictSharedIds(a, b)) return true;
+
+  const aIds = a.external_ids || {};
+  const bIds = b.external_ids || {};
+  const aWork = normalizeOpenLibraryWorkKey(aIds.openlibrary_work || "");
+  const bWork = normalizeOpenLibraryWorkKey(bIds.openlibrary_work || "");
+  if (aWork && bWork && aWork === bWork) return true;
+  if (hasSharedValue(aIds.isbn, bIds.isbn)) return true;
+
+  const aTitles = getTitleKeys(a);
+  const bTitles = getTitleKeys(b);
+  if (!aTitles.length || !bTitles.length) return false;
+
+  return aTitles.some((left) => bTitles.some((right) => {
+    if (left === right) return true;
+    if (left.length > 6 && right.length > 6 && (left.includes(right) || right.includes(left))) return true;
+    return false;
+  }));
+}
+
 function resolveBooksPrimarySource(existing = {}, incoming = {}) {
   if (existing.category !== "books" || incoming.category !== "books") {
     return existing.primary_source || incoming.primary_source || "";
@@ -788,13 +820,40 @@ function normalizeBookDisplayLanguage(item = {}, language = "ru") {
   const titleEn = String(item.title_en || "").trim();
   const originalTitle = String(item.original_title || "").trim();
   const aliases = uniqueArray(safeArray(item.aliases).map(String).filter(Boolean));
+  const wikidataLabels = item?.meta?.wikidata_labels || {};
+  const wikidataAliases = item?.meta?.wikidata_aliases || {};
+  const alternativeTitles = safeArray(item?.meta?.openlibrary_alternative_titles).map(String).filter(Boolean);
 
-  const ruAlias = aliases.find((alias) => hasCyrillic(alias)) || "";
-  const enAlias = aliases.find((alias) => !hasCyrillic(alias)) || "";
+  const ruAlias = uniqueArray([
+    ...safeArray(wikidataAliases?.ru),
+    ...aliases
+  ]).find((alias) => hasCyrillic(alias)) || "";
+  const enAlias = uniqueArray([
+    ...safeArray(wikidataAliases?.en),
+    ...aliases
+  ]).find((alias) => !hasCyrillic(alias)) || "";
+  const ruAlternative = alternativeTitles.find((alias) => hasCyrillic(alias)) || "";
+  const itemTitle = String(item.title || "").trim();
 
   const localizedTitle = language === "en"
-    ? (titleEn || originalTitle || enAlias || titleRu || ruAlias || item.title || "")
-    : (titleRu || ruAlias || (hasCyrillic(item.title || "") ? item.title : "") || originalTitle || titleEn || enAlias || item.title || "");
+    ? (
+      titleEn ||
+      String(wikidataLabels?.en || "").trim() ||
+      originalTitle ||
+      enAlias ||
+      titleRu ||
+      itemTitle
+    )
+    : (
+      titleRu ||
+      String(wikidataLabels?.ru || "").trim() ||
+      ruAlias ||
+      ruAlternative ||
+      (hasCyrillic(itemTitle) ? itemTitle : "") ||
+      originalTitle ||
+      titleEn ||
+      itemTitle
+    );
 
   return {
     ...item,
@@ -832,6 +891,8 @@ function mapWikidataBookEntity(searchItem, details, entities = {}) {
     ...extractEntityIdsFromClaims(claims, "P629"),
     ...extractEntityIdsFromClaims(claims, "P747")
   ]);
+  const resolvedSeries = resolveWikidataEntityRefs(seriesIds, entities);
+  const resolvedSeriesName = resolvedSeries[0] || "";
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
@@ -860,15 +921,24 @@ function mapWikidataBookEntity(searchItem, details, entities = {}) {
     },
     meta: {
       wikidata_p18: safeArray(claims.P18).map((claim) => claim?.mainsnak?.datavalue?.value).find(Boolean) || "",
+      wikidata_labels: {
+        ru: titleRu,
+        en: titleEn
+      },
+      wikidata_aliases: {
+        ru: aliasesRu,
+        en: aliasesEn
+      },
       author_keys: authorIds,
       author_names: resolveWikidataEntityRefs(authorIds, entities),
-      series_name: resolveWikidataEntityRefs(seriesIds, entities)[0] || "",
+      wikidata_series_name: resolvedSeriesName,
+      series_name: resolvedSeriesName,
       series_candidates: uniqueArray([
-        ...resolveWikidataEntityRefs(seriesIds, entities),
+        ...resolvedSeries,
         ...seriesIds
       ]),
       wikidata_relations: {
-        series: uniqueArray([...resolveWikidataEntityRefs(seriesIds, entities), ...seriesIds]),
+        series: uniqueArray([...resolvedSeries, ...seriesIds]),
         follows: uniqueArray([...resolveWikidataEntityRefs(followsIds, entities), ...followsIds]),
         followed_by: uniqueArray([...resolveWikidataEntityRefs(followedByIds, entities), ...followedByIds]),
         based_on: uniqueArray([...resolveWikidataEntityRefs(basedOnIds, entities), ...basedOnIds]),
@@ -945,16 +1015,16 @@ function scoreBookResult(query, item) {
   let score = 0;
   const titlesPool = uniqueArray([title, titleRu, titleEn, originalTitle].filter(Boolean));
 
-  if (titlesPool.some((candidate) => candidate === q)) score += 300;
-  if (titlesPool.some((candidate) => candidate.startsWith(q))) score += 140;
-  if (titlesPool.some((candidate) => candidate.includes(q))) score += 90;
-  if (aliases.includes(q)) score += 80;
-  if (aliases.some((alias) => alias.startsWith(q))) score += 45;
-  if (aliases.some((alias) => alias.includes(q))) score += 25;
-  if (authorNames.includes(q)) score += 60;
-  if (authorNames.some((author) => author.includes(q))) score += 32;
-  if (searchMode === "title") score += 35;
-  if (searchMode === "author") score += 10;
+  if (titlesPool.some((candidate) => candidate === q)) score += 420;
+  if (titlesPool.some((candidate) => candidate.startsWith(q))) score += 180;
+  if (titlesPool.some((candidate) => candidate.includes(q))) score += 110;
+  if (aliases.includes(q)) score += 90;
+  if (aliases.some((alias) => alias.startsWith(q))) score += 55;
+  if (aliases.some((alias) => alias.includes(q))) score += 35;
+  if (authorNames.includes(q)) score += 45;
+  if (authorNames.some((author) => author.includes(q))) score += 24;
+  if (searchMode === "title") score += 70;
+  if (searchMode === "author") score += 12;
   if (item.cover_url) score += 8;
   if (item.year) score += 10;
   if (Object.keys(item.external_ids || {}).some((key) => {
@@ -968,17 +1038,8 @@ function scoreBookResult(query, item) {
 
 function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
   return safeArray(wikidataItems).map((item) => {
-    const itemIsbns = safeArray(item.external_ids?.isbn);
-    const itemWork = item.external_ids?.openlibrary_work || "";
-
     const match = safeArray(openLibraryItems).find((candidate) => {
-      const candidateIsbns = safeArray(candidate.external_ids?.isbn);
-      const candidateWork = candidate.external_ids?.openlibrary_work || "";
-
-      if (itemWork && candidateWork && itemWork === candidateWork) return true;
-      if (itemIsbns.some((isbn) => candidateIsbns.includes(isbn))) return true;
-
-      return false;
+      return hasBookMergeSignal(item, candidate);
     });
 
     if (!match) return item;
@@ -1279,7 +1340,7 @@ async function searchAnimeOrManga(query, category = "anime") {
     return safeArray(payload?.data?.Page?.media)
       .map((item) => mapAniListItem(item, category));
   })().catch((error) => {
-    console.warn("AniList search error:", error);
+    console.debug("AniList search error:", error);
     return [];
   });
 
@@ -1392,15 +1453,15 @@ function hasConflictData(item = {}) {
 
 function validateFinalItem(item = {}) {
   if (!item?.title || !item?.category || !item?.canonical_key) {
-    console.warn("invalid entity: missing required fields", item?.canonical_key || item?.title || "unknown");
+    console.debug("invalid entity: missing required fields", item?.canonical_key || item?.title || "unknown");
     return false;
   }
   if (!["books", "movies", "series", "anime", "manga"].includes(item.category)) {
-    console.warn("invalid entity: unsupported category", item.category, item.canonical_key);
+    console.debug("invalid entity: unsupported category", item.category, item.canonical_key);
     return false;
   }
   if (hasConflictData(item)) {
-    console.warn("invalid entity: conflicting data", item.canonical_key);
+    console.debug("invalid entity: conflicting data", item.canonical_key);
     return false;
   }
   return true;
