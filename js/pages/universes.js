@@ -35,6 +35,8 @@ function renderUniverseCard(universe = {}) {
   const title = universe.title || "Без названия";
   const total = Number(universe.total || universe.items?.length || 0);
   const done = Number(universe.done || 0);
+  const inLibrary = Number(universe.in_library_count ?? done);
+  const notAdded = Number(universe.not_added_count ?? Math.max(0, total - inLibrary));
   const source = universe.source || "";
 
   return `
@@ -53,6 +55,9 @@ function renderUniverseCard(universe = {}) {
           <div class="universe-title">${escapeHtml(title)}</div>
           <div class="universe-meta">
             ${escapeHtml(String(total))} элементов · готово ${escapeHtml(String(done))}
+          </div>
+          <div class="universe-meta">
+            В библиотеке ${escapeHtml(String(inLibrary))} · не добавлено ${escapeHtml(String(notAdded))}
           </div>
           ${
             source
