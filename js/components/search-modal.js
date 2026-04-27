@@ -39,7 +39,29 @@ function renderEmpty(query) {
   `;
 }
 
+function getBookAuthors(item = {}) {
+  return (
+    item?.meta?.author_names ||
+    item?.meta?.authors ||
+    item?.authors ||
+    []
+  ).filter(Boolean);
+}
+
+function getBookSeriesName(item = {}) {
+  return (
+    item?.meta?.series_name ||
+    item?.meta?.series ||
+    item?.series_name ||
+    ""
+  );
+}
+
 function renderCover(item) {
+  if (item.category === "books") {
+    return "";
+  }
+
   if (item.cover_url) {
     return `
       <img
@@ -54,22 +76,51 @@ function renderCover(item) {
   return `<div class="search-result-card__cover-fallback">?</div>`;
 }
 
+function renderBookExtraMeta(item) {
+  if (item.category !== "books") return "";
+
+  const authors = getBookAuthors(item);
+  const seriesName = getBookSeriesName(item);
+
+  return `
+    ${
+      authors.length
+        ? `<div class="search-result-card__subtitle">Автор: ${escapeHtml(authors.join(", "))}</div>`
+        : ""
+    }
+
+    ${
+      seriesName
+        ? `<div class="search-result-card__series">Часть серии: ${escapeHtml(seriesName)}</div>`
+        : ""
+    }
+  `;
+}
+
 function renderResultCard(item) {
+  const isBook = item.category === "books";
+
   const year = item.year
     ? `<span class="search-result-card__year">${escapeHtml(String(item.year))}</span>`
     : "";
 
   return `
-    <div class="search-result-card">
+    <div class="search-result-card ${isBook ? "is-book" : ""}">
       <button
         class="search-result-card__main"
         type="button"
         data-card-key="${escapeHtml(item.canonical_key)}"
         data-card-category="${escapeHtml(item.category)}"
       >
-        <div class="search-result-card__cover">
-          ${renderCover(item)}
-        </div>
+        ${
+          isBook
+            ? ""
+            : `
+              <div class="search-result-card__cover">
+                ${renderCover(item)}
+              </div>
+            `
+        }
 
         <div class="search-result-card__meta">
           <div class="search-result-card__top">
@@ -80,10 +131,12 @@ function renderResultCard(item) {
           </div>
 
           ${
-            item.original_title
+            item.original_title && item.original_title !== item.title
               ? `<div class="search-result-card__subtitle">${escapeHtml(item.original_title)}</div>`
               : ""
           }
+
+          ${renderBookExtraMeta(item)}
 
           <div class="search-result-card__category">
             ${escapeHtml(getCategoryLabel(state.language, item.category))}
@@ -192,10 +245,13 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
 
   root.querySelector('[data-action="show-all"]')?.addEventListener("click", () => {
     closeSearchModal();
+
     const payload = { q: currentQuery || "" };
+
     if (state.searchContextCategory) {
       payload.category = state.searchContextCategory;
     }
+
     navigate("/search", payload);
   });
 }
@@ -206,6 +262,7 @@ async function performSearch(root, query) {
 
   const cleanQuery = String(query || "").trim();
   const contextCategory = String(state.searchContextCategory || "").trim();
+
   root.dataset.currentQuery = cleanQuery;
 
   activeSearchRequestId += 1;
@@ -436,6 +493,10 @@ export function renderSearchModal(root, options = {}) {
         color: var(--text);
       }
 
+      .search-result-card.is-book .search-result-card__main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       .search-result-card__add {
         min-width: 98px;
         min-height: 40px;
@@ -505,6 +566,15 @@ export function renderSearchModal(root, options = {}) {
         font-size: 13px;
         color: var(--text-soft);
         line-height: 1.4;
+      }
+
+      .search-result-card__series {
+        width: fit-content;
+        font-size: 12px;
+        color: var(--text-soft);
+        background: var(--accent-soft);
+        padding: 4px 8px;
+        border-radius: 999px;
       }
 
       .search-result-card__category {
