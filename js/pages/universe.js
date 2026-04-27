@@ -22,24 +22,37 @@ function getCover(entity = {}) {
 
 
 const GROUP_TITLES = {
-  direct_sequel: "Прямые продолжения",
-  direct_prequel: "Прямые продолжения",
-  book_series: "Серия книг",
-  adaptation: "Экранизации",
-  source_material: "Экранизации",
-  spin_off: "Спинофы",
+  source_material: "Первоисточник",
+  book_series: "Первоисточник",
+  direct_sequel: "Продолжения",
+  sequel: "Продолжения",
+  direct_prequel: "Предыстории",
+  prequel: "Предыстории",
+  adaptation: "Адаптации",
+  spin_off: "Спин-оффы",
   same_universe: "Одна вселенная",
-  release_order: "Порядок выхода",
-  story_chronology: "Хронология событий",
   related_work: "Связанное",
   alternate_version: "Связанное",
   reboot: "Связанное",
   remake: "Связанное"
 };
 
-function groupItemsByRelations(items = [], relations = [], seedId = null) {
+function buildRelationOrderMap(relations = [], sortMode = "release") {
+  const type = sortMode === "story" ? "story_chronology" : "release_order";
+  const map = new Map();
+  safeArray(relations)
+    .filter((rel) => rel.relation_type === type && Number(rel.to_entity_id))
+    .sort((a, b) => Number(a.sort_order ?? 999) - Number(b.sort_order ?? 999))
+    .forEach((rel, index) => {
+      map.set(Number(rel.to_entity_id), Number(rel.sort_order ?? index));
+    });
+  return map;
+}
+
+function groupItemsByRelations(items = [], relations = [], seedId = null, sortMode = "release") {
   const byId = new Map(safeArray(items).map((item) => [Number(item.media_entities?.id), item]));
   const grouped = new Map();
+  const orderMap = buildRelationOrderMap(relations, sortMode);
 
   safeArray(relations).forEach((rel) => {
     if (seedId && Number(rel.from_entity_id) !== Number(seedId)) return;
@@ -59,7 +72,19 @@ function groupItemsByRelations(items = [], relations = [], seedId = null) {
 
   return Array.from(grouped.entries()).map(([title, entries]) => ({
     title,
-    entries: entries.filter((entry, idx, arr) => idx === arr.findIndex((x) => x.item.media_entities?.id === entry.item.media_entities?.id))
+    entries: entries
+      .filter((entry, idx, arr) => idx === arr.findIndex((x) => x.item.media_entities?.id === entry.item.media_entities?.id))
+      .sort((a, b) => {
+        const aId = Number(a.item.media_entities?.id || 0);
+        const bId = Number(b.item.media_entities?.id || 0);
+        if (orderMap.has(aId) || orderMap.has(bId)) {
+          return (orderMap.get(aId) ?? 999) - (orderMap.get(bId) ?? 999);
+        }
+        const ay = Number(a.item.media_entities?.year || 0);
+        const by = Number(b.item.media_entities?.year || 0);
+        if (ay && by && ay !== by) return ay - by;
+        return resolveTitle(a.item.media_entities || {}).localeCompare(resolveTitle(b.item.media_entities || {}), "ru");
+      })
   })).filter((group) => group.entries.length);
 }
 
@@ -87,7 +112,7 @@ function findRelationForItem(targetEntityId, relations = []) {
     .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null;
 }
 
-function renderItem(item, index, relation = null, relations = []) {
+function renderItem(item, index, relation = null, relations = [], rootSourceId = 0) {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "Planned";
@@ -121,6 +146,7 @@ function renderItem(item, index, relation = null, relations = []) {
           ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
           <span>${escapeHtml(status)}</span>
           <span>${escapeHtml(relationLabel)}</span>
+          ${Number(entity.id) === Number(rootSourceId) ? `<span>Первоисточник</span>` : ""}
         </div>
       </div>
     </button>
@@ -203,6 +229,28 @@ function renderStyles() {
         background: var(--accent-soft);
         color: var(--text);
         font-size: 12px;
+      }
+
+      .sort-switch {
+        display: inline-flex;
+        gap: 6px;
+        background: var(--bg-soft);
+        padding: 4px;
+        border-radius: 999px;
+        border: 1px solid var(--border-soft);
+        width: fit-content;
+      }
+
+      .sort-btn {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: var(--text-soft);
+      }
+
+      .sort-btn.is-active {
+        background: var(--surface);
+        color: var(--text);
       }
 
       .section-title {
@@ -466,6 +514,21 @@ export async function renderUniversePage(root, params = {}) {
 
     const done = items.filter((item) => item.status === "done").length;
 
+    const rootSourceId = Number(universe?.metadata_json?.root_source_entity_id || universe?.metadata_json?.seed_entity_id || 0);
+    const hasStoryChronology = relations.some((rel) => rel.relation_type === "story_chronology");
+    const initialSort = hasStoryChronology ? "story" : "release";
+
+    function renderBody(sortMode = initialSort) {
+      return groupItemsByRelations(items, relations, Number(universe?.metadata_json?.seed_entity_id || 0), sortMode)
+        .map((group) => `
+          <div class="section-title">${escapeHtml(group.title)}</div>
+          <div class="timeline">
+            ${group.entries.map((entry, index) => renderItem(entry.item, index, entry.relation, relations, rootSourceId)).join("")}
+          </div>
+        `)
+        .join("");
+    }
+
     root.innerHTML = `
       ${renderStyles()}
 
@@ -492,23 +555,35 @@ export async function renderUniversePage(root, params = {}) {
               <span class="stat">${escapeHtml(String(items.length))} элементов</span>
               <span class="stat">готово ${escapeHtml(String(done))}</span>
               ${relations.length ? `<span class="stat">${escapeHtml(String(relations.length))} связей</span>` : ""}
+              ${rootSourceId ? `<span class="stat">первоисточник #${escapeHtml(String(rootSourceId))}</span>` : ""}
               ${universe.source ? `<span class="stat">${escapeHtml(universe.source === "openai" ? "OpenAI + БД" : "БД")}</span>` : ""}
             </div>
           </div>
         </div>
 
-        ${groupItemsByRelations(items, relations, Number(universe?.metadata_json?.seed_entity_id || 0))
-          .map((group) => `
-            <div class="section-title">${escapeHtml(group.title)}</div>
-            <div class="timeline">
-              ${group.entries.map((entry, index) => renderItem(entry.item, index, entry.relation, relations)).join("")}
-            </div>
-          `)
-          .join("")}
+        <div class="sort-switch">
+          <button class="sort-btn ${initialSort === "release" ? "is-active" : ""}" data-sort="release" type="button">По выходу</button>
+          <button class="sort-btn ${initialSort === "story" ? "is-active" : ""}" data-sort="story" type="button" ${hasStoryChronology ? "" : "disabled"}>По событиям</button>
+        </div>
+
+        <div data-groups-root>
+          ${renderBody(initialSort)}
+        </div>
       </section>
     `;
 
     bindItems(root);
+    root.querySelectorAll("[data-sort]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.sort || "release";
+        root.querySelectorAll("[data-sort]").forEach((node) => node.classList.toggle("is-active", node === button));
+        const groupsRoot = root.querySelector("[data-groups-root]");
+        if (groupsRoot) {
+          groupsRoot.innerHTML = renderBody(mode);
+          bindItems(root);
+        }
+      });
+    });
   } catch (error) {
     console.warn("Universe details error:", error);
     renderError(root);
