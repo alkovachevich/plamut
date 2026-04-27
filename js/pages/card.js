@@ -702,7 +702,7 @@ function bindCardActions({
       startPolling(job);
       setStatus("Строим вселенную…");
 
-      buildUniverseForJob(job, saved.entity)
+      buildUniverseForJob(job, saved.entity, { force: forceRebuild })
         .then((result) => {
           if (destroyedRef.value || !result?.universe_key) return;
           navigate("/universe", { id: result.universe_key });
