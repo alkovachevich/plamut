@@ -78,6 +78,9 @@ const WIKIDATA_ALLOWED_BOOK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q4746
 const WIKIDATA_BANNED_BOOK_TYPES = new Set(["Q11424", "Q5398426", "Q95074", "Q5", "Q7889", "Q43229"]);
 const WIKIDATA_MOVIE_TYPES = new Set(["Q11424", "Q24856"]);
 const WIKIDATA_TV_TYPES = new Set(["Q5398426"]);
+const WIKIDATA_HUMAN_TYPES = new Set(["Q5", "Q15632617", "Q95074"]);
+const WIKIDATA_ORGANIZATION_TYPES = new Set(["Q43229", "Q783794"]);
+const WIKIDATA_CHARACTER_TYPES = new Set(["Q95074", "Q15773317"]);
 
 function clean(value = "") {
   return String(value || "").trim();
@@ -296,6 +299,71 @@ export function deriveUniverseInfo(entity = {}) {
     universe_key: slugify(words.join("-")),
     title: words.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1)).join(" ")
   };
+}
+
+function entityLooksLikeBookFranchise(seedEntity = {}) {
+  const text = compact([
+    resolveTitle(seedEntity),
+    seedEntity.title_primary,
+    seedEntity.description_ru,
+    seedEntity.description_en
+  ].join(" ")).toLowerCase();
+  return cleanLower(seedEntity.category) === "books" || text.includes("книга") || text.includes("book");
+}
+
+function parseEntityYear(entity = {}) {
+  const year = Number(entity?.year);
+  if (Number.isFinite(year) && year > 0) return year;
+
+  const releaseDate =
+    entity?.meta?.release_date ||
+    entity?.meta?.first_air_date ||
+    entity?.meta?.publication_date ||
+    "";
+  const parsed = Number(String(releaseDate).slice(0, 4));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function hasKnowledgeIds(entity = {}) {
+  const ids = entity?.external_ids || {};
+  return Boolean(clean(ids.wikidata) || clean(ids.openlibrary_work));
+}
+
+export function resolveRootSourceCandidate(seedEntity = {}, candidates = []) {
+  const shortlist = dedupeUniverseItems(
+    [{ media_entities: seedEntity }, ...safeArray(candidates).map((item) => ({ media_entities: item }))]
+  ).map((row) => row.media_entities || row);
+
+  if (!shortlist.length) return seedEntity;
+
+  const bookFranchise = entityLooksLikeBookFranchise(seedEntity);
+
+  const scored = shortlist.map((candidate) => {
+    const relType = cleanLower(candidate?.meta?.root_relation_type || candidate?.root_relation_type || "");
+    const category = cleanLower(candidate?.category || "");
+    const year = parseEntityYear(candidate);
+
+    let score = 0;
+    if (relType === "source_material") score += 200;
+    if (relType === "book_series") score += 160;
+    if (bookFranchise && category === "books") score += 80;
+    if (hasKnowledgeIds(candidate)) score += 30;
+    if (candidate?.id && Number(candidate.id) === Number(seedEntity?.id)) score += 10;
+    if (year) score += Math.max(0, 120 - (year - 1800));
+
+    return {
+      candidate,
+      score,
+      year: year || 9999
+    };
+  }).sort((a, b) => b.score - a.score || a.year - b.year);
+
+  const best = scored[0];
+  const second = scored[1];
+  const confidenceGap = best ? (best.score - (second?.score ?? 0)) : 0;
+
+  if (!best || confidenceGap < 20) return seedEntity;
+  return best.candidate || seedEntity;
 }
 
 function entityToAiPayload(entity = {}) {
@@ -768,7 +836,7 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
     existing_entities: safeArray(items).map((item) => item.media_entities || item),
     saved_media_entities: savedEntities.map(entityToAiPayload),
     instruction:
-      "Normalize one media universe. Return JSON with universe title+description, deduped_entities, relation groups, direct sequels/prequels, adaptations/source material, spin-offs, same universe, book_series, release_order, story_chronology, and low-confidence related_work for weak links. Use existing entity IDs when possible. Never invent entity IDs."
+      "Normalize one media universe graph. Return JSON in the same schema: universe, deduped_entities, relations, direct_sequels, direct_prequels, adaptations, source_material, sequels, prequels, spin_offs, same_universe, related_work, release_order, story_chronology. Identify the most likely root source (source_material or book_series when justified). Do not mix characters with works. Do not include humans, organizations, or fictional characters as universe members. Use only existing entity IDs from payload. Never invent IDs. Avoid self-relations and noisy duplicates. If uncertain, return fewer but higher-quality relations."
   };
 
   try {
@@ -823,6 +891,30 @@ function isAllowedUniverseMemberForSeed(seedCategory = "", entity = {}) {
   }
 
   return true;
+}
+
+function isBlockedWikidataType(typeIds = []) {
+  return safeArray(typeIds).some((id) =>
+    WIKIDATA_HUMAN_TYPES.has(id) ||
+    WIKIDATA_ORGANIZATION_TYPES.has(id) ||
+    WIKIDATA_CHARACTER_TYPES.has(id)
+  );
+}
+
+function isClearlyNotWorkCategory(category = "") {
+  const normalized = cleanLower(category);
+  return [
+    "human",
+    "humans",
+    "person",
+    "people",
+    "character",
+    "characters",
+    "organization",
+    "organizations",
+    "company",
+    "companies"
+  ].includes(normalized);
 }
 function sharedExternalId(a = {}, b = {}) {
   const aIds = a.external_ids || {};
@@ -1435,6 +1527,10 @@ async function fetchWikidataSearch(entity = {}) {
         console.warn("filtered wikidata item: missing P31", item.id);
         return null;
       }
+      if (isBlockedWikidataType(typeIds)) {
+        console.warn("filtered wikidata item: blocked person/org/character", item.id, typeIds);
+        return null;
+      }
       if (!isAllowedWikidataForSeed(seedCategory, claims)) {
         console.warn("filtered wikidata item: seed category mismatch", item.id, seedCategory, typeIds);
         return null;
@@ -1528,6 +1624,26 @@ function preDedupeUniverseItems(seedEntity, items = [], limit = 40) {
 }
 
 function dedupeUniverseItems(items = []) {
+  function entityQuality(entity = {}) {
+    const ids = entity.external_ids || {};
+    let score = 0;
+    if (entity.id) score += 100;
+    if (clean(entity.canonical_key)) score += 20;
+    if (ids.wikidata) score += 50;
+    if (ids.openlibrary_work) score += 45;
+    if (ids.tmdb) score += 35;
+    if (ids.imdb) score += 25;
+    if (entity.cover_url) score += 10;
+    if (entity.year) score += 5;
+    return score;
+  }
+
+  function chooseBetterEntity(left = {}, right = {}) {
+    const leftScore = entityQuality(left);
+    const rightScore = entityQuality(right);
+    return rightScore > leftScore ? right : left;
+  }
+
   const aliasToBucket = new Map();
   const buckets = new Map();
 
@@ -1556,18 +1672,20 @@ function dedupeUniverseItems(items = []) {
       return;
     }
 
+    const better = chooseBetterEntity(existing.media_entities || {}, entity);
     buckets.set(key, {
       ...existing,
       ...item,
       media_entities: {
         ...existing.media_entities,
         ...entity,
-        title_primary: existing.media_entities?.title_primary || entity.title_primary,
-        title_ru: existing.media_entities?.title_ru || entity.title_ru,
-        title_en: existing.media_entities?.title_en || entity.title_en,
-        original_title: existing.media_entities?.original_title || entity.original_title,
-        year: existing.media_entities?.year || entity.year,
-        cover_url: existing.media_entities?.cover_url || entity.cover_url,
+        ...better,
+        title_primary: better.title_primary || existing.media_entities?.title_primary || entity.title_primary,
+        title_ru: better.title_ru || existing.media_entities?.title_ru || entity.title_ru,
+        title_en: better.title_en || existing.media_entities?.title_en || entity.title_en,
+        original_title: better.original_title || existing.media_entities?.original_title || entity.original_title,
+        year: better.year || existing.media_entities?.year || entity.year,
+        cover_url: better.cover_url || existing.media_entities?.cover_url || entity.cover_url,
         external_ids: {
           ...(existing.media_entities?.external_ids || {}),
           ...(entity.external_ids || {})
@@ -1633,17 +1751,47 @@ async function resolveAiEntitiesToDb(aiEntities = [], existingItems = []) {
 }
 
 function sanitizeAiRelations(relations = [], allowedEntityIds = new Set(), entityCategoryMap = new Map()) {
-  return safeArray(relations).filter((relation) => {
+  const relationSeenByPair = new Map();
+  const result = [];
+
+  safeArray(relations).forEach((relation) => {
     const fromId = Number(relation.from_entity_id);
     const toId = Number(relation.to_entity_id);
-    if (!allowedEntityIds.has(fromId) || !allowedEntityIds.has(toId)) return false;
-    if (entityCategoryMap.size) {
-      const fromCategory = cleanLower(entityCategoryMap.get(fromId) || "");
-      const toCategory = cleanLower(entityCategoryMap.get(toId) || "");
-      if (fromCategory && toCategory && fromCategory !== toCategory) return false;
-    }
-    return true;
+    const relationType = normalizeRelationType(relation.relation_type);
+    if (!fromId || !toId || fromId === toId) return;
+    if (!allowedEntityIds.has(fromId) || !allowedEntityIds.has(toId)) return;
+
+    const fromCategory = cleanLower(entityCategoryMap.get(fromId) || "");
+    const toCategory = cleanLower(entityCategoryMap.get(toId) || "");
+    if (isClearlyNotWorkCategory(fromCategory) || isClearlyNotWorkCategory(toCategory)) return;
+
+    const pairKey = `${fromId}:${toId}`;
+    const relationKey = `${pairKey}:${relationType}`;
+    if (relationSeenByPair.has(relationKey)) return;
+
+    const pairTypes = relationSeenByPair.get(pairKey) || new Set();
+    if (
+      pairTypes.has("direct_sequel") &&
+      relationType === "sequel"
+    ) return;
+    if (
+      pairTypes.has("direct_prequel") &&
+      relationType === "prequel"
+    ) return;
+
+    relationSeenByPair.set(relationKey, true);
+    pairTypes.add(relationType);
+    relationSeenByPair.set(pairKey, pairTypes);
+
+    result.push({
+      ...relation,
+      relation_type: relationType,
+      from_entity_id: fromId,
+      to_entity_id: toId
+    });
   });
+
+  return result;
 }
 function buildOrderMap(aiOrder = [], fallbackItems = []) {
   const orderMap = new Map();
@@ -1661,6 +1809,12 @@ function buildOrderMap(aiOrder = [], fallbackItems = []) {
   });
 
   return orderMap;
+}
+
+function isRecentEnough(isoDate, maxAgeMs = 24 * 60 * 60 * 1000) {
+  const ts = new Date(isoDate || "").getTime();
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+  return Date.now() - ts < maxAgeMs;
 }
 
 async function readPersistedUniverseForEntity(entity = {}) {
@@ -1682,8 +1836,9 @@ async function readPersistedUniverseForEntity(entity = {}) {
   };
 }
 
-export async function buildUniverseForJob(job, entity) {
+export async function buildUniverseForJob(job, entity, options = { force: false }) {
   if (!job?.id || !entity?.id) return null;
+  const force = Boolean(options && typeof options === "object" ? options.force : false);
 
   try {
     await updateUniverseBuildJob(job.id, {
@@ -1692,6 +1847,27 @@ export async function buildUniverseForJob(job, entity) {
       progress_total: 9,
       progress_label: "Проверяем сохранённую вселенную"
     });
+
+    if (
+      !force &&
+      clean(entity.universe_key) &&
+      cleanLower(entity.relations_status) === "ready" &&
+      isRecentEnough(entity.relations_built_at)
+    ) {
+      await updateUniverseBuildJob(job.id, {
+        status: UNIVERSE_JOB_STATUS.READY,
+        progress_current: 9,
+        progress_total: 9,
+        progress_label: "Пропускаем: вселенная свежая (<24ч)",
+        universe_key: entity.universe_key,
+        result_payload: {
+          universe_key: entity.universe_key,
+          source: "fresh_entity_cache",
+          skipped_rebuild: true
+        }
+      });
+      return { universe_key: entity.universe_key };
+    }
 
     const persisted = await readPersistedUniverseForEntity(entity);
 
@@ -1710,7 +1886,12 @@ export async function buildUniverseForJob(job, entity) {
         }
       });
 
-      return persisted;
+      return {
+        universe_key: persisted.universe.universe_key,
+        universe: persisted.universe,
+        items: persisted.items,
+        relations: persisted.relations
+      };
     }
 
     await updateUniverseBuildJob(job.id, {
@@ -1825,6 +2006,20 @@ export async function buildUniverseForJob(job, entity) {
 
     const mergedItems = dedupeUniverseItems([...allItems, ...aiResolvedItems])
       .filter((item) => isAllowedUniverseMemberForSeed(cleanLower(entity.category), item.media_entities || {}));
+    const relationCandidates = safeArray(aiResult?.relations).map((row) => ({
+      id: Number(row.to_entity_id),
+      root_relation_type: row.relation_type
+    }));
+    const rootCandidates = mergedItems
+      .map((item) => {
+        const row = item.media_entities || {};
+        const match = relationCandidates.find((entry) => entry.id === Number(row.id));
+        return {
+          ...row,
+          root_relation_type: match?.root_relation_type || ""
+        };
+      });
+    const rootSource = resolveRootSourceCandidate(seedResolved, rootCandidates);
     const allowedEntityIds = new Set(
       mergedItems.map((item) => Number(item.media_entities?.id || item.entity_id || item.id)).filter(Boolean)
     );
@@ -1850,6 +2045,7 @@ export async function buildUniverseForJob(job, entity) {
       metadata_json: {
         job_id: job.id,
         seed_entity_id: seedResolved.id,
+        root_source_entity_id: rootSource?.id || seedResolved.id,
         ai_used: Boolean(aiResult),
         fallback_used: !aiResult
       }
@@ -2125,6 +2321,9 @@ export async function getUserUniverses(userId) {
   );
 
   const persistedGroups = [];
+  const libraryEntityIds = new Set(
+    libraryItems.map((item) => Number(item.media_entities?.id || item.entity_id || 0)).filter(Boolean)
+  );
 
   for (const universeKey of knownUniverseKeys) {
     const group = await fetchUniverseGroup(universeKey);
@@ -2138,6 +2337,8 @@ export async function getUserUniverses(userId) {
         items: members,
         total: members.length,
         done,
+        in_library_count: members.filter((item) => libraryEntityIds.has(Number(item.media_entities?.id || 0))).length,
+        not_added_count: members.filter((item) => !libraryEntityIds.has(Number(item.media_entities?.id || 0))).length,
         progress: members.length ? done / members.length : 0
       });
     }
@@ -2197,6 +2398,8 @@ export async function getUserUniverses(userId) {
         items: sorted,
         total: sorted.length,
         done,
+        in_library_count: sorted.length,
+        not_added_count: 0,
         progress: sorted.length ? done / sorted.length : 0
       };
     })
