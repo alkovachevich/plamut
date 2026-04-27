@@ -597,6 +597,22 @@ export async function renderCategoryPage(root, params = {}) {
   const category = params.category || "unknown";
   const title = getCategoryLabel(state.language, category);
   const userId = state.user?.id;
+  const authStatus = state.authStatus;
+
+  if (authStatus === "restoring") {
+    root.innerHTML = `
+      ${renderStyles()}
+      <section class="page">
+        <div class="page-header">
+          <div class="page-title">${escapeHtml(title)}</div>
+        </div>
+        <div class="empty-state">
+          <div class="empty-state__title">Восстановление сессии…</div>
+        </div>
+      </section>
+    `;
+    return () => {};
+  }
 
   if (!userId) {
     renderGuestState(root, title);
