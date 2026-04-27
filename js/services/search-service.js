@@ -35,6 +35,26 @@ function normalizeQuery(value = "") {
   return normalizeString(value || "");
 }
 
+function getSystemLanguage() {
+  const htmlLang = typeof document !== "undefined"
+    ? String(document?.documentElement?.lang || "").trim().toLowerCase()
+    : "";
+  if (htmlLang.startsWith("en")) return "en";
+  if (htmlLang.startsWith("ru")) return "ru";
+
+  const localStorageLang = typeof localStorage !== "undefined"
+    ? String(localStorage.getItem("plamut_language") || "").trim().toLowerCase()
+    : "";
+  if (localStorageLang === "en") return "en";
+  if (localStorageLang === "ru") return "ru";
+
+  return "ru";
+}
+
+function hasCyrillic(value = "") {
+  return /[А-Яа-яЁёІіЇїЄє]/.test(String(value || ""));
+}
+
 function emptyGroups() {
   return {
     books: [],
@@ -154,6 +174,8 @@ function normalizeSearchResult(raw = {}) {
     canonical_key: canonical,
     category,
     title,
+    title_ru: String(raw.title_ru || "").trim(),
+    title_en: String(raw.title_en || "").trim(),
     original_title: originalTitle,
     year: safeNumberYear(raw.year),
     cover_url: String(raw.cover_url || "").trim(),
@@ -242,6 +264,15 @@ function mergeItems(existing, incoming) {
   const incomingIds = incoming.external_ids || {};
   const existingMeta = existing.meta && typeof existing.meta === "object" ? existing.meta : {};
   const incomingMeta = incoming.meta && typeof incoming.meta === "object" ? incoming.meta : {};
+  const resolvedSeriesCandidates = uniqueArray([
+    ...safeArray(existingMeta.series_candidates),
+    ...safeArray(incomingMeta.series_candidates),
+    ...safeArray(existingMeta.wikidata_relations?.series),
+    ...safeArray(incomingMeta.wikidata_relations?.series),
+    existingMeta.series_name,
+    incomingMeta.series_name
+  ].filter(Boolean));
+  const resolvedSeriesName = existingMeta.series_name || incomingMeta.series_name || resolvedSeriesCandidates[0] || "";
   const resolvedBookSearchMode =
     existing.category === "books"
       ? (existingMeta.book_search_mode === "title" || incomingMeta.book_search_mode === "title"
@@ -290,6 +321,8 @@ function mergeItems(existing, incoming) {
     meta: {
       ...existingMeta,
       ...incomingMeta,
+      series_name: resolvedSeriesName,
+      series_candidates: resolvedSeriesCandidates,
       ...(resolvedBookSearchMode ? { book_search_mode: resolvedBookSearchMode } : {})
     }
   };
@@ -457,7 +490,10 @@ async function fetchOpenLibraryByTitle(query) {
       "isbn",
       "edition_key",
       "ia",
-      "subject"
+      "subject",
+      "person",
+      "place",
+      "time"
     ].join(",")
   );
 
@@ -491,7 +527,11 @@ async function fetchOpenLibraryByAuthor(query) {
       "cover_i",
       "isbn",
       "edition_key",
-      "ia"
+      "ia",
+      "subject",
+      "person",
+      "place",
+      "time"
     ].join(",")
   );
 
@@ -508,13 +548,19 @@ async function fetchOpenLibraryByAuthor(query) {
 }
 
 function extractOpenLibrarySeriesName(doc = {}) {
-  const subjects = safeArray(doc?.subject).map((value) => String(value || "").trim()).filter(Boolean);
-  const explicitSeries = subjects.find((value) => /(^|[\s:(-])series([\s):,-]|$)/i.test(value));
+  const subjectPool = [
+    ...safeArray(doc?.subject),
+    ...safeArray(doc?.person),
+    ...safeArray(doc?.place),
+    ...safeArray(doc?.time)
+  ];
+  const subjects = subjectPool.map((value) => String(value || "").trim()).filter(Boolean);
+  const explicitSeries = subjects.find((value) => /(book series|книжн(ая|ой) серия|цикл|series)/i.test(value));
   if (explicitSeries) return explicitSeries;
   return "";
 }
 
-function mapOpenLibraryDoc(doc) {
+function mapOpenLibraryDoc(doc, { mode = "title", language = "ru" } = {}) {
   const workKey = typeof doc?.key === "string" ? doc.key : "";
   const normalizedWorkKey = normalizeOpenLibraryWorkKey(workKey);
 
@@ -524,6 +570,14 @@ function mapOpenLibraryDoc(doc) {
   const authorNames = uniqueArray([...safeArray(doc?.author_name).map(String).filter(Boolean)]);
   const authorKeys = uniqueArray([...safeArray(doc?.author_key).map(String).filter(Boolean)]);
   const seriesName = extractOpenLibrarySeriesName(doc);
+  const openLibraryAlternatives = uniqueArray(safeArray(doc?.alternative_title).map(String).filter(Boolean));
+  const openLibraryRuAlternative = openLibraryAlternatives.find((value) => hasCyrillic(value)) || "";
+  const sourceTitle = String(doc?.title || "").trim();
+  const titleRu = hasCyrillic(sourceTitle) ? sourceTitle : openLibraryRuAlternative;
+  const titleEn = sourceTitle;
+  const normalizedTitle = language === "en"
+    ? (titleEn || titleRu || sourceTitle)
+    : (titleRu || titleEn || sourceTitle);
 
   return {
     canonical_key: normalizedWorkKey
@@ -531,15 +585,17 @@ function mapOpenLibraryDoc(doc) {
       : `books:openlibrary:search:${compactString(doc?.title || "unknown")}`,
     category: "books",
     primary_source: "openlibrary",
-    title: doc?.title || "",
-    original_title: doc?.title || "",
+    title: normalizedTitle,
+    title_ru: titleRu,
+    title_en: titleEn,
+    original_title: sourceTitle,
     year: doc?.first_publish_year || null,
     cover_url: buildOpenLibraryCover(doc),
     description_ru: "",
     description_en: "",
     aliases: uniqueArray([
-      doc?.title,
-      ...safeArray(doc?.alternative_title),
+      sourceTitle,
+      ...openLibraryAlternatives,
       ...(doc?.subtitle ? [doc.subtitle] : []),
       ...authorNames
     ]),
@@ -553,7 +609,9 @@ function mapOpenLibraryDoc(doc) {
       openlibrary_cover_i: doc?.cover_i || null,
       author_names: authorNames,
       author_keys: authorKeys,
-      series_name: seriesName
+      series_name: seriesName,
+      series_candidates: uniqueArray([seriesName].filter(Boolean)),
+      book_search_mode: mode
     },
     score: 0
   };
@@ -707,7 +765,51 @@ function extractImageFromWikidataClaims(claims = {}) {
   return image ? wikimediaFileUrl(image) : "";
 }
 
-function mapWikidataBookEntity(searchItem, details) {
+function extractEntityIdsFromClaims(claims = {}, property = "") {
+  return uniqueArray(
+    safeArray(claims?.[property])
+      .map((claim) => claim?.mainsnak?.datavalue?.value?.id)
+      .filter(Boolean)
+  );
+}
+
+function resolveWikidataEntityRefs(ids = [], entities = {}) {
+  return uniqueArray(ids.map((id) => {
+    const entity = entities?.[id];
+    const label = entity?.labels?.ru?.value || entity?.labels?.en?.value || "";
+    return label || id;
+  }));
+}
+
+function normalizeBookDisplayLanguage(item = {}, language = "ru") {
+  if (item.category !== "books") return item;
+
+  const titleRu = String(item.title_ru || "").trim();
+  const titleEn = String(item.title_en || "").trim();
+  const originalTitle = String(item.original_title || "").trim();
+  const aliases = uniqueArray(safeArray(item.aliases).map(String).filter(Boolean));
+
+  const ruAlias = aliases.find((alias) => hasCyrillic(alias)) || "";
+  const enAlias = aliases.find((alias) => !hasCyrillic(alias)) || "";
+
+  const localizedTitle = language === "en"
+    ? (titleEn || originalTitle || enAlias || titleRu || ruAlias || item.title || "")
+    : (titleRu || ruAlias || (hasCyrillic(item.title || "") ? item.title : "") || originalTitle || titleEn || enAlias || item.title || "");
+
+  return {
+    ...item,
+    title: String(localizedTitle || item.title || "").trim(),
+    title_ru: titleRu || (hasCyrillic(localizedTitle) ? String(localizedTitle) : ""),
+    title_en: titleEn || (!hasCyrillic(localizedTitle) ? String(localizedTitle) : ""),
+    original_title: originalTitle || titleEn || titleRu || item.title || "",
+    meta: {
+      ...(item.meta || {}),
+      normalization_ready: true
+    }
+  };
+}
+
+function mapWikidataBookEntity(searchItem, details, entities = {}) {
   const labels = details?.labels || {};
   const aliases = details?.aliases || {};
   const claims = details?.claims || {};
@@ -715,15 +817,29 @@ function mapWikidataBookEntity(searchItem, details) {
 
   const titleRu = labels?.ru?.value || "";
   const titleEn = labels?.en?.value || "";
+  const aliasesRu = safeArray(aliases?.ru).map((item) => item?.value).filter(Boolean);
+  const aliasesEn = safeArray(aliases?.en).map((item) => item?.value).filter(Boolean);
   const isbns = extractIsbnValuesFromClaims(claims);
   const openLibraryWork = extractOpenLibraryWorkIdFromClaims(claims);
   const wikidataImage = extractImageFromWikidataClaims(claims);
+  const authorIds = extractEntityIdsFromClaims(claims, "P50");
+  const seriesIds = extractEntityIdsFromClaims(claims, "P179");
+  const followsIds = extractEntityIdsFromClaims(claims, "P155");
+  const followedByIds = extractEntityIdsFromClaims(claims, "P156");
+  const basedOnIds = extractEntityIdsFromClaims(claims, "P144");
+  const derivativeIds = extractEntityIdsFromClaims(claims, "P4969");
+  const editionsOrTranslationsIds = uniqueArray([
+    ...extractEntityIdsFromClaims(claims, "P629"),
+    ...extractEntityIdsFromClaims(claims, "P747")
+  ]);
 
   return {
     canonical_key: `books:wikidata:${searchItem.id}`,
     category: "books",
     primary_source: "wikidata",
     title: titleRu || titleEn || searchItem?.label || "",
+    title_ru: titleRu,
+    title_en: titleEn,
     original_title: titleEn || titleRu || searchItem?.label || "",
     year: extractYearFromWikidataClaims(claims),
     cover_url: openLibraryCoverUrlFromIsbn(isbns[0]) || wikidataImage,
@@ -734,8 +850,8 @@ function mapWikidataBookEntity(searchItem, details) {
       searchItem?.match?.text,
       titleRu,
       titleEn,
-      ...safeArray(aliases?.ru).map((item) => item?.value),
-      ...safeArray(aliases?.en).map((item) => item?.value)
+      ...aliasesRu,
+      ...aliasesEn
     ]),
     external_ids: {
       wikidata: searchItem.id,
@@ -743,7 +859,22 @@ function mapWikidataBookEntity(searchItem, details) {
       isbn: isbns
     },
     meta: {
-      wikidata_p18: safeArray(claims.P18).map((claim) => claim?.mainsnak?.datavalue?.value).find(Boolean) || ""
+      wikidata_p18: safeArray(claims.P18).map((claim) => claim?.mainsnak?.datavalue?.value).find(Boolean) || "",
+      author_keys: authorIds,
+      author_names: resolveWikidataEntityRefs(authorIds, entities),
+      series_name: resolveWikidataEntityRefs(seriesIds, entities)[0] || "",
+      series_candidates: uniqueArray([
+        ...resolveWikidataEntityRefs(seriesIds, entities),
+        ...seriesIds
+      ]),
+      wikidata_relations: {
+        series: uniqueArray([...resolveWikidataEntityRefs(seriesIds, entities), ...seriesIds]),
+        follows: uniqueArray([...resolveWikidataEntityRefs(followsIds, entities), ...followsIds]),
+        followed_by: uniqueArray([...resolveWikidataEntityRefs(followedByIds, entities), ...followedByIds]),
+        based_on: uniqueArray([...resolveWikidataEntityRefs(basedOnIds, entities), ...basedOnIds]),
+        derivative_work: uniqueArray([...resolveWikidataEntityRefs(derivativeIds, entities), ...derivativeIds]),
+        editions_or_translations: uniqueArray([...resolveWikidataEntityRefs(editionsOrTranslationsIds, entities), ...editionsOrTranslationsIds])
+      }
     },
     score: 0
   };
@@ -798,6 +929,9 @@ function applyBookScreenPenalty(item = {}) {
 function scoreBookResult(query, item) {
   const q = compactString(query);
   const title = compactString(item.title || "");
+  const titleRu = compactString(item.title_ru || "");
+  const titleEn = compactString(item.title_en || "");
+  const originalTitle = compactString(item.original_title || "");
   const searchMode = String(item?.meta?.book_search_mode || "").trim().toLowerCase();
   const aliases = safeArray(item.aliases).map(compactString);
   const authorNames = uniqueArray([
@@ -809,17 +943,19 @@ function scoreBookResult(query, item) {
     .filter(Boolean);
 
   let score = 0;
+  const titlesPool = uniqueArray([title, titleRu, titleEn, originalTitle].filter(Boolean));
 
-  if (title === q) score += 220;
-  if (aliases.includes(q)) score += 100;
-  if (title.startsWith(q) || aliases.some((alias) => alias.startsWith(q))) score += 50;
-  if (title.includes(q) || aliases.some((alias) => alias.includes(q))) score += 20;
-  if (authorNames.includes(q)) score += 70;
-  if (authorNames.some((author) => author.startsWith(q))) score += 35;
-  if (authorNames.some((author) => author.includes(q))) score += 20;
-  if (searchMode === "title") score += 30;
-  if (searchMode === "author") score += 8;
-  if (item.cover_url) score += 40;
+  if (titlesPool.some((candidate) => candidate === q)) score += 300;
+  if (titlesPool.some((candidate) => candidate.startsWith(q))) score += 140;
+  if (titlesPool.some((candidate) => candidate.includes(q))) score += 90;
+  if (aliases.includes(q)) score += 80;
+  if (aliases.some((alias) => alias.startsWith(q))) score += 45;
+  if (aliases.some((alias) => alias.includes(q))) score += 25;
+  if (authorNames.includes(q)) score += 60;
+  if (authorNames.some((author) => author.includes(q))) score += 32;
+  if (searchMode === "title") score += 35;
+  if (searchMode === "author") score += 10;
+  if (item.cover_url) score += 8;
   if (item.year) score += 10;
   if (Object.keys(item.external_ids || {}).some((key) => {
     const value = item.external_ids?.[key];
@@ -853,6 +989,7 @@ function enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems) {
 
 async function searchBooks(query) {
   const cleanQuery = normalizeQuery(query);
+  const language = getSystemLanguage();
 
   if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
@@ -866,30 +1003,12 @@ async function searchBooks(query) {
 
   const openLibraryTitleItems =
     olTitleResult.status === "fulfilled"
-      ? safeArray(olTitleResult.value).map((doc) => {
-          const mapped = mapOpenLibraryDoc(doc);
-          return {
-            ...mapped,
-            meta: {
-              ...(mapped.meta || {}),
-              book_search_mode: "title"
-            }
-          };
-        })
+      ? safeArray(olTitleResult.value).map((doc) => mapOpenLibraryDoc(doc, { mode: "title", language }))
       : [];
 
   const openLibraryAuthorItems =
     olAuthorResult.status === "fulfilled"
-      ? safeArray(olAuthorResult.value).map((doc) => {
-          const mapped = mapOpenLibraryDoc(doc);
-          return {
-            ...mapped,
-            meta: {
-              ...(mapped.meta || {}),
-              book_search_mode: "author"
-            }
-          };
-        })
+      ? safeArray(olAuthorResult.value).map((doc) => mapOpenLibraryDoc(doc, { mode: "author", language }))
       : [];
 
   let wikidataItems = [];
@@ -907,15 +1026,15 @@ async function searchBooks(query) {
         const claims = details?.claims || {};
         const typeIds = getWikidataTypeIds(claims);
         const allowed = isAllowedWikidataBook(claims);
-        const mapped = mapWikidataBookEntity(candidate, details);
+        const mapped = mapWikidataBookEntity(candidate, details, detailsResult);
 
         if (!typeIds.length) {
-          console.warn("filtered wikidata item: missing P31", candidate.id);
+          console.debug("filtered wikidata item: missing P31", candidate.id);
           return null;
         }
 
         if (!allowed) {
-          console.warn("filtered wikidata item: banned/non-book P31", candidate.id, typeIds);
+          console.debug("filtered wikidata item: banned/non-book P31", candidate.id, typeIds);
           return null;
         }
 
@@ -928,6 +1047,7 @@ async function searchBooks(query) {
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
 
   return dedupeBooks([...openLibraryTitleItems, ...openLibraryAuthorItems, ...enrichedWikidata])
+    .map((item) => normalizeBookDisplayLanguage(item, language))
     .map((item) => ({
       ...item,
       score: scoreBookResult(cleanQuery, item)
@@ -1141,23 +1261,73 @@ async function searchAnimeOrManga(query, category = "anime") {
     return [];
   }
 
-  const response = await fetchWithTimeout(API_ENDPOINTS.ANILIST, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify(buildAniListGraphqlBody(cleanQuery, category))
+  const anilistItems = await (async () => {
+    const response = await fetchWithTimeout(API_ENDPOINTS.ANILIST, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(buildAniListGraphqlBody(cleanQuery, category))
+    });
+
+    if (!response.ok) {
+      throw new Error(`AniList failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return safeArray(payload?.data?.Page?.media)
+      .map((item) => mapAniListItem(item, category));
+  })().catch((error) => {
+    console.warn("AniList search error:", error);
+    return [];
   });
 
-  if (!response.ok) {
-    throw new Error(`AniList failed: ${response.status}`);
+  if (anilistItems.length) {
+    return anilistItems
+      .map((item) => ({ ...item, score: scoreScreenResult(cleanQuery, item) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
   }
 
-  const payload = await response.json();
+  const jikanType = category === "manga" ? "manga" : "anime";
+  const jikanUrl = new URL(`${API_ENDPOINTS.JIKAN}/${jikanType}`);
+  jikanUrl.searchParams.set("q", cleanQuery);
+  jikanUrl.searchParams.set("limit", String(ANILIST_LIMIT));
+  jikanUrl.searchParams.set("sfw", "true");
 
-  return safeArray(payload?.data?.Page?.media)
-    .map((item) => mapAniListItem(item, category))
+  const jikanResponse = await fetchWithTimeout(jikanUrl.toString(), {
+    headers: { Accept: "application/json" }
+  });
+
+  if (!jikanResponse.ok) {
+    throw new Error(`Jikan failed: ${jikanResponse.status}`);
+  }
+
+  const jikanPayload = await jikanResponse.json();
+  const jikanItems = safeArray(jikanPayload?.data).map((item = {}) => {
+    const title = item?.title || item?.title_english || item?.title_japanese || "";
+    const originalTitle = item?.title_japanese || item?.title_english || title;
+    return {
+      canonical_key: `${category}:mal:${item?.mal_id}`,
+      category,
+      primary_source: "jikan",
+      title,
+      original_title: originalTitle,
+      year: safeNumberYear(item?.year || item?.aired?.prop?.from?.year || item?.published?.prop?.from?.year),
+      cover_url: item?.images?.jpg?.large_image_url || item?.images?.jpg?.image_url || "",
+      description_ru: String(item?.synopsis || "").trim(),
+      description_en: "",
+      aliases: uniqueArray([title, originalTitle, item?.title_english, item?.title_japanese]),
+      external_ids: { mal: item?.mal_id || null },
+      meta: {
+        mal_id: item?.mal_id || null
+      },
+      score: item?.images?.jpg?.large_image_url ? 20 : 0
+    };
+  });
+
+  return jikanItems
     .map((item) => ({ ...item, score: scoreScreenResult(cleanQuery, item) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, SEARCH_LIMITS.MODAL_RESULTS);
@@ -1273,10 +1443,11 @@ export async function runGlobalSearch(query) {
     }))
     .map((item) => {
       const cover = item.cover_url || fallbackCoverResolver(item);
+      const missingCoverPenalty = item.category === "books" ? 0 : 20;
       return {
         ...item,
         cover_url: cover,
-        score: cover ? item.score : (item.score || 0) - 20
+        score: cover ? item.score : (item.score || 0) - missingCoverPenalty
       };
     })
     .map((item) => applyBookScreenPenalty(item))
@@ -1312,10 +1483,11 @@ export async function runCategorySearch(query, category) {
   result = applyFinalCategoryFilter(result, normalizedCategory)
     .map((item) => {
       const cover = item.cover_url || fallbackCoverResolver(item);
+      const missingCoverPenalty = item.category === "books" ? 0 : 20;
       return {
         ...item,
         cover_url: cover,
-        score: cover ? (item.score || 0) : (item.score || 0) - 20
+        score: cover ? (item.score || 0) : (item.score || 0) - missingCoverPenalty
       };
     })
     .map((item) => applyBookScreenPenalty(item))
