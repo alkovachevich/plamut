@@ -598,6 +598,17 @@ async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
   };
 }
 
+
+function isUniverseFresh(entity = {}, maxAgeMs = 24 * 60 * 60 * 1000) {
+  if (!entity?.universe_key) return false;
+  if (String(entity.relations_status || '').toLowerCase() !== 'ready') return false;
+
+  const ts = new Date(entity.relations_built_at || '').getTime();
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+
+  return Date.now() - ts < maxAgeMs;
+}
+
 function bindCardActions({
   root,
   getEntity,
@@ -683,7 +694,7 @@ function bindCardActions({
       setUserMedia(saved.userMedia);
       updateUserMediaUI(root, saved.userMedia);
 
-      if (!forceRebuild && saved.entity.universe_key && saved.entity.relations_status === "ready") {
+      if (!forceRebuild && isUniverseFresh(saved.entity)) {
         navigate("/universe", { id: saved.entity.universe_key });
         return;
       }
