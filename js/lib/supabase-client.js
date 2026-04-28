@@ -6,12 +6,14 @@ let cachedSession = null;
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const AUTH_TIMEOUT_MS = 12000;
-const SESSION_TIMEOUT_MS = 9000;
-const PROFILE_TIMEOUT_MS = 10000;
+const SESSION_TIMEOUT_MS = 15000;
+const PROFILE_TIMEOUT_MS = 20000;
 const STORAGE_TIMEOUT_MS = 60000;
 const SESSION_RESTORE_GRACE_MS = 12000;
+const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let profilePromiseByUserId = new Map();
+let profileCacheByUserId = new Map();
 let sessionRestoreStartedAt = 0;
 let authStatePromise = null;
 
@@ -72,6 +74,36 @@ function cleanPayload(payload = {}) {
   return result;
 }
 
+function getCachedProfile(userId = "") {
+  const key = cleanText(userId);
+  if (!key) return null;
+
+  const row = profileCacheByUserId.get(key);
+  if (!row) return null;
+
+  if (Date.now() - Number(row.ts || 0) > PROFILE_CACHE_TTL_MS) {
+    profileCacheByUserId.delete(key);
+    return null;
+  }
+
+  return row.profile || null;
+}
+
+function setCachedProfile(userId = "", profile = null) {
+  const key = cleanText(userId);
+  if (!key) return;
+
+  if (!profile) {
+    profileCacheByUserId.delete(key);
+    return;
+  }
+
+  profileCacheByUserId.set(key, {
+    profile,
+    ts: Date.now()
+  });
+}
+
 export function setCachedSession(session) {
   cachedSession = session || null;
 }
@@ -80,6 +112,8 @@ export function clearCachedSession() {
   cachedSession = null;
   sessionPromise = null;
   authStatePromise = null;
+  profilePromiseByUserId = new Map();
+  profileCacheByUserId = new Map();
 }
 
 function isTimeoutError(error) {
@@ -325,6 +359,16 @@ export async function fetchUserProfileResultSafe(userId) {
   const cleanUserId = cleanText(userId);
   if (!cleanUserId) return { status: "empty", profile: null, error: null };
 
+  const cachedProfile = getCachedProfile(cleanUserId);
+  if (cachedProfile?.id) {
+    return {
+      status: "found",
+      profile: cachedProfile,
+      error: null,
+      cached: true
+    };
+  }
+
   if (profilePromiseByUserId.has(cleanUserId)) {
     return profilePromiseByUserId.get(cleanUserId);
   }
@@ -332,13 +376,21 @@ export async function fetchUserProfileResultSafe(userId) {
   const profilePromise = (async () => {
     try {
       const profile = await fetchUserProfile(cleanUserId);
+      if (profile?.id) {
+        setCachedProfile(cleanUserId, profile);
+      }
+
       return {
         status: profile?.id ? "found" : "not_found",
         profile: profile || null,
         error: null
       };
     } catch (error) {
-      console.warn("fetchUserProfileSafe skipped:", error);
+      if (isTimeoutError(error)) {
+        console.info("fetchUserProfileSafe: timeout, using fallback profile");
+      } else {
+        console.warn("fetchUserProfileSafe skipped:", error);
+      }
       return {
         status: isTimeoutError(error) ? "timeout" : "error",
         profile: null,
