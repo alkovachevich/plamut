@@ -16,6 +16,7 @@ import {
 const DEFAULT_TIMEOUT_MS = 30000;
 const EDGE_FUNCTION_NAME = "plamut-universe-normalize";
 const universeMemoryCache = new Map();
+let edgeNormalizeDisabledForSession = false;
 
 const RELATION_LABELS = {
   related_work: "Связанное",
@@ -154,6 +155,17 @@ function normalizeConfidence(value, fallback = 0.65) {
 
 function normalizeWorkId(value = "") {
   return clean(value).replace("/works/", "");
+}
+
+function shouldDisableEdgeNormalize(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return [
+    "failed to send a request",
+    "fetch",
+    "cors",
+    "preflight",
+    "functionsfetcherror"
+  ].some((chunk) => message.includes(chunk));
 }
 
 function getWikidataTypeIds(claims = {}) {
@@ -845,6 +857,10 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
       "Normalize one media universe graph. Return JSON in the same schema: universe, deduped_entities, relations, direct_sequels, direct_prequels, adaptations, source_material, sequels, prequels, spin_offs, same_universe, related_work, release_order, story_chronology. Identify the most likely root source (source_material or book_series when justified). Do not mix characters with works. Do not include humans, organizations, or fictional characters as universe members. Use only existing entity IDs from payload. Never invent IDs. Avoid self-relations and noisy duplicates. If uncertain, return fewer but higher-quality relations."
   };
 
+  if (edgeNormalizeDisabledForSession) {
+    return null;
+  }
+
   const supabase = getSupabaseClient();
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -858,6 +874,12 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
       );
 
       if (error) {
+        if (shouldDisableEdgeNormalize(error)) {
+          edgeNormalizeDisabledForSession = true;
+          console.warn("OpenAI universe normalization disabled for session:", error);
+          return null;
+        }
+
         console.warn("OpenAI universe normalization bad response:", error, "attempt", attempt);
         continue;
       }
@@ -869,6 +891,12 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
 
       return data;
     } catch (error) {
+      if (shouldDisableEdgeNormalize(error)) {
+        edgeNormalizeDisabledForSession = true;
+        console.warn("OpenAI universe normalization disabled for session:", error);
+        return null;
+      }
+
       console.warn("OpenAI universe normalization skipped:", error, "attempt", attempt);
     }
   }
