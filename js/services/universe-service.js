@@ -68,10 +68,14 @@ const LEGACY_RELATION_FALLBACK_MAP = {
 };
 
 const ALLOWED_DB_SOURCES = new Set([
-  "library",
-  "wikidata",
-  "user",
-  "openai"
+  "library"
+]);
+
+const PROD_RELATION_TYPES = new Set([
+  "related_work",
+  "book_series",
+  "adaptation",
+  "source_material"
 ]);
 
 const WIKIDATA_ALLOWED_BOOK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q47461344", "Q277759"]);
@@ -122,6 +126,11 @@ function normalizeRelationType(type = "") {
   return RELATION_TYPES.has(cleanType) ? cleanType : "related_work";
 }
 
+function toProductionRelationType(type = "") {
+  const normalized = normalizeRelationType(type);
+  return PROD_RELATION_TYPES.has(normalized) ? normalized : toLegacyRelationType(normalized);
+}
+
 function toLegacyRelationType(type = "") {
   const normalized = normalizeRelationType(type);
   return LEGACY_RELATION_FALLBACK_MAP[normalized] || normalized;
@@ -134,11 +143,7 @@ function normalizeRelationSource(source = "") {
     return cleanSource;
   }
 
-  if (cleanSource === "openai" || cleanSource === "ai") {
-    return "openai";
-  }
-
-  return "wikidata";
+  return "library";
 }
 
 function normalizeConfidence(value, fallback = 0.65) {
@@ -829,6 +834,7 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
     candidate_entities: context.sortedCandidates.map(entityToAiPayload),
     library_items: context.currentLibrary,
     local_relations: safeArray(context.localRelations),
+    wikidata_data: context.wikidataCandidates,
     wikidata_candidates: context.wikidataCandidates,
     tmdb_candidates: context.tmdbCandidates,
     openlibrary_candidates: context.openlibraryCandidates,
@@ -839,31 +845,35 @@ async function invokeUniverseNormalizeFunction({ seedEntity, items, localRelatio
       "Normalize one media universe graph. Return JSON in the same schema: universe, deduped_entities, relations, direct_sequels, direct_prequels, adaptations, source_material, sequels, prequels, spin_offs, same_universe, related_work, release_order, story_chronology. Identify the most likely root source (source_material or book_series when justified). Do not mix characters with works. Do not include humans, organizations, or fictional characters as universe members. Use only existing entity IDs from payload. Never invent IDs. Avoid self-relations and noisy duplicates. If uncertain, return fewer but higher-quality relations."
   };
 
-  try {
-    const supabase = getSupabaseClient();
-    const { data, error } = await withTimeout(
-      supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-        body: payload
-      }),
-      "OpenAI нормализация вселенной",
-      DEFAULT_TIMEOUT_MS
-    );
+  const supabase = getSupabaseClient();
 
-    if (error) {
-      console.warn("OpenAI universe normalization bad response:", error);
-      return null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke(EDGE_FUNCTION_NAME, {
+          body: payload
+        }),
+        "OpenAI нормализация вселенной",
+        DEFAULT_TIMEOUT_MS
+      );
+
+      if (error) {
+        console.warn("OpenAI universe normalization bad response:", error, "attempt", attempt);
+        continue;
+      }
+
+      if (!data || typeof data !== "object") {
+        console.warn("OpenAI universe normalization: empty or invalid payload", data, "attempt", attempt);
+        continue;
+      }
+
+      return data;
+    } catch (error) {
+      console.warn("OpenAI universe normalization skipped:", error, "attempt", attempt);
     }
-
-    if (!data || typeof data !== "object") {
-      console.warn("OpenAI universe normalization: empty or invalid payload", data);
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.warn("OpenAI universe normalization skipped:", error);
-    return null;
   }
+
+  return null;
 }
 
 function isAllowedUniverseMemberForSeed(seedCategory = "", entity = {}) {
@@ -1274,15 +1284,25 @@ async function upsertUniverseMembers(universeKey, items = [], orderMap = new Map
 async function upsertMediaRelations(rows = []) {
   const cleanRows = safeArray(rows)
     .filter((row) => row.from_entity_id && row.to_entity_id && row.from_entity_id !== row.to_entity_id)
-    .map((row, index) => ({
-      from_entity_id: Number(row.from_entity_id),
-      to_entity_id: Number(row.to_entity_id),
-      relation_type: normalizeRelationType(row.relation_type),
-      source: normalizeRelationSource(row.source),
-      confidence: normalizeConfidence(row.confidence),
-      sort_order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : index,
-      metadata_json: row.metadata_json || {}
-    }));
+    .map((row, index) => {
+      const normalizedType = normalizeRelationType(row.relation_type);
+      const dbRelationType = toProductionRelationType(normalizedType);
+      const inferredSource = cleanLower(row.source || "") || "library";
+
+      return {
+        from_entity_id: Number(row.from_entity_id),
+        to_entity_id: Number(row.to_entity_id),
+        relation_type: dbRelationType,
+        source: normalizeRelationSource(row.source),
+        confidence: normalizeConfidence(row.confidence),
+        sort_order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : index,
+        metadata_json: {
+          ...(row.metadata_json || {}),
+          inferred_relation_type: normalizedType,
+          inferred_source: inferredSource
+        }
+      };
+    });
 
   if (!cleanRows.length) return [];
 
