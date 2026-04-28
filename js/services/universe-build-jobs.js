@@ -100,6 +100,17 @@ export function isUniverseJobFinished(job = {}) {
   ].includes(normalized?.status);
 }
 
+function isLikelyStuckJob(job = {}, maxAgeMs = 90 * 1000) {
+  const normalized = normalizeJob(job);
+  if (!normalized) return false;
+  if (!isUniverseJobActive(normalized)) return false;
+
+  const ts = new Date(normalized.updated_at || normalized.created_at || "").getTime();
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+
+  return Date.now() - ts > maxAgeMs;
+}
+
 export async function getLatestUniverseBuildJob({
   userId,
   entityId,
@@ -165,7 +176,9 @@ export async function createUniverseBuildJob({
   });
 
   if (existing && isUniverseJobActive(existing)) {
-    return existing;
+    if (!force || !isLikelyStuckJob(existing)) {
+      return existing;
+    }
   }
 
   if (!force && existing?.status === UNIVERSE_JOB_STATUS.READY && existing.universe_key) {
