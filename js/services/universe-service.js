@@ -1544,15 +1544,15 @@ async function fetchWikidataSearch(entity = {}) {
       const resolvedCategory = resolveCategoryFromWikidataClaims(claims, seedCategory);
 
       if (!typeIds.length) {
-        console.warn("filtered wikidata item: missing P31", item.id);
+        console.info("filtered wikidata item: missing P31", item.id);
         return null;
       }
       if (isBlockedWikidataType(typeIds)) {
-        console.warn("filtered wikidata item: blocked person/org/character", item.id, typeIds);
+        console.info("filtered wikidata item: blocked person/org/character", item.id, typeIds);
         return null;
       }
       if (!isAllowedWikidataForSeed(seedCategory, claims)) {
-        console.warn("filtered wikidata item: seed category mismatch", item.id, seedCategory, typeIds);
+        console.info("filtered wikidata item: seed category mismatch", item.id, seedCategory, typeIds);
         return null;
       }
 
