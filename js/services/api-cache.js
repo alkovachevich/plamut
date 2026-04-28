@@ -2,7 +2,8 @@ import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 
 const API_CACHE_TABLE = "api_cache";
 const DEFAULT_TIMEOUT_MS = 12000;
-let apiCacheDisabledForSession = false;
+const API_CACHE_DISABLED_KEY = "plamut-api-cache-disabled";
+let apiCacheDisabledForSession = typeof window !== "undefined" && window.sessionStorage?.getItem(API_CACHE_DISABLED_KEY) === "1";
 
 function isPermissionError(error) {
   const status = Number(error?.status || error?.code || 0);
@@ -85,6 +86,9 @@ export async function getApiCache(source, query) {
   if (error) {
     if (isPermissionError(error)) {
       apiCacheDisabledForSession = true;
+      if (typeof window !== "undefined") {
+        window.sessionStorage?.setItem(API_CACHE_DISABLED_KEY, "1");
+      }
       console.warn("getApiCache permission denied, disable api_cache for session");
       return null;
     }
@@ -120,6 +124,9 @@ export async function setApiCache(source, query, payload, options = {}) {
   if (error) {
     if (isPermissionError(error)) {
       apiCacheDisabledForSession = true;
+      if (typeof window !== "undefined") {
+        window.sessionStorage?.setItem(API_CACHE_DISABLED_KEY, "1");
+      }
       console.warn("setApiCache permission denied, disable api_cache for session");
       return null;
     }
