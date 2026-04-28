@@ -525,7 +525,12 @@ async function hydrateUserMediaState(root, userId, entity) {
 
     return loaded || null;
   } catch (error) {
-    console.warn("CARD: user media load skipped", error);
+    const message = String(error?.message || "").toLowerCase();
+    if (message.includes("превышено время ожидания")) {
+      console.info("CARD: user media load timeout, using fallback state");
+    } else {
+      console.warn("CARD: user media load skipped", error);
+    }
     return null;
   }
 }
@@ -906,7 +911,12 @@ export async function renderCardPage(root, params = {}) {
         }
       })
       .catch((error) => {
-        console.warn("CARD: background DB refresh skipped", error);
+        const message = String(error?.message || "").toLowerCase();
+        if (message.includes("превышено время ожидания")) {
+          console.info("CARD: background DB refresh timeout, keeping current card");
+        } else {
+          console.warn("CARD: background DB refresh skipped", error);
+        }
       });
   }
 
