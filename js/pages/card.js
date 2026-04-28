@@ -1,4 +1,4 @@
-import { escapeHtml, clampText } from "../utils.js";
+import { escapeHtml, clampText, safeArray } from "../utils.js";
 import { getCategoryLabel, STATUS_LABELS } from "../config.js";
 import { navigate } from "../router.js";
 import {
@@ -66,6 +66,13 @@ function isPersistableEntity(entity = {}) {
 }
 
 function resolveTitle(entity = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+  if ((entity.category || "") === "books") {
+    if (lang === "en") {
+      return entity.title_en || entity.title_primary || entity.title_ru || entity.original_title || entity.title || "Без названия";
+    }
+    return entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || entity.title || "Без названия";
+  }
   return (
     entity.title_primary ||
     entity.title_ru ||
@@ -77,7 +84,30 @@ function resolveTitle(entity = {}) {
 }
 
 function resolveDescription(entity = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+  if ((entity.category || "") === "books") {
+    return lang === "en"
+      ? (entity.description_en || entity.description_ru || entity.description || "")
+      : (entity.description_ru || entity.description_en || entity.description || "");
+  }
   return entity.description_ru || entity.description_en || entity.description || "";
+}
+
+function renderRelatedFallbackFromMeta(entity = {}) {
+  const relations = entity?.meta?.wikidata_relations || {};
+  const lines = [
+    { key: "series", label: "Серия" },
+    { key: "previous", label: "Предыдущая часть" },
+    { key: "next", label: "Следующая часть" },
+    { key: "adaptations", label: "Экранизации" }
+  ]
+    .map(({ key, label }) => {
+      const values = safeArray(relations?.[key]).filter(Boolean);
+      if (!values.length) return "";
+      return `<div class="related-card__meta"><b>${escapeHtml(label)}:</b> ${escapeHtml(values.slice(0, 4).join(", "))}</div>`;
+    })
+    .filter(Boolean);
+  return lines.join("");
 }
 
 function getCover(entity = {}) {
@@ -347,6 +377,8 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
     entity.original_title && entity.original_title !== title
       ? entity.original_title
       : "";
+  const relatedFallbackHtml = !relatedItems.length ? renderRelatedFallbackFromMeta(entity) : "";
+  const hasRelatedContent = relatedItems.length || relatedFallbackHtml;
 
   root.innerHTML = `
     ${renderStyles()}
@@ -405,10 +437,10 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
         </div>
       </div>
 
-      <div class="card-section" data-related-section ${relatedItems.length ? "" : "hidden"}>
+      <div class="card-section" data-related-section ${hasRelatedContent ? "" : "hidden"}>
         <div class="card-section__title">Связанные</div>
         <div class="related-grid" data-related-grid>
-          ${relatedItems.map(renderRelatedItem).join("")}
+          ${relatedItems.length ? relatedItems.map(renderRelatedItem).join("") : relatedFallbackHtml}
         </div>
       </div>
     </section>
@@ -443,8 +475,14 @@ function renderRelated(root, relatedItems = []) {
   if (!section || !grid) return;
 
   if (!relatedItems.length) {
-    section.hidden = true;
-    grid.innerHTML = "";
+    const fallbackHtml = renderRelatedFallbackFromMeta(state.card.entity || {});
+    if (!fallbackHtml) {
+      section.hidden = true;
+      grid.innerHTML = "";
+      return;
+    }
+    section.hidden = false;
+    grid.innerHTML = fallbackHtml;
     return;
   }
 
