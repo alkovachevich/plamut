@@ -1891,7 +1891,7 @@ export async function buildUniverseForJob(job, entity, options = { force: false 
 
     const persisted = await readPersistedUniverseForEntity(entity);
 
-    if (persisted?.universe?.universe_key && persisted.items.length) {
+    if (!force && persisted?.universe?.universe_key && persisted.items.length) {
       await updateUniverseBuildJob(job.id, {
         status: UNIVERSE_JOB_STATUS.READY,
         progress_current: 9,
