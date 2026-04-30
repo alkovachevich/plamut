@@ -1,7 +1,8 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { safeArray } from "../utils.js";
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 30000;
+const LIST_TIMEOUT_MS = 45000;
 
 function clean(value = "") {
   return String(value || "").trim();
@@ -52,12 +53,10 @@ function normalizeEntity(row = {}) {
 
 function normalizeUniverseItem(row = {}) {
   const entity = normalizeEntity(row.media_entities || row.entity || {});
-
   if (!entity) return null;
 
   return {
     id: row.id || null,
-    user_id: row.user_id || null,
     entity_id: entity.id,
     category: entity.category,
     status: row.status || "",
@@ -114,7 +113,7 @@ export async function getUserUniversesFromDb() {
       .eq("is_public", true)
       .order("title", { ascending: true }),
     "Загрузка списка вселенных из БД",
-    DEFAULT_TIMEOUT_MS
+    LIST_TIMEOUT_MS
   );
 
   if (universeError) throw universeError;
@@ -127,34 +126,39 @@ export async function getUserUniversesFromDb() {
 
   const universeIds = universes.map((universe) => universe.id);
 
-  const [{ data: itemRows }, { data: relationRows }] = await Promise.all([
-    withTimeout(
-      supabase
-        .from("universe_items")
-        .select("universe_id, entity_id, is_core")
-        .in("universe_id", universeIds),
-      "Загрузка счётчиков элементов вселенных",
-      DEFAULT_TIMEOUT_MS
-    ).catch(() => ({ data: [] })),
-    withTimeout(
-      supabase
-        .from("universe_relations")
-        .select("universe_id, id")
-        .in("universe_id", universeIds),
-      "Загрузка счётчиков связей вселенных",
-      DEFAULT_TIMEOUT_MS
-    ).catch(() => ({ data: [] }))
-  ]);
+  const itemsResult = await withTimeout(
+    supabase
+      .from("universe_items")
+      .select("universe_id, entity_id")
+      .in("universe_id", universeIds),
+    "Загрузка счётчиков элементов вселенных",
+    LIST_TIMEOUT_MS
+  ).catch((error) => {
+    console.warn("Universe item counters skipped:", error);
+    return { data: [] };
+  });
+
+  const relationsResult = await withTimeout(
+    supabase
+      .from("universe_relations")
+      .select("universe_id, id")
+      .in("universe_id", universeIds),
+    "Загрузка счётчиков связей вселенных",
+    LIST_TIMEOUT_MS
+  ).catch((error) => {
+    console.warn("Universe relation counters skipped:", error);
+    return { data: [] };
+  });
 
   const itemCountByUniverse = new Map();
   const relationCountByUniverse = new Map();
 
-  safeArray(itemRows).forEach((row) => {
+  safeArray(itemsResult.data).forEach((row) => {
     const key = Number(row.universe_id || 0);
     itemCountByUniverse.set(key, (itemCountByUniverse.get(key) || 0) + 1);
   });
 
-  safeArray(relationRows).forEach((row) => {
+  safeArray(relationsResult.data).forEach((row) => {
     const key = Number(row.universe_id || 0);
     relationCountByUniverse.set(key, (relationCountByUniverse.get(key) || 0) + 1);
   });
@@ -170,7 +174,7 @@ export async function getUserUniversesFromDb() {
       in_library_count: 0,
       not_added_count: total,
       relations_count: relations,
-      progress: total > 0 ? 0 : 0
+      progress: 0
     };
   });
 }
@@ -210,68 +214,67 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
     };
   }
 
-  const [{ data: itemRows, error: itemsError }, { data: relationRows, error: relationsError }] =
-    await Promise.all([
-      withTimeout(
-        supabase
-          .from("universe_items")
-          .select(`
-            id,
-            universe_id,
-            entity_id,
-            role,
-            release_order,
-            story_order,
-            phase,
-            arc,
-            is_core,
-            metadata_json,
-            media_entities (
-              id,
-              canonical_key,
-              category,
-              primary_source,
-              title_primary,
-              title_ru,
-              title_en,
-              original_title,
-              year,
-              cover_url,
-              description_ru,
-              description_en,
-              external_ids,
-              meta,
-              universe_key,
-              relations_built_at,
-              relations_status
-            )
-          `)
-          .eq("universe_id", universe.id)
-          .order("release_order", { ascending: true }),
-        "Загрузка элементов вселенной",
-        DEFAULT_TIMEOUT_MS
-      ),
-      withTimeout(
-        supabase
-          .from("universe_relations")
-          .select("*")
-          .eq("universe_id", universe.id)
-          .order("sort_order", { ascending: true }),
-        "Загрузка связей вселенной",
-        DEFAULT_TIMEOUT_MS
-      )
-    ]);
+  const itemsResult = await withTimeout(
+    supabase
+      .from("universe_items")
+      .select(`
+        id,
+        universe_id,
+        entity_id,
+        role,
+        release_order,
+        story_order,
+        phase,
+        arc,
+        is_core,
+        metadata_json,
+        media_entities (
+          id,
+          canonical_key,
+          category,
+          primary_source,
+          title_primary,
+          title_ru,
+          title_en,
+          original_title,
+          year,
+          cover_url,
+          description_ru,
+          description_en,
+          external_ids,
+          meta,
+          universe_key,
+          relations_built_at,
+          relations_status
+        )
+      `)
+      .eq("universe_id", universe.id)
+      .order("release_order", { ascending: true }),
+    "Загрузка элементов вселенной",
+    DEFAULT_TIMEOUT_MS
+  );
 
-  if (itemsError) throw itemsError;
-  if (relationsError) throw relationsError;
+  if (itemsResult.error) throw itemsResult.error;
+
+  const relationsResult = await withTimeout(
+    supabase
+      .from("universe_relations")
+      .select("*")
+      .eq("universe_id", universe.id)
+      .order("sort_order", { ascending: true }),
+    "Загрузка связей вселенной",
+    DEFAULT_TIMEOUT_MS
+  );
+
+  if (relationsResult.error) throw relationsResult.error;
 
   const items = sortItems(
-    safeArray(itemRows)
+    safeArray(itemsResult.data)
       .map(normalizeUniverseItem)
       .filter(Boolean)
   );
 
-  const relations = safeArray(relationRows)
+  const relations = safeArray(relationsResult.data)
     .map(normalizeRelation)
     .filter((relation) => relation.from_entity_id && relation.to_entity_id);
 
