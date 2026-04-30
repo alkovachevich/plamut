@@ -83,33 +83,31 @@ function normalizeUniverseLink(row = {}) {
   const entity = normalizeEntity(row.media_entities || row.entity || {});
   if (!entity) return null;
 
+  const universe = normalizeUniverse(row.universes || row.universe || {});
   const continuity = normalizeContinuity(row.universe_continuities || row.continuity || {});
   const branch = normalizeBranch(row.universe_branches || row.branch || {});
 
   return {
     id: row.id || null,
-    user_id: row.user_id || null,
 
     universe_id: row.universe_id || null,
     continuity_id: row.continuity_id || null,
     branch_id: row.branch_id || null,
     entity_id: entity.id,
 
-    category: entity.category,
-    status: row.status || "",
-    folder_name: row.folder_name || "",
-
     role: row.role || "member",
-
     release_order: row.release_order ?? null,
     story_order: row.story_order ?? null,
     branch_order: row.branch_order ?? null,
-
     is_core: row.is_core !== false,
     metadata_json: row.metadata_json || {},
 
+    universe,
     continuity,
     branch,
+
+    universe_key: universe?.universe_key || "",
+    universe_title: universe?.title || "",
 
     continuity_key: continuity?.continuity_key || "",
     continuity_title: continuity?.title || "",
@@ -119,6 +117,7 @@ function normalizeUniverseLink(row = {}) {
     branch_title: branch?.title || "",
     branch_type: branch?.type || "",
 
+    category: entity.category,
     media_entities: entity
   };
 }
@@ -154,10 +153,6 @@ function sortLinks(items = [], mode = "release") {
           : b.release_order ?? b.story_order ?? b.branch_order ?? 9999;
 
     if (Number(aOrder) !== Number(bOrder)) return Number(aOrder) - Number(bOrder);
-
-    const ay = Number(a.media_entities?.year || 0);
-    const by = Number(b.media_entities?.year || 0);
-    if (ay && by && ay !== by) return ay - by;
 
     return String(a.media_entities?.title_primary || "").localeCompare(
       String(b.media_entities?.title_primary || ""),
@@ -270,7 +265,7 @@ export async function getUserUniversesFromDb() {
       not_added_count: entityCount,
       relations_count: relationsCount,
       branches_count: branchesCount,
-      progress: entityCount > 0 ? 0 : 0
+      progress: 0
     };
   });
 }
@@ -535,4 +530,106 @@ export async function getRelatedItemsForEntityFromDb({ entityId } = {}) {
       };
     })
     .filter(Boolean);
+}
+
+export async function getEntityUniverseLinksFromDb({ entityId } = {}) {
+  const cleanEntityId = Number(entityId || 0);
+
+  if (!cleanEntityId) return [];
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from("universe_item_links")
+      .select(`
+        id,
+        universe_id,
+        continuity_id,
+        branch_id,
+        entity_id,
+        role,
+        release_order,
+        story_order,
+        branch_order,
+        is_core,
+        metadata_json,
+        universes (
+          id,
+          universe_key,
+          title,
+          title_ru,
+          title_en,
+          description_ru,
+          description_en,
+          cover_url,
+          source,
+          is_public,
+          metadata_json
+        ),
+        universe_continuities (
+          id,
+          universe_id,
+          continuity_key,
+          title,
+          type,
+          description,
+          sort_order
+        ),
+        universe_branches (
+          id,
+          universe_id,
+          continuity_id,
+          branch_key,
+          title,
+          type,
+          description,
+          sort_order
+        ),
+        media_entities (
+          id,
+          canonical_key,
+          category,
+          primary_source,
+          title_primary,
+          title_ru,
+          title_en,
+          original_title,
+          year,
+          cover_url,
+          description_ru,
+          description_en,
+          external_ids,
+          meta,
+          universe_key,
+          relations_built_at,
+          relations_status
+        )
+      `)
+      .eq("entity_id", cleanEntityId)
+      .order("branch_order", { ascending: true }),
+    "Загрузка вселенных карточки",
+    DEFAULT_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return safeArray(data)
+    .map(normalizeUniverseLink)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const au = a.universe_title || "";
+      const bu = b.universe_title || "";
+      if (au !== bu) return au.localeCompare(bu, "ru");
+
+      const ac = a.continuity?.sort_order ?? 9999;
+      const bc = b.continuity?.sort_order ?? 9999;
+      if (ac !== bc) return ac - bc;
+
+      const ab = a.branch?.sort_order ?? 9999;
+      const bb = b.branch?.sort_order ?? 9999;
+      if (ab !== bb) return ab - bb;
+
+      return Number(a.branch_order ?? 9999) - Number(b.branch_order ?? 9999);
+    });
 }
