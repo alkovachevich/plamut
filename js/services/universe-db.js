@@ -1,8 +1,7 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { safeArray } from "../utils.js";
 
-const DEFAULT_TIMEOUT_MS = 30000;
-const LIST_TIMEOUT_MS = 45000;
+const DEFAULT_TIMEOUT_MS = 12000;
 
 function clean(value = "") {
   return String(value || "").trim();
@@ -17,13 +16,42 @@ function normalizeUniverse(row = {}) {
     title: row.title || row.title_ru || row.title_en || row.universe_key || "Вселенная",
     title_ru: row.title_ru || "",
     title_en: row.title_en || "",
-    description: row.description_ru || row.description_en || "",
+    description: row.description_ru || row.description_en || row.description || "",
     description_ru: row.description_ru || "",
     description_en: row.description_en || "",
     cover_url: row.cover_url || "",
     source: row.source || "manual",
     is_public: row.is_public !== false,
     metadata_json: row.metadata_json || {}
+  };
+}
+
+function normalizeContinuity(row = {}) {
+  if (!row?.id) return null;
+
+  return {
+    id: row.id,
+    universe_id: row.universe_id,
+    continuity_key: row.continuity_key || "",
+    title: row.title || row.continuity_key || "Continuity",
+    type: row.type || "main",
+    description: row.description || "",
+    sort_order: Number(row.sort_order || 0)
+  };
+}
+
+function normalizeBranch(row = {}) {
+  if (!row?.id) return null;
+
+  return {
+    id: row.id,
+    universe_id: row.universe_id,
+    continuity_id: row.continuity_id || null,
+    branch_key: row.branch_key || "",
+    title: row.title || row.branch_key || "Branch",
+    type: row.type || "main_series",
+    description: row.description || "",
+    sort_order: Number(row.sort_order || 0)
   };
 }
 
@@ -51,23 +79,46 @@ function normalizeEntity(row = {}) {
   };
 }
 
-function normalizeUniverseItem(row = {}) {
+function normalizeUniverseLink(row = {}) {
   const entity = normalizeEntity(row.media_entities || row.entity || {});
   if (!entity) return null;
 
+  const continuity = normalizeContinuity(row.universe_continuities || row.continuity || {});
+  const branch = normalizeBranch(row.universe_branches || row.branch || {});
+
   return {
     id: row.id || null,
+    user_id: row.user_id || null,
+
+    universe_id: row.universe_id || null,
+    continuity_id: row.continuity_id || null,
+    branch_id: row.branch_id || null,
     entity_id: entity.id,
+
     category: entity.category,
     status: row.status || "",
     folder_name: row.folder_name || "",
+
     role: row.role || "member",
+
     release_order: row.release_order ?? null,
     story_order: row.story_order ?? null,
-    phase: row.phase || "",
-    arc: row.arc || "",
+    branch_order: row.branch_order ?? null,
+
     is_core: row.is_core !== false,
     metadata_json: row.metadata_json || {},
+
+    continuity,
+    branch,
+
+    continuity_key: continuity?.continuity_key || "",
+    continuity_title: continuity?.title || "",
+    continuity_type: continuity?.type || "",
+
+    branch_key: branch?.branch_key || "",
+    branch_title: branch?.title || "",
+    branch_type: branch?.type || "",
+
     media_entities: entity
   };
 }
@@ -86,11 +137,23 @@ function normalizeRelation(row = {}) {
   };
 }
 
-function sortItems(items = []) {
+function sortLinks(items = [], mode = "release") {
   return [...safeArray(items)].sort((a, b) => {
-    const ar = Number(a.release_order ?? 9999);
-    const br = Number(b.release_order ?? 9999);
-    if (ar !== br) return ar - br;
+    const aOrder =
+      mode === "story"
+        ? a.story_order ?? a.release_order ?? a.branch_order ?? 9999
+        : mode === "branch"
+          ? a.branch_order ?? a.story_order ?? a.release_order ?? 9999
+          : a.release_order ?? a.story_order ?? a.branch_order ?? 9999;
+
+    const bOrder =
+      mode === "story"
+        ? b.story_order ?? b.release_order ?? b.branch_order ?? 9999
+        : mode === "branch"
+          ? b.branch_order ?? b.story_order ?? b.release_order ?? 9999
+          : b.release_order ?? b.story_order ?? b.branch_order ?? 9999;
+
+    if (Number(aOrder) !== Number(bOrder)) return Number(aOrder) - Number(bOrder);
 
     const ay = Number(a.media_entities?.year || 0);
     const by = Number(b.media_entities?.year || 0);
@@ -103,6 +166,21 @@ function sortItems(items = []) {
   });
 }
 
+function uniqueLinksByEntity(items = []) {
+  const seen = new Set();
+  const result = [];
+
+  safeArray(items).forEach((item) => {
+    const key = Number(item.entity_id || item.media_entities?.id || 0);
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    result.push(item);
+  });
+
+  return result;
+}
+
 export async function getUserUniversesFromDb() {
   const supabase = getSupabaseClient();
 
@@ -113,7 +191,7 @@ export async function getUserUniversesFromDb() {
       .eq("is_public", true)
       .order("title", { ascending: true }),
     "Загрузка списка вселенных из БД",
-    LIST_TIMEOUT_MS
+    DEFAULT_TIMEOUT_MS
   );
 
   if (universeError) throw universeError;
@@ -126,55 +204,73 @@ export async function getUserUniversesFromDb() {
 
   const universeIds = universes.map((universe) => universe.id);
 
-  const itemsResult = await withTimeout(
-    supabase
-      .from("universe_items")
-      .select("universe_id, entity_id")
-      .in("universe_id", universeIds),
-    "Загрузка счётчиков элементов вселенных",
-    LIST_TIMEOUT_MS
-  ).catch((error) => {
-    console.warn("Universe item counters skipped:", error);
-    return { data: [] };
-  });
+  const [{ data: linkRows }, { data: relationRows }, { data: branchRows }] = await Promise.all([
+    withTimeout(
+      supabase
+        .from("universe_item_links")
+        .select("universe_id, entity_id, branch_id, is_core")
+        .in("universe_id", universeIds),
+      "Загрузка счётчиков элементов вселенных",
+      DEFAULT_TIMEOUT_MS
+    ).catch(() => ({ data: [] })),
+    withTimeout(
+      supabase
+        .from("universe_relations")
+        .select("universe_id, id")
+        .in("universe_id", universeIds),
+      "Загрузка счётчиков связей вселенных",
+      DEFAULT_TIMEOUT_MS
+    ).catch(() => ({ data: [] })),
+    withTimeout(
+      supabase
+        .from("universe_branches")
+        .select("universe_id, id")
+        .in("universe_id", universeIds),
+      "Загрузка счётчиков веток вселенных",
+      DEFAULT_TIMEOUT_MS
+    ).catch(() => ({ data: [] }))
+  ]);
 
-  const relationsResult = await withTimeout(
-    supabase
-      .from("universe_relations")
-      .select("universe_id, id")
-      .in("universe_id", universeIds),
-    "Загрузка счётчиков связей вселенных",
-    LIST_TIMEOUT_MS
-  ).catch((error) => {
-    console.warn("Universe relation counters skipped:", error);
-    return { data: [] };
-  });
-
-  const itemCountByUniverse = new Map();
+  const entityIdsByUniverse = new Map();
   const relationCountByUniverse = new Map();
+  const branchCountByUniverse = new Map();
 
-  safeArray(itemsResult.data).forEach((row) => {
-    const key = Number(row.universe_id || 0);
-    itemCountByUniverse.set(key, (itemCountByUniverse.get(key) || 0) + 1);
+  safeArray(linkRows).forEach((row) => {
+    const universeId = Number(row.universe_id || 0);
+    const entityId = Number(row.entity_id || 0);
+    if (!universeId || !entityId) return;
+
+    if (!entityIdsByUniverse.has(universeId)) {
+      entityIdsByUniverse.set(universeId, new Set());
+    }
+
+    entityIdsByUniverse.get(universeId).add(entityId);
   });
 
-  safeArray(relationsResult.data).forEach((row) => {
-    const key = Number(row.universe_id || 0);
-    relationCountByUniverse.set(key, (relationCountByUniverse.get(key) || 0) + 1);
+  safeArray(relationRows).forEach((row) => {
+    const universeId = Number(row.universe_id || 0);
+    relationCountByUniverse.set(universeId, (relationCountByUniverse.get(universeId) || 0) + 1);
+  });
+
+  safeArray(branchRows).forEach((row) => {
+    const universeId = Number(row.universe_id || 0);
+    branchCountByUniverse.set(universeId, (branchCountByUniverse.get(universeId) || 0) + 1);
   });
 
   return universes.map((universe) => {
-    const total = itemCountByUniverse.get(Number(universe.id)) || 0;
-    const relations = relationCountByUniverse.get(Number(universe.id)) || 0;
+    const entityCount = entityIdsByUniverse.get(Number(universe.id))?.size || 0;
+    const relationsCount = relationCountByUniverse.get(Number(universe.id)) || 0;
+    const branchesCount = branchCountByUniverse.get(Number(universe.id)) || 0;
 
     return {
       ...universe,
-      total,
+      total: entityCount,
       done: 0,
       in_library_count: 0,
-      not_added_count: total,
-      relations_count: relations,
-      progress: 0
+      not_added_count: entityCount,
+      relations_count: relationsCount,
+      branches_count: branchesCount,
+      progress: entityCount > 0 ? 0 : 0
     };
   });
 }
@@ -186,7 +282,10 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
     return {
       universe: null,
       items: [],
-      relations: []
+      links: [],
+      relations: [],
+      branches: [],
+      continuities: []
     };
   }
 
@@ -210,78 +309,140 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
     return {
       universe: null,
       items: [],
-      relations: []
+      links: [],
+      relations: [],
+      branches: [],
+      continuities: []
     };
   }
 
-  const itemsResult = await withTimeout(
-    supabase
-      .from("universe_items")
-      .select(`
-        id,
-        universe_id,
-        entity_id,
-        role,
-        release_order,
-        story_order,
-        phase,
-        arc,
-        is_core,
-        metadata_json,
-        media_entities (
+  const [
+    { data: linkRows, error: linksError },
+    { data: relationRows, error: relationsError },
+    { data: continuityRows, error: continuitiesError },
+    { data: branchRows, error: branchesError }
+  ] = await Promise.all([
+    withTimeout(
+      supabase
+        .from("universe_item_links")
+        .select(`
           id,
-          canonical_key,
-          category,
-          primary_source,
-          title_primary,
-          title_ru,
-          title_en,
-          original_title,
-          year,
-          cover_url,
-          description_ru,
-          description_en,
-          external_ids,
-          meta,
-          universe_key,
-          relations_built_at,
-          relations_status
-        )
-      `)
-      .eq("universe_id", universe.id)
-      .order("release_order", { ascending: true }),
-    "Загрузка элементов вселенной",
-    DEFAULT_TIMEOUT_MS
+          universe_id,
+          continuity_id,
+          branch_id,
+          entity_id,
+          role,
+          release_order,
+          story_order,
+          branch_order,
+          is_core,
+          metadata_json,
+          universe_continuities (
+            id,
+            universe_id,
+            continuity_key,
+            title,
+            type,
+            description,
+            sort_order
+          ),
+          universe_branches (
+            id,
+            universe_id,
+            continuity_id,
+            branch_key,
+            title,
+            type,
+            description,
+            sort_order
+          ),
+          media_entities (
+            id,
+            canonical_key,
+            category,
+            primary_source,
+            title_primary,
+            title_ru,
+            title_en,
+            original_title,
+            year,
+            cover_url,
+            description_ru,
+            description_en,
+            external_ids,
+            meta,
+            universe_key,
+            relations_built_at,
+            relations_status
+          )
+        `)
+        .eq("universe_id", universe.id)
+        .order("release_order", { ascending: true }),
+      "Загрузка V3 элементов вселенной",
+      DEFAULT_TIMEOUT_MS
+    ),
+    withTimeout(
+      supabase
+        .from("universe_relations")
+        .select("*")
+        .eq("universe_id", universe.id)
+        .order("sort_order", { ascending: true }),
+      "Загрузка связей вселенной",
+      DEFAULT_TIMEOUT_MS
+    ),
+    withTimeout(
+      supabase
+        .from("universe_continuities")
+        .select("*")
+        .eq("universe_id", universe.id)
+        .order("sort_order", { ascending: true }),
+      "Загрузка линий канона вселенной",
+      DEFAULT_TIMEOUT_MS
+    ),
+    withTimeout(
+      supabase
+        .from("universe_branches")
+        .select("*")
+        .eq("universe_id", universe.id)
+        .order("sort_order", { ascending: true }),
+      "Загрузка веток вселенной",
+      DEFAULT_TIMEOUT_MS
+    )
+  ]);
+
+  if (linksError) throw linksError;
+  if (relationsError) throw relationsError;
+  if (continuitiesError) throw continuitiesError;
+  if (branchesError) throw branchesError;
+
+  const links = sortLinks(
+    safeArray(linkRows)
+      .map(normalizeUniverseLink)
+      .filter(Boolean),
+    "release"
   );
 
-  if (itemsResult.error) throw itemsResult.error;
+  const items = uniqueLinksByEntity(links);
 
-  const relationsResult = await withTimeout(
-    supabase
-      .from("universe_relations")
-      .select("*")
-      .eq("universe_id", universe.id)
-      .order("sort_order", { ascending: true }),
-    "Загрузка связей вселенной",
-    DEFAULT_TIMEOUT_MS
-  );
-
-  if (relationsResult.error) throw relationsResult.error;
-
-  const items = sortItems(
-    safeArray(itemsResult.data)
-      .map(normalizeUniverseItem)
-      .filter(Boolean)
-  );
-
-  const relations = safeArray(relationsResult.data)
+  const relations = safeArray(relationRows)
     .map(normalizeRelation)
     .filter((relation) => relation.from_entity_id && relation.to_entity_id);
+
+  const continuities = safeArray(continuityRows)
+    .map(normalizeContinuity)
+    .filter(Boolean);
+
+  const branches = safeArray(branchRows)
+    .map(normalizeBranch)
+    .filter(Boolean);
 
   return {
     universe,
     items,
-    relations
+    links,
+    relations,
+    branches,
+    continuities
   };
 }
 
