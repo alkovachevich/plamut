@@ -127,6 +127,7 @@ function slugifyWorkIdentity(title = "", author = "") {
 
 function getBookAuthorForIdentity(entity = {}) {
   const meta = normalizeJson(entity.meta, {});
+
   return (
     cleanText(safeArray(meta.author_names)[0]) ||
     cleanText(safeArray(entity.author_names)[0]) ||
@@ -321,6 +322,7 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
 
   const existingIds = normalizeJson(existing.external_ids, {});
   const incomingIds = normalizeJson(incoming.external_ids, {});
+
   const resolvedExternalIds = {
     ...existingIds,
     ...incomingIds
@@ -460,12 +462,16 @@ async function findDuplicateEntity(entity = {}) {
 
 function buildAliasRows(entityId, aliases = [], source = "entity") {
   const normalizedSource = cleanText(source) || "entity";
+  const seen = new Set();
 
   return normalizeArray(aliases)
     .map((alias) => {
       const aliasNormalized = normalizeString(alias);
 
       if (!aliasNormalized) return null;
+      if (seen.has(aliasNormalized)) return null;
+
+      seen.add(aliasNormalized);
 
       return {
         entity_id: entityId,
