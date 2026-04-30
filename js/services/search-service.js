@@ -247,6 +247,22 @@ function pickBooksDescription(existing = {}, incoming = {}, field = "description
   return incomingText.length > existingText.length ? incomingText : existingText;
 }
 
+function coverPriority(item = {}) {
+  if (!item?.cover_url) return 0;
+  const source = String(item?.primary_source || "").toLowerCase();
+  if (source === "supabase") return 5;
+  if (source === "wikidata") return 4;
+  if (source === "openlibrary") return 3;
+  return 2;
+}
+
+function pickBestCover(existing = {}, incoming = {}) {
+  const existingRank = coverPriority(existing);
+  const incomingRank = coverPriority(incoming);
+  if (incomingRank > existingRank) return incoming.cover_url || "";
+  return existing.cover_url || incoming.cover_url || "";
+}
+
 function mergeItems(existing, incoming) {
   if (!existing?.category || !incoming?.category || existing.category !== incoming.category) {
     console.debug("merge conflict: category mismatch", existing?.canonical_key, incoming?.canonical_key);
@@ -367,7 +383,7 @@ function mergeItems(existing, incoming) {
     title_en: pickBetterText(existing.title_en, incoming.title_en),
     original_title: pickBetterText(existing.original_title, incoming.original_title),
     year: existing.year || incoming.year || null,
-    cover_url: existing.cover_url || incoming.cover_url || "",
+    cover_url: pickBestCover(existing, incoming),
     description_ru:
       existing.category === "books"
         ? pickBooksDescription(existing, incoming, "description_ru")
@@ -415,6 +431,20 @@ function mergeItems(existing, incoming) {
 
 function areSameBook(a = {}, b = {}) {
   if (a.category !== "books" || b.category !== "books") return false;
+  const aWikidata = String(a?.external_ids?.wikidata || "").trim();
+  const bWikidata = String(b?.external_ids?.wikidata || "").trim();
+  if (aWikidata && bWikidata && aWikidata === bWikidata) return true;
+
+  const aTitle = getTitleKeys(a)[0] || "";
+  const bTitle = getTitleKeys(b)[0] || "";
+  const aAuthor = compactString(collectBookAuthors(a)[0] || "");
+  const bAuthor = compactString(collectBookAuthors(b)[0] || "");
+  if (aTitle && bTitle && aAuthor && bAuthor && aTitle === bTitle && aAuthor === bAuthor) return true;
+
+  const aSeries = compactString(a?.meta?.series_name || "");
+  const bSeries = compactString(b?.meta?.series_name || "");
+  if (aTitle && bTitle && aSeries && bSeries && aTitle === bTitle && aSeries === bSeries) return true;
+
   return hasBookMergeSignal(a, b);
 }
 
@@ -694,41 +724,42 @@ async function fetchOpenLibraryByTitle(query) {
 }
 
 async function fetchOpenLibraryByAuthor(query) {
-  const url = new URL("https://openlibrary.org/search.json");
-
-  url.searchParams.set("author", query);
-  url.searchParams.set("limit", String(BOOKS_AUTHOR_LIMIT));
-  url.searchParams.set(
-    "fields",
-    [
-      "key",
-      "title",
-      "subtitle",
-      "alternative_title",
-      "author_name",
-      "author_key",
-      "first_publish_year",
-      "cover_i",
-      "isbn",
-      "edition_key",
-      "ia",
-      "subject",
-      "person",
-      "place",
-      "time"
-    ].join(",")
-  );
-
-  const response = await fetchWithTimeout(url.toString(), {
-    headers: { Accept: "application/json" }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Open Library author failed: ${response.status}`);
+  try {
+    const url = new URL("https://openlibrary.org/search.json");
+    url.searchParams.set("author", query);
+    url.searchParams.set("limit", String(BOOKS_AUTHOR_LIMIT));
+    url.searchParams.set(
+      "fields",
+      [
+        "key",
+        "title",
+        "subtitle",
+        "alternative_title",
+        "author_name",
+        "author_key",
+        "first_publish_year",
+        "cover_i",
+        "isbn",
+        "edition_key",
+        "ia",
+        "subject",
+        "person",
+        "place",
+        "time"
+      ].join(",")
+    );
+    const response = await fetchWithTimeout(url.toString(), {
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) {
+      throw new Error(`Open Library author failed: ${response.status}`);
+    }
+    const payload = await response.json();
+    return payload?.docs || [];
+  } catch (error) {
+    console.warn("fetchOpenLibraryByAuthor failed:", error);
+    return [];
   }
-
-  const payload = await response.json();
-  return payload?.docs || [];
 }
 
 function extractOpenLibrarySeriesName(doc = {}) {
@@ -763,10 +794,12 @@ function mapOpenLibraryDoc(doc, { mode = "title", language = "ru" } = {}) {
     ? (titleEn || titleRu || sourceTitle)
     : (titleRu || titleEn || sourceTitle);
 
+  const fallbackTitle = cleanTitleForDedupe(sourceTitle || openLibraryRuAlternative || "unknown");
+  const fallbackAuthor = cleanTitleForDedupe(authorNames[0] || "");
+  const fallbackIdentity = compactString(`${fallbackTitle}:${fallbackAuthor}`).replace(/\s+/g, "-");
+
   return {
-    canonical_key: normalizedWorkKey
-      ? `books:openlibrary:${normalizedWorkKey}`
-      : `books:openlibrary:search:${compactString(doc?.title || "unknown")}`,
+    canonical_key: `books:work:${fallbackIdentity || "unknown"}`,
     category: "books",
     primary_source: "openlibrary",
     title: normalizedTitle,
@@ -899,8 +932,7 @@ const WIKIDATA_ALLOWED_BOOK_TYPES = new Set([
   "Q8261", // novel
   "Q7725634", // literary work
   "Q47461344", // written work
-  "Q277759", // book series
-  "Q3331189" // version, edition, or translation
+  "Q277759" // book series
 ]);
 
 const WIKIDATA_BANNED_BOOK_TYPES = new Set([
@@ -1392,11 +1424,11 @@ async function searchBooks(query, { modal = true } = {}) {
 
   const dbResultsPromise = fetchBooksFromSupabase(cleanQuery, language).catch(() => []);
 
-  const [olTitleResult, olAuthorResult, wdResult, dbResults] = await Promise.allSettled([
-    fetchOpenLibraryByTitle(cleanQuery),
-    fetchOpenLibraryByAuthor(cleanQuery),
+  const [dbResults, wdResult, olTitleResult, olAuthorResult] = await Promise.allSettled([
+    dbResultsPromise,
     fetchWikidataCandidates(cleanQuery),
-    dbResultsPromise
+    fetchOpenLibraryByTitle(cleanQuery),
+    fetchOpenLibraryByAuthor(cleanQuery)
   ]);
 
   const openLibraryTitleItems =
@@ -1520,7 +1552,8 @@ async function searchBooks(query, { modal = true } = {}) {
     .map((row) => row.value);
 
   const enrichedWikidata = enrichBooksWithOpenLibrary(wikidataItems, openLibraryItems);
-  const sourcePool = [...supabaseItems, ...(enrichedWikidata.length ? enrichedWikidata : []), ...openLibraryItems];
+  const fallbackOpenLibrary = openLibraryItems.filter((candidate) => !enrichedWikidata.some((wd) => areSameBook(wd, candidate)));
+  const sourcePool = [...supabaseItems, ...enrichedWikidata, ...fallbackOpenLibrary];
   const deduped = dedupeBooks(sourcePool)
     .map((item) => normalizeBookDisplayLanguage(item, language))
     .map((item) => ({
