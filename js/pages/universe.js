@@ -21,90 +21,41 @@ function getCover(entity = {}) {
   return cover;
 }
 
-const GROUP_TITLES = {
-  source_material: "Первоисточник",
-  book_series: "Первоисточник",
-  direct_sequel: "Продолжения",
-  legacy_sequel: "Продолжения",
-  story_continuation: "Продолжение линии",
-  multiverse_link: "Мультивселенная",
-  sequel: "Продолжения",
-  direct_prequel: "Предыстории",
-  prequel: "Предыстории",
-  adaptation: "Адаптации",
-  spin_off: "Спин-оффы",
-  same_universe: "Одна вселенная",
-  related_work: "Связанное",
-  alternate_version: "Альтернативные версии",
-  reboot: "Связанное",
-  remake: "Связанное"
-};
-
-function buildRelationOrderMap(items = [], sortMode = "release") {
-  const map = new Map();
-
-  safeArray(items).forEach((item, index) => {
-    const entityId = Number(item.media_entities?.id || item.entity_id || 0);
-    if (!entityId) return;
-
-    const order =
-      sortMode === "story"
-        ? item.story_order ?? item.release_order ?? index
-        : item.release_order ?? index;
-
-    map.set(entityId, Number(order ?? index));
-  });
-
-  return map;
-}
-
-function groupItemsByRelations(items = [], relations = [], seedId = null, sortMode = "release") {
-  const byId = new Map(safeArray(items).map((item) => [Number(item.media_entities?.id), item]));
-  const grouped = new Map();
-  const orderMap = buildRelationOrderMap(items, sortMode);
-
-  safeArray(relations).forEach((rel) => {
-    const target = byId.get(Number(rel.to_entity_id));
-    if (!target) return;
-
-    const key = rel.relation_type || "related_work";
-    const title = GROUP_TITLES[key] || "Связанное";
-
-    if (!grouped.has(title)) grouped.set(title, []);
-    grouped.get(title).push({ item: target, relation: rel });
-  });
-
-  if (!grouped.size) {
-    grouped.set("Все элементы", safeArray(items).map((item) => ({ item, relation: null })));
+function getOrderValue(item = {}, sortMode = "release", index = 0) {
+  if (sortMode === "story") {
+    return Number(item.story_order ?? item.release_order ?? index + 1);
   }
 
-  return Array.from(grouped.entries())
-    .map(([title, entries]) => ({
-      title,
-      entries: entries
-        .filter(
-          (entry, idx, arr) =>
-            idx === arr.findIndex((x) => x.item.media_entities?.id === entry.item.media_entities?.id)
-        )
-        .sort((a, b) => {
-          const aId = Number(a.item.media_entities?.id || 0);
-          const bId = Number(b.item.media_entities?.id || 0);
+  return Number(item.release_order ?? item.story_order ?? index + 1);
+}
 
-          if (orderMap.has(aId) || orderMap.has(bId)) {
-            return (orderMap.get(aId) ?? 9999) - (orderMap.get(bId) ?? 9999);
-          }
+function sortUniverseItems(items = [], sortMode = "release") {
+  return [...safeArray(items)].sort((a, b) => {
+    const ai = safeArray(items).indexOf(a);
+    const bi = safeArray(items).indexOf(b);
 
-          const ay = Number(a.item.media_entities?.year || 0);
-          const by = Number(b.item.media_entities?.year || 0);
-          if (ay && by && ay !== by) return ay - by;
+    const ao = getOrderValue(a, sortMode, ai);
+    const bo = getOrderValue(b, sortMode, bi);
 
-          return resolveTitle(a.item.media_entities || {}).localeCompare(
-            resolveTitle(b.item.media_entities || {}),
-            "ru"
-          );
-        })
-    }))
-    .filter((group) => group.entries.length);
+    if (ao !== bo) return ao - bo;
+
+    const ay = Number(a.media_entities?.year || 0);
+    const by = Number(b.media_entities?.year || 0);
+    if (ay && by && ay !== by) return ay - by;
+
+    return resolveTitle(a.media_entities || {}).localeCompare(
+      resolveTitle(b.media_entities || {}),
+      "ru"
+    );
+  });
+}
+
+function getBestRelationForEntity(entityId, relations = []) {
+  return (
+    safeArray(relations)
+      .filter((rel) => Number(rel.to_entity_id) === Number(entityId))
+      .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null
+  );
 }
 
 function renderCover(entity = {}) {
@@ -125,20 +76,13 @@ function renderCover(entity = {}) {
   return `<div class="item-cover-fallback">?</div>`;
 }
 
-function findRelationForItem(targetEntityId, relations = []) {
-  return (
-    safeArray(relations)
-      .filter((rel) => Number(rel.to_entity_id) === Number(targetEntityId))
-      .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null
-  );
-}
-
-function renderItem(item, index, relation = null, relations = [], rootSourceId = 0) {
+function renderItem(item, index, relations = [], sortMode = "release") {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "";
-  const relationInfo = relation || findRelationForItem(entity.id, relations);
-  const relationLabel = relationInfo ? getRelationLabel(relationInfo.relation_type) : "Участник";
+  const relation = getBestRelationForEntity(entity.id, relations);
+  const relationLabel = relation ? getRelationLabel(relation.relation_type) : "Участник";
+  const orderValue = getOrderValue(item, sortMode, index);
 
   return `
     <button
@@ -147,7 +91,7 @@ function renderItem(item, index, relation = null, relations = [], rootSourceId =
       data-key="${escapeHtml(entity.canonical_key || "")}"
       data-category="${escapeHtml(entity.category || item.category || "")}"
     >
-      <div class="timeline-index">${escapeHtml(String(index + 1))}</div>
+      <div class="timeline-index">${escapeHtml(String(orderValue || index + 1))}</div>
 
       <div class="item-cover">
         ${renderCover(entity)}
@@ -166,9 +110,9 @@ function renderItem(item, index, relation = null, relations = [], rootSourceId =
           <span>${escapeHtml(getCategoryLabel(state.language, entity.category || ""))}</span>
           ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
           ${status ? `<span>${escapeHtml(status)}</span>` : ""}
-          <span>${escapeHtml(relationLabel)}</span>
+          ${item.role ? `<span>${escapeHtml(item.role)}</span>` : ""}
           ${item.phase ? `<span>${escapeHtml(item.phase)}</span>` : ""}
-          ${Number(entity.id) === Number(rootSourceId) ? `<span>Первоисточник</span>` : ""}
+          ${relationLabel ? `<span>${escapeHtml(relationLabel)}</span>` : ""}
         </div>
       </div>
     </button>
@@ -261,9 +205,10 @@ function renderStyles() {
 
       .sort-btn {
         border-radius:999px;
-        padding:6px 10px;
+        padding:7px 12px;
         font-size:12px;
         color:var(--text-soft);
+        cursor:pointer;
       }
 
       .sort-btn.is-active {
@@ -285,7 +230,7 @@ function renderStyles() {
 
       .timeline-item {
         display:grid;
-        grid-template-columns:34px 74px 1fr;
+        grid-template-columns:42px 74px 1fr;
         gap:12px;
         align-items:center;
         padding:10px;
@@ -297,8 +242,8 @@ function renderStyles() {
       }
 
       .timeline-index {
-        width:34px;
-        height:34px;
+        width:42px;
+        height:42px;
         border-radius:999px;
         display:grid;
         place-items:center;
@@ -400,18 +345,22 @@ function renderStyles() {
         .hero-cover { width:82px; height:118px; }
 
         .timeline-item {
-          grid-template-columns:28px 62px 1fr;
+          grid-template-columns:34px 62px 1fr;
           gap:10px;
         }
 
         .timeline-index {
-          width:28px;
-          height:28px;
+          width:34px;
+          height:34px;
         }
 
         .item-cover {
           width:62px;
           height:90px;
+        }
+
+        .title {
+          font-size:24px;
         }
       }
     </style>
@@ -427,7 +376,7 @@ function renderGuest(root) {
 
       <div class="empty-state">
         <div class="empty-title">Нужно войти</div>
-        <div class="empty-text">Вселенные строятся на основе твоей библиотеки.</div>
+        <div class="empty-text">Войди, чтобы открыть вселенную.</div>
         <button class="login-btn" type="button" data-action="login">Войти</button>
       </div>
     </section>
@@ -457,7 +406,7 @@ function renderNotFound(root, text = "Вселенная не найдена") {
     <section class="page">
       <div class="empty-state">
         <div class="empty-title">${escapeHtml(text)}</div>
-        <div class="empty-text">Эта вселенная пока не найдена в новой базе Plamut.</div>
+        <div class="empty-text">Эта вселенная пока не найдена в базе Plamut.</div>
       </div>
     </section>
   `;
@@ -524,33 +473,26 @@ export async function renderUniversePage(root, params = {}) {
       "";
 
     const done = items.filter((item) => item.status === "done").length;
-    const rootSourceId = Number(
-      universe?.metadata_json?.root_source_entity_id ||
-        universe?.metadata_json?.seed_entity_id ||
-        0
+    const hasStoryChronology = items.some(
+      (item) => item.story_order !== null && item.story_order !== undefined
     );
 
-    const hasStoryChronology = items.some((item) => item.story_order !== null && item.story_order !== undefined);
-    const initialSort = hasStoryChronology ? "story" : "release";
+    let currentSortMode = "release";
 
-    function renderBody(sortMode = initialSort) {
-      return groupItemsByRelations(
-        items,
-        relations,
-        Number(universe?.metadata_json?.seed_entity_id || 0),
-        sortMode
-      )
-        .map(
-          (group) => `
-          <div class="section-title">${escapeHtml(group.title)}</div>
-          <div class="timeline">
-            ${group.entries
-              .map((entry, index) => renderItem(entry.item, index, entry.relation, relations, rootSourceId))
-              .join("")}
-          </div>
-        `
-        )
-        .join("");
+    function renderBody(sortMode = "release") {
+      const sortedItems = sortUniverseItems(items, sortMode);
+
+      return `
+        <div class="section-title">
+          ${sortMode === "story" ? "Хронология событий" : "Порядок выхода"}
+        </div>
+
+        <div class="timeline">
+          ${sortedItems
+            .map((item, index) => renderItem(item, index, relations, sortMode))
+            .join("")}
+        </div>
+      `;
     }
 
     root.innerHTML = `
@@ -579,19 +521,20 @@ export async function renderUniversePage(root, params = {}) {
               <span class="stat">${escapeHtml(String(items.length))} элементов</span>
               <span class="stat">готово ${escapeHtml(String(done))}</span>
               ${relations.length ? `<span class="stat">${escapeHtml(String(relations.length))} связей</span>` : ""}
-              ${rootSourceId ? `<span class="stat">первоисточник #${escapeHtml(String(rootSourceId))}</span>` : ""}
               ${universe.source ? `<span class="stat">${escapeHtml(universe.source === "manual" ? "БД" : universe.source)}</span>` : ""}
             </div>
           </div>
         </div>
 
         <div class="sort-switch">
-          <button class="sort-btn ${initialSort === "release" ? "is-active" : ""}" data-sort="release" type="button">По выходу</button>
-          <button class="sort-btn ${initialSort === "story" ? "is-active" : ""}" data-sort="story" type="button" ${hasStoryChronology ? "" : "disabled"}>По событиям</button>
+          <button class="sort-btn is-active" data-sort="release" type="button">По выходу</button>
+          <button class="sort-btn" data-sort="story" type="button">
+            По событиям${hasStoryChronology ? "" : " · черновик"}
+          </button>
         </div>
 
         <div data-groups-root>
-          ${renderBody(initialSort)}
+          ${renderBody(currentSortMode)}
         </div>
       </section>
     `;
@@ -601,6 +544,7 @@ export async function renderUniversePage(root, params = {}) {
     root.querySelectorAll("[data-sort]").forEach((button) => {
       button.addEventListener("click", () => {
         const mode = button.dataset.sort || "release";
+        currentSortMode = mode;
 
         root.querySelectorAll("[data-sort]").forEach((node) => {
           node.classList.toggle("is-active", node === button);
@@ -608,7 +552,7 @@ export async function renderUniversePage(root, params = {}) {
 
         const groupsRoot = root.querySelector("[data-groups-root]");
         if (groupsRoot) {
-          groupsRoot.innerHTML = renderBody(mode);
+          groupsRoot.innerHTML = renderBody(currentSortMode);
           bindItems(root);
         }
       });
