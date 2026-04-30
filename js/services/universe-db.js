@@ -104,6 +104,77 @@ function sortItems(items = []) {
   });
 }
 
+export async function getUserUniversesFromDb() {
+  const supabase = getSupabaseClient();
+
+  const { data: universeRows, error: universeError } = await withTimeout(
+    supabase
+      .from("universes")
+      .select("*")
+      .eq("is_public", true)
+      .order("title", { ascending: true }),
+    "Загрузка списка вселенных из БД",
+    DEFAULT_TIMEOUT_MS
+  );
+
+  if (universeError) throw universeError;
+
+  const universes = safeArray(universeRows)
+    .map(normalizeUniverse)
+    .filter(Boolean);
+
+  if (!universes.length) return [];
+
+  const universeIds = universes.map((universe) => universe.id);
+
+  const [{ data: itemRows }, { data: relationRows }] = await Promise.all([
+    withTimeout(
+      supabase
+        .from("universe_items")
+        .select("universe_id, entity_id, is_core")
+        .in("universe_id", universeIds),
+      "Загрузка счётчиков элементов вселенных",
+      DEFAULT_TIMEOUT_MS
+    ).catch(() => ({ data: [] })),
+    withTimeout(
+      supabase
+        .from("universe_relations")
+        .select("universe_id, id")
+        .in("universe_id", universeIds),
+      "Загрузка счётчиков связей вселенных",
+      DEFAULT_TIMEOUT_MS
+    ).catch(() => ({ data: [] }))
+  ]);
+
+  const itemCountByUniverse = new Map();
+  const relationCountByUniverse = new Map();
+
+  safeArray(itemRows).forEach((row) => {
+    const key = Number(row.universe_id || 0);
+    itemCountByUniverse.set(key, (itemCountByUniverse.get(key) || 0) + 1);
+  });
+
+  safeArray(relationRows).forEach((row) => {
+    const key = Number(row.universe_id || 0);
+    relationCountByUniverse.set(key, (relationCountByUniverse.get(key) || 0) + 1);
+  });
+
+  return universes.map((universe) => {
+    const total = itemCountByUniverse.get(Number(universe.id)) || 0;
+    const relations = relationCountByUniverse.get(Number(universe.id)) || 0;
+
+    return {
+      ...universe,
+      total,
+      done: 0,
+      in_library_count: 0,
+      not_added_count: total,
+      relations_count: relations,
+      progress: total > 0 ? 0 : 0
+    };
+  });
+}
+
 export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
   const key = clean(universeKey);
 
