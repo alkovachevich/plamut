@@ -15,7 +15,8 @@ import {
 } from "../services/entity-db.js";
 
 import {
-  getRelatedItemsForEntityFromDb
+  getRelatedItemsForEntityFromDb,
+  getEntityUniverseLinksFromDb
 } from "../services/universe-db.js";
 
 import {
@@ -384,6 +385,85 @@ function renderRelatedItem(item = {}) {
   `;
 }
 
+function groupUniverseLinks(links = []) {
+  const grouped = new Map();
+
+  safeArray(links).forEach((link) => {
+    const universeKey = link.universe_key || "unknown";
+    const continuityKey = link.continuity_key || "unknown";
+    const branchKey = link.branch_key || "unknown";
+
+    if (!grouped.has(universeKey)) {
+      grouped.set(universeKey, {
+        universe_key: universeKey,
+        universe_title: link.universe_title || "Вселенная",
+        continuities: new Map()
+      });
+    }
+
+    const universe = grouped.get(universeKey);
+
+    if (!universe.continuities.has(continuityKey)) {
+      universe.continuities.set(continuityKey, {
+        continuity_key: continuityKey,
+        continuity_title: link.continuity_title || "Линия",
+        continuity_type: link.continuity_type || "",
+        branches: new Map()
+      });
+    }
+
+    const continuity = universe.continuities.get(continuityKey);
+
+    if (!continuity.branches.has(branchKey)) {
+      continuity.branches.set(branchKey, {
+        branch_key: branchKey,
+        branch_title: link.branch_title || "Ветка",
+        branch_type: link.branch_type || "",
+        links: []
+      });
+    }
+
+    continuity.branches.get(branchKey).links.push(link);
+  });
+
+  return Array.from(grouped.values()).map((universe) => ({
+    ...universe,
+    continuities: Array.from(universe.continuities.values()).map((continuity) => ({
+      ...continuity,
+      branches: Array.from(continuity.branches.values())
+    }))
+  }));
+}
+
+function renderUniverseLinks(links = []) {
+  if (!links.length) return "";
+
+  const grouped = groupUniverseLinks(links);
+
+  return `
+    <div class="card-section" data-universe-links-section>
+      <div class="card-section__title">Вселенные</div>
+      <div class="universe-links">
+        ${grouped.map((universe) => `
+          <button class="universe-link" type="button" data-universe-key="${escapeHtml(universe.universe_key)}">
+            <div class="universe-link__title">${escapeHtml(universe.universe_title)}</div>
+            ${universe.continuities.map((continuity) => `
+              <div class="universe-link__continuity">
+                ${escapeHtml(continuity.continuity_title)}
+              </div>
+              <div class="universe-link__branches">
+                ${continuity.branches.map((branch) => `
+                  <span>${escapeHtml(branch.branch_title)}</span>
+                `).join("")}
+              </div>
+            `).join("")}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderStyles() {
   return `
     <style>
@@ -414,6 +494,13 @@ function renderStyles() {
       .card-section[hidden] { display:none; }
       .card-section__title { font-size:17px; font-weight:850; color:var(--text); margin-bottom:10px; }
       .card-description { color:var(--text-soft); font-size:15px; line-height:1.55; white-space:pre-line; }
+
+      .universe-links { display:grid; gap:10px; }
+      .universe-link { width:100%; display:flex; flex-direction:column; gap:7px; padding:12px; border-radius:15px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
+      .universe-link__title { font-weight:850; line-height:1.25; }
+      .universe-link__continuity { color:var(--text-soft); font-size:13px; }
+      .universe-link__branches { display:flex; flex-wrap:wrap; gap:6px; }
+      .universe-link__branches span { font-size:12px; color:var(--text-soft); background:var(--bg-soft); padding:4px 8px; border-radius:999px; }
 
       .related-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; }
       .related-card { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:center; padding:8px; border-radius:14px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
@@ -488,7 +575,7 @@ function renderMenu(userMedia) {
   `;
 }
 
-function renderCard(root, { entity, userMedia, relatedItems = [] }) {
+function renderCard(root, { entity, userMedia, relatedItems = [], universeLinks = [] }) {
   const title = resolveTitle(entity);
   const description = resolveDescription(entity);
   const categoryLabel = getCategoryLabel(state.language, entity.category || "");
@@ -534,6 +621,8 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
           ${description ? escapeHtml(description) : "Описание отсутствует"}
         </div>
       </div>
+
+      ${renderUniverseLinks(universeLinks)}
 
       <div class="card-section" data-related-section ${hasRelatedContent ? "" : "hidden"}>
         <div class="card-section__title">Связанные</div>
@@ -676,6 +765,21 @@ function bindRelated(root) {
   });
 }
 
+function bindUniverseLinks(root) {
+  root.querySelectorAll("[data-universe-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.universeKey || "";
+      if (!key) return;
+      navigate("/universe", { id: key });
+    });
+  });
+}
+
+function bindAllLinks(root) {
+  bindRelated(root);
+  bindUniverseLinks(root);
+}
+
 async function hydrateUserMediaState(root, userId, entity) {
   if (!userId || !entity?.id) return null;
 
@@ -709,6 +813,19 @@ async function hydrateUserMediaState(root, userId, entity) {
     }
 
     return null;
+  }
+}
+
+async function loadUniverseLinks(entity) {
+  if (!entity?.id) return [];
+
+  try {
+    return await getEntityUniverseLinksFromDb({
+      entityId: entity.id
+    });
+  } catch (error) {
+    console.warn("CARD: universe links skipped", error);
+    return [];
   }
 }
 
@@ -791,10 +908,13 @@ function bindCardActions({
         setTemporaryCardItem(nextEntity);
       }
 
+      const universeLinks = await loadUniverseLinks(nextEntity);
+
       renderCard(root, {
         entity: nextEntity,
         userMedia: nextUserMedia,
-        relatedItems: []
+        relatedItems: [],
+        universeLinks
       });
 
       bindCardActions({
@@ -805,6 +925,8 @@ function bindCardActions({
         setUserMedia,
         userId
       });
+
+      bindAllLinks(root);
 
       setStatus(root, result.alreadyExists ? "Уже есть в библиотеке" : "Добавлено в библиотеку");
 
@@ -947,10 +1069,13 @@ function bindCardActions({
 
       setUserMedia(null);
 
+      const universeLinks = await loadUniverseLinks(entity);
+
       renderCard(root, {
         entity,
         userMedia: null,
-        relatedItems: []
+        relatedItems: [],
+        universeLinks
       });
 
       bindCardActions({
@@ -961,6 +1086,8 @@ function bindCardActions({
         setUserMedia,
         userId
       });
+
+      bindAllLinks(root);
 
       setStatus(root, "Удалено из библиотеки");
 
@@ -987,7 +1114,8 @@ export async function renderCardPage(root, params = {}) {
   renderCard(root, {
     entity: currentEntity,
     userMedia: currentUserMedia,
-    relatedItems: []
+    relatedItems: [],
+    universeLinks: []
   });
 
   bindCardActions({
@@ -1002,6 +1130,8 @@ export async function renderCardPage(root, params = {}) {
     },
     userId
   });
+
+  bindAllLinks(root);
 
   if (!currentEntity || isFallbackEntity(currentEntity)) {
     renderLoading(root);
@@ -1025,10 +1155,13 @@ export async function renderCardPage(root, params = {}) {
 
     currentUserMedia = await hydrateUserMediaState(root, userId, currentEntity);
 
+    const universeLinks = await loadUniverseLinks(currentEntity);
+
     renderCard(root, {
       entity: currentEntity,
       userMedia: currentUserMedia,
-      relatedItems: []
+      relatedItems: [],
+      universeLinks
     });
 
     bindCardActions({
@@ -1043,6 +1176,8 @@ export async function renderCardPage(root, params = {}) {
       },
       userId
     });
+
+    bindAllLinks(root);
 
     await hydrateRelatedItems(root, currentEntity);
   } catch (error) {
@@ -1056,7 +1191,8 @@ export async function renderCardPage(root, params = {}) {
     renderCard(root, {
       entity: currentEntity,
       userMedia: currentUserMedia,
-      relatedItems: []
+      relatedItems: [],
+      universeLinks: []
     });
 
     bindCardActions({
@@ -1071,6 +1207,8 @@ export async function renderCardPage(root, params = {}) {
       },
       userId
     });
+
+    bindAllLinks(root);
 
     setStatus(root, "Карточка открыта из кэша. База временно недоступна.");
   }
