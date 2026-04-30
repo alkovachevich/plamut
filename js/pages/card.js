@@ -15,8 +15,8 @@ import {
 } from "../services/entity-db.js";
 
 import {
-  getRelatedItemsForEntity
-} from "../services/universe-service.js";
+  getRelatedItemsForEntityFromDb
+} from "../services/universe-db.js";
 
 import {
   getSupabaseClient,
@@ -93,10 +93,24 @@ function resolveTitle(entity = {}) {
 
   if ((entity.category || "") === "books") {
     if (lang === "en") {
-      return entity.title_en || entity.title_primary || entity.title_ru || entity.original_title || entity.title || "Без названия";
+      return (
+        entity.title_en ||
+        entity.title_primary ||
+        entity.title_ru ||
+        entity.original_title ||
+        entity.title ||
+        "Без названия"
+      );
     }
 
-    return entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || entity.title || "Без названия";
+    return (
+      entity.title_ru ||
+      entity.title_primary ||
+      entity.title_en ||
+      entity.original_title ||
+      entity.title ||
+      "Без названия"
+    );
   }
 
   return (
@@ -114,8 +128,8 @@ function resolveDescription(entity = {}) {
 
   if ((entity.category || "") === "books") {
     return lang === "en"
-      ? (entity.description_en || entity.description_ru || entity.description || "")
-      : (entity.description_ru || entity.description_en || entity.description || "");
+      ? entity.description_en || entity.description_ru || entity.description || ""
+      : entity.description_ru || entity.description_en || entity.description || "";
   }
 
   return entity.description_ru || entity.description_en || entity.description || "";
@@ -421,9 +435,6 @@ function renderStyles() {
       .card-dialog__btn { min-height:40px; padding:0 13px; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-weight:750; }
       .card-dialog__btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
       .card-dialog__btn.danger { background:var(--danger); color:#fff; border-color:transparent; }
-      .card-dialog__status-list { display:grid; gap:8px; }
-      .card-dialog__status-option { text-align:left; min-height:42px; border-radius:12px; padding:0 12px; background:var(--surface); color:var(--text); border:1px solid var(--border-soft); }
-      .card-dialog__status-option.active { background:var(--accent-soft); border-color:transparent; }
 
       @media (max-width:640px) {
         .card-shell { grid-template-columns:104px 1fr; gap:12px; padding:12px; border-radius:18px; }
@@ -580,6 +591,7 @@ function openFolderDialog(currentFolder = "") {
     document.body.appendChild(backdrop);
 
     const input = backdrop.querySelector("[data-folder-input]");
+
     const cleanup = (value) => {
       backdrop.remove();
       resolve(value);
@@ -700,12 +712,11 @@ async function hydrateUserMediaState(root, userId, entity) {
   }
 }
 
-async function hydrateRelatedItems(root, userId, entity, userMedia) {
-  if (!userId || !entity?.id || !userMedia?.id) return [];
+async function hydrateRelatedItems(root, entity) {
+  if (!entity?.id) return [];
 
   try {
-    const relatedItems = await getRelatedItemsForEntity({
-      userId,
+    const relatedItems = await getRelatedItemsForEntityFromDb({
       entityId: entity.id
     });
 
@@ -721,7 +732,7 @@ async function hydrateRelatedItems(root, userId, entity, userMedia) {
     renderRelated(root, filtered, entity);
     return filtered;
   } catch (error) {
-    console.warn("CARD: related items skipped", error);
+    console.warn("CARD: related items from universe DB skipped", error);
     return [];
   }
 }
@@ -797,7 +808,7 @@ function bindCardActions({
 
       setStatus(root, result.alreadyExists ? "Уже есть в библиотеке" : "Добавлено в библиотеку");
 
-      hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
+      hydrateRelatedItems(root, nextEntity);
     } catch (error) {
       console.warn("CARD: add to library error", error);
       setStatus(root, error.message || "Ошибка добавления");
@@ -866,23 +877,21 @@ function bindCardActions({
 
     if (!userMedia?.id) return;
 
-    closeMenu(root);
-
-    const folderName = await openFolderDialog(userMedia.folder_name || "");
-    if (folderName === null) return;
-
-    const cleanFolder = clean(folderName);
-
     try {
+      closeMenu(root);
+
+      const value = await openFolderDialog(userMedia.folder_name || "");
+      if (value === null) return;
+
       setStatus(root, "Обновляем папку…");
 
       const updated = await updateUserMedia(userMedia.id, {
-        folder_name: cleanFolder || null
+        folder_name: clean(value) || null
       });
 
       const nextUserMedia = updated || {
         ...userMedia,
-        folder_name: cleanFolder || null
+        folder_name: clean(value) || ""
       };
 
       setUserMedia(nextUserMedia);
@@ -895,7 +904,7 @@ function bindCardActions({
       });
 
       updateUserMediaUI(root, nextUserMedia);
-      setStatus(root, cleanFolder ? "Папка обновлена" : "Папка убрана");
+      setStatus(root, "Папка обновлена");
     } catch (error) {
       console.warn("CARD: folder update error", error);
       setStatus(root, error.message || "Ошибка обновления папки");
@@ -907,6 +916,7 @@ function bindCardActions({
     event.stopPropagation();
 
     const userMedia = getUserMedia();
+    const entity = getEntity();
 
     if (!userId) {
       openAuthModal("login");
@@ -915,29 +925,30 @@ function bindCardActions({
 
     if (!userMedia?.id) return;
 
-    closeMenu(root);
-
     const confirmed = await openConfirmDialog({
       title: "Удалить из библиотеки?",
-      text: "Карточка будет удалена только из твоей библиотеки. Сама сущность останется в базе.",
+      text: "Карточка будет удалена только из твоей библиотеки. Общая карточка произведения останется в базе.",
       danger: true
     });
 
     if (!confirmed) return;
 
     try {
+      closeMenu(root);
       setStatus(root, "Удаляем…");
 
       await deleteUserMedia(userMedia.id);
 
-      removeCachedLibraryItem(userId, userMedia.id, {
-        category: userMedia.category || getEntity().category
-      });
+      try {
+        removeCachedLibraryItem(userId, entity.canonical_key);
+      } catch (cacheError) {
+        console.warn("CARD: remove cache skipped", cacheError);
+      }
 
       setUserMedia(null);
 
       renderCard(root, {
-        entity: getEntity(),
+        entity,
         userMedia: null,
         relatedItems: []
       });
@@ -952,6 +963,8 @@ function bindCardActions({
       });
 
       setStatus(root, "Удалено из библиотеки");
+
+      hydrateRelatedItems(root, entity);
     } catch (error) {
       console.warn("CARD: remove error", error);
       setStatus(root, error.message || "Ошибка удаления");
@@ -960,108 +973,105 @@ function bindCardActions({
 }
 
 export async function renderCardPage(root, params = {}) {
-  const key = normalizeKey(params.key || "");
+  const key = normalizeKey(params.key || params.canonical_key || "");
   const userId = state.user?.id || "";
 
-  let currentEntity = loadFastEntity(params);
-  let userMedia = currentEntity ? getCachedUserMedia(userId, currentEntity) : null;
-
-  if (!currentEntity) {
-    renderLoading(root);
-
-    try {
-      currentEntity = await loadEntityFromDb(key);
-    } catch (error) {
-      console.warn("CARD: first DB load skipped", error);
-    }
-
-    if (!currentEntity) {
-      currentEntity = buildFallbackEntity(params);
-    }
-  }
-
-  if (!currentEntity) {
+  if (!key) {
     renderNotFound(root);
     return;
   }
 
-  if (isPersistableEntity(currentEntity)) {
-    setTemporaryCardItem(currentEntity);
-  }
+  let currentEntity = loadFastEntity(params) || buildFallbackEntity(params);
+  let currentUserMedia = null;
 
   renderCard(root, {
     entity: currentEntity,
-    userMedia,
+    userMedia: currentUserMedia,
     relatedItems: []
   });
 
-  const getEntity = () => currentEntity;
-  const setEntity = (nextEntity) => {
-    currentEntity = nextEntity || currentEntity;
-  };
-
-  const getUserMedia = () => userMedia;
-  const setUserMedia = (nextUserMedia) => {
-    userMedia = nextUserMedia || null;
-  };
-
   bindCardActions({
     root,
-    getEntity,
-    setEntity,
-    getUserMedia,
-    setUserMedia,
+    getEntity: () => currentEntity,
+    setEntity: (value) => {
+      currentEntity = value || currentEntity;
+    },
+    getUserMedia: () => currentUserMedia,
+    setUserMedia: (value) => {
+      currentUserMedia = value || null;
+    },
     userId
   });
 
-  bindRelated(root);
-
-  if (currentEntity.__fallback) {
-    setStatus(root, "Карточка не загружена из БД. Действия временно ограничены.");
-    return () => {};
+  if (!currentEntity || isFallbackEntity(currentEntity)) {
+    renderLoading(root);
   }
 
   try {
-    const dbEntity = await loadEntityFromDb(currentEntity.canonical_key);
+    const loadedEntity = await loadEntityFromDb(key);
 
-    if (dbEntity?.canonical_key) {
-      currentEntity = {
-        ...currentEntity,
-        ...dbEntity
-      };
-
-      if (isPersistableEntity(currentEntity)) {
-        setTemporaryCardItem(currentEntity);
+    if (!loadedEntity?.canonical_key) {
+      if (!currentEntity) {
+        renderNotFound(root);
       }
+      return;
     }
+
+    currentEntity = loadedEntity;
+
+    if (isPersistableEntity(currentEntity)) {
+      setTemporaryCardItem(currentEntity);
+    }
+
+    currentUserMedia = await hydrateUserMediaState(root, userId, currentEntity);
+
+    renderCard(root, {
+      entity: currentEntity,
+      userMedia: currentUserMedia,
+      relatedItems: []
+    });
+
+    bindCardActions({
+      root,
+      getEntity: () => currentEntity,
+      setEntity: (value) => {
+        currentEntity = value || currentEntity;
+      },
+      getUserMedia: () => currentUserMedia,
+      setUserMedia: (value) => {
+        currentUserMedia = value || null;
+      },
+      userId
+    });
+
+    await hydrateRelatedItems(root, currentEntity);
   } catch (error) {
-    console.warn("CARD: background DB entity refresh skipped", error);
-  }
+    console.warn("CARD: render error", error);
 
-  if (userId && currentEntity?.id) {
-    const loadedUserMedia = await hydrateUserMediaState(root, userId, currentEntity);
-
-    if (loadedUserMedia?.id) {
-      userMedia = loadedUserMedia;
-
-      renderCard(root, {
-        entity: currentEntity,
-        userMedia,
-        relatedItems: []
-      });
-
-      bindCardActions({
-        root,
-        getEntity,
-        setEntity,
-        getUserMedia,
-        setUserMedia,
-        userId
-      });
-
-      hydrateRelatedItems(root, userId, currentEntity, userMedia);
+    if (!currentEntity) {
+      renderNotFound(root);
+      return;
     }
-  }
 
-  return () => {};
+    renderCard(root, {
+      entity: currentEntity,
+      userMedia: currentUserMedia,
+      relatedItems: []
+    });
+
+    bindCardActions({
+      root,
+      getEntity: () => currentEntity,
+      setEntity: (value) => {
+        currentEntity = value || currentEntity;
+      },
+      getUserMedia: () => currentUserMedia,
+      setUserMedia: (value) => {
+        currentUserMedia = value || null;
+      },
+      userId
+    });
+
+    setStatus(root, "Карточка открыта из кэша. База временно недоступна.");
+  }
 }
