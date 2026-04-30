@@ -1,3 +1,5 @@
+// js/components/search-modal.js
+
 import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
 import {
@@ -17,6 +19,7 @@ import {
 } from "../services/search-service.js";
 
 let activeSearchRequestId = 0;
+
 const SEARCH_CATEGORIES = ["", "books", "movies", "series", "anime", "manga"];
 
 function getTotalCount(groupedResults) {
@@ -59,10 +62,6 @@ function getBookSeriesName(item = {}) {
 }
 
 function renderCover(item) {
-  if (item.category === "books") {
-    return "";
-  }
-
   if (item.cover_url) {
     return `
       <img
@@ -99,29 +98,21 @@ function renderBookExtraMeta(item) {
 }
 
 function renderResultCard(item) {
-  const isBook = item.category === "books";
-
   const year = item.year
     ? `<span class="search-result-card__year">${escapeHtml(String(item.year))}</span>`
     : "";
 
   return `
-    <div class="search-result-card ${isBook ? "is-book" : ""}">
+    <div class="search-result-card">
       <button
         class="search-result-card__main"
         type="button"
         data-card-key="${escapeHtml(item.canonical_key)}"
         data-card-category="${escapeHtml(item.category)}"
       >
-        ${
-          isBook
-            ? ""
-            : `
-              <div class="search-result-card__cover">
-                ${renderCover(item)}
-              </div>
-            `
-        }
+        <div class="search-result-card__cover">
+          ${renderCover(item)}
+        </div>
 
         <div class="search-result-card__meta">
           <div class="search-result-card__top">
@@ -187,10 +178,12 @@ function buildItemsMap(groupedResults) {
   return new Map(flat.map((item) => [item.canonical_key, item]));
 }
 
-function attachResultHandlers(root, groupedResults, currentQuery) {
+function attachResultHandlers(resultsRoot, groupedResults, currentQuery) {
   const itemsByKey = buildItemsMap(groupedResults);
+  const modalRoot = resultsRoot.closest("[data-search-category-root]");
+  const selectedCategory = String(modalRoot?.dataset.searchCategory || "").trim();
 
-  root.querySelectorAll("[data-card-key]").forEach((button) => {
+  resultsRoot.querySelectorAll("[data-card-key]").forEach((button) => {
     button.addEventListener("click", () => {
       const canonicalKey = button.dataset.cardKey || "";
       const category = button.dataset.cardCategory || "";
@@ -210,7 +203,7 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
     });
   });
 
-  root.querySelectorAll("[data-add-key]").forEach((button) => {
+  resultsRoot.querySelectorAll("[data-add-key]").forEach((button) => {
     button.addEventListener("click", async () => {
       const key = button.dataset.addKey || "";
       const item = itemsByKey.get(key);
@@ -244,12 +237,11 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
     });
   });
 
-  root.querySelector('[data-action="show-all"]')?.addEventListener("click", () => {
+  resultsRoot.querySelector('[data-action="show-all"]')?.addEventListener("click", () => {
     closeSearchModal();
 
     const payload = { q: currentQuery || "" };
 
-    const selectedCategory = String(root.closest("[data-search-category-root]")?.dataset.searchCategory || state.searchContextCategory || "").trim();
     if (selectedCategory) {
       payload.category = selectedCategory;
     }
@@ -263,7 +255,7 @@ async function performSearch(root, query) {
   if (!resultsRoot) return;
 
   const cleanQuery = String(query || "").trim();
-  const contextCategory = String(root.dataset.searchCategory || state.searchContextCategory || "").trim();
+  const selectedCategory = String(root.dataset.searchCategory || "").trim();
 
   root.dataset.currentQuery = cleanQuery;
 
@@ -279,8 +271,8 @@ async function performSearch(root, query) {
   resultsRoot.innerHTML = `<div class="search-modal__loading">Ищем…</div>`;
 
   try {
-    const groupedResults = contextCategory
-      ? { [contextCategory]: await runCategorySearch(cleanQuery, contextCategory) }
+    const groupedResults = selectedCategory
+      ? { [selectedCategory]: await runCategorySearch(cleanQuery, selectedCategory) }
       : await runGlobalSearch(cleanQuery);
 
     if (
@@ -298,7 +290,7 @@ async function performSearch(root, query) {
     }
 
     resultsRoot.innerHTML = `
-      ${renderGroups(groupedResults, contextCategory)}
+      ${renderGroups(groupedResults, selectedCategory)}
 
       <div class="search-modal__footer">
         <button class="search-modal__show-all" type="button" data-action="show-all">
@@ -331,14 +323,20 @@ const debouncedSearch = debounce(performSearch, SEARCH_LIMITS.DEBOUNCE_MS);
 export function renderSearchModal(root, options = {}) {
   const isOpen = state.searchModalOpen;
   const initialQuery = state.searchQuery || "";
-  const contextCategory = options.category || state.searchContextCategory || "";
+  const initialCategory = String(options.category || state.searchContextCategory || "").trim();
+
   const categoryOptions = SEARCH_CATEGORIES.map((category) => {
     const label = category ? getCategoryLabel(state.language, category) : "Все";
-    return `<option value="${escapeHtml(category)}" ${category === contextCategory ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    return `
+      <option value="${escapeHtml(category)}" ${category === initialCategory ? "selected" : ""}>
+        ${escapeHtml(label)}
+      </option>
+    `;
   }).join("");
 
   root.dataset.searchCategoryRoot = "1";
-  root.dataset.searchCategory = contextCategory;
+  root.dataset.searchCategory = initialCategory;
+
   root.innerHTML = `
     <style>
       .search-modal-overlay {
@@ -405,10 +403,14 @@ export function renderSearchModal(root, options = {}) {
       }
 
       .search-modal__searchbox {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(120px, 180px) 1fr;
+        gap: 8px;
       }
 
-      .search-modal__input {
+      .search-modal__input,
+      .search-modal__category-select,
+      .search-modal__text-input {
         width: 100%;
         min-height: 54px;
         border-radius: 18px;
@@ -419,7 +421,7 @@ export function renderSearchModal(root, options = {}) {
         outline: none;
       }
 
-      .search-modal__input::placeholder {
+      .search-modal__text-input::placeholder {
         color: var(--text-muted);
       }
 
@@ -499,10 +501,6 @@ export function renderSearchModal(root, options = {}) {
         text-align: left;
         background: transparent;
         color: var(--text);
-      }
-
-      .search-result-card.is-book .search-result-card__main {
-        grid-template-columns: minmax(0, 1fr);
       }
 
       .search-result-card__add {
@@ -604,6 +602,10 @@ export function renderSearchModal(root, options = {}) {
           padding: 14px;
         }
 
+        .search-modal__searchbox {
+          grid-template-columns: 1fr;
+        }
+
         .search-result-card {
           grid-template-columns: 1fr;
         }
@@ -624,11 +626,13 @@ export function renderSearchModal(root, options = {}) {
         </div>
 
         <div class="search-modal__searchbox">
-          <select class="search-modal__input" data-search-category style="max-width:180px;margin-right:8px;">
+          <select class="search-modal__category-select" data-search-category>
             ${categoryOptions}
           </select>
+
           <input
-            class="search-modal__input"
+            class="search-modal__text-input"
+            data-search-input
             type="text"
             value="${escapeHtml(initialQuery)}"
             placeholder="Искать книги, фильмы, аниме, мангу…"
@@ -645,7 +649,7 @@ export function renderSearchModal(root, options = {}) {
   `;
 
   const overlay = root.querySelector(".search-modal-overlay");
-  const input = root.querySelector(".search-modal__input");
+  const input = root.querySelector("[data-search-input]");
   const categorySelect = root.querySelector("[data-search-category]");
 
   overlay?.addEventListener("click", (event) => {
@@ -668,10 +672,11 @@ export function renderSearchModal(root, options = {}) {
     const value = input.value || "";
     debouncedSearch(root, value);
   });
+
   categorySelect?.addEventListener("change", () => {
     const category = String(categorySelect.value || "").trim();
     root.dataset.searchCategory = category;
-    state.searchContextCategory = category;
+
     if ((input.value || "").trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
       performSearch(root, input.value || "");
     }
