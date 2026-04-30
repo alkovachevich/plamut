@@ -1,7 +1,7 @@
 import { navigate } from "../router.js";
 import { state, openAuthModal } from "../state.js";
 import { escapeHtml } from "../utils.js";
-import { getUserUniverses } from "../services/universe-service.js";
+import { getUserUniversesFromDb } from "../services/universe-db.js";
 
 function renderProgressCircle(progress = 0) {
   const percent = Math.max(0, Math.min(100, Math.round(Number(progress || 0) * 100)));
@@ -38,6 +38,7 @@ function renderUniverseCard(universe = {}) {
   const inLibrary = Number(universe.in_library_count ?? done);
   const notAdded = Number(universe.not_added_count ?? Math.max(0, total - inLibrary));
   const source = universe.source || "";
+  const relationsCount = Number(universe.relations_count || 0);
 
   return `
     <button
@@ -54,14 +55,14 @@ function renderUniverseCard(universe = {}) {
         <div class="universe-main">
           <div class="universe-title">${escapeHtml(title)}</div>
           <div class="universe-meta">
-            ${escapeHtml(String(total))} элементов · готово ${escapeHtml(String(done))}
+            ${escapeHtml(String(total))} элементов · ${escapeHtml(String(relationsCount))} связей
           </div>
           <div class="universe-meta">
             В библиотеке ${escapeHtml(String(inLibrary))} · не добавлено ${escapeHtml(String(notAdded))}
           </div>
           ${
             source
-              ? `<div class="universe-source">${escapeHtml(source === "openai" ? "OpenAI + БД" : "БД")}</div>`
+              ? `<div class="universe-source">${escapeHtml(source === "manual" ? "БД" : source)}</div>`
               : ""
           }
         </div>
@@ -325,14 +326,14 @@ function renderGuest(root) {
       <div class="universes-header">
         <div class="universes-title">Вселенные</div>
         <div class="universes-subtitle">
-          Связанные книги, фильмы, сериалы, аниме и манга строятся на основе твоей библиотеки.
+          Связанные книги, фильмы, сериалы, аниме и манга строятся на основе базы Plamut.
         </div>
       </div>
 
       <div class="universes-empty">
         <div class="universes-empty__title">Нужно войти</div>
         <div class="universes-empty__text">
-          Войди в аккаунт, чтобы Plamut смог показать твои сохранённые вселенные.
+          Войди в аккаунт, чтобы Plamut смог показать вселенные.
         </div>
         <div class="universes-empty__actions">
           <button class="universes-btn" type="button" data-action="login">Войти</button>
@@ -354,14 +355,14 @@ function renderLoading(root) {
       <div class="universes-header">
         <div class="universes-title">Вселенные</div>
         <div class="universes-subtitle">
-          Читаем сохранённые вселенные из базы данных.
+          Читаем готовые вселенные из базы данных.
         </div>
       </div>
 
       <div class="universes-empty">
         <div class="universes-empty__title">Загружаем вселенные…</div>
         <div class="universes-empty__text">
-          Сначала используем готовые данные из БД, без повторного построения.
+          Используем новую БД без OpenAI-построения.
         </div>
       </div>
     </section>
@@ -376,14 +377,14 @@ function renderEmpty(root) {
       <div class="universes-header">
         <div class="universes-title">Вселенные</div>
         <div class="universes-subtitle">
-          Пока нет сохранённых вселенных. Построй первую вселенную из карточки произведения.
+          Пока нет сохранённых вселенных в новой базе.
         </div>
       </div>
 
       <div class="universes-empty">
         <div class="universes-empty__title">Пока нет вселенных</div>
         <div class="universes-empty__text">
-          Открой карточку произведения и нажми “Построить вселенную”.
+          Добавь первую эталонную вселенную в таблицу universes.
         </div>
         <div class="universes-empty__actions">
           <button class="universes-btn secondary" type="button" data-action="categories">
@@ -411,7 +412,7 @@ function renderError(root) {
       <div class="universes-empty">
         <div class="universes-empty__title">Ошибка загрузки</div>
         <div class="universes-empty__text">
-          Не удалось загрузить вселенные. Можно вернуться к категориям.
+          Не удалось загрузить вселенные из новой БД.
         </div>
         <div class="universes-empty__actions">
           <button class="universes-btn secondary" type="button" data-action="categories">
@@ -451,7 +452,7 @@ export async function renderUniversesPage(root) {
   renderLoading(root);
 
   try {
-    const universes = await getUserUniverses(userId);
+    const universes = await getUserUniversesFromDb();
 
     if (!universes.length) {
       renderEmpty(root);
@@ -465,7 +466,7 @@ export async function renderUniversesPage(root) {
         <div class="universes-header">
           <div class="universes-title">Вселенные</div>
           <div class="universes-subtitle">
-            Найдено ${escapeHtml(String(universes.length))} сохранённых групп.
+            Найдено ${escapeHtml(String(universes.length))} готовых вселенных в БД.
           </div>
         </div>
 
