@@ -1,3 +1,5 @@
+// js/pages/search.js
+
 import {
   runGlobalSearch,
   runCategorySearch,
@@ -13,6 +15,8 @@ import {
 import { debounce, escapeHtml, clampText, safeArray } from "../utils.js";
 
 let activeSearchPageRequestId = 0;
+
+const SEARCH_CATEGORIES = ["", "books", "movies", "series", "anime", "manga"];
 
 function getOrderedCategories(category = "") {
   if (category) return [category];
@@ -126,16 +130,21 @@ function groupBooksBySeries(items = []) {
 
   safeArray(items).forEach((item) => {
     const seriesName = getBookSeriesName(item);
+
     if (!seriesName) {
       singles.push(item);
       return;
     }
+
     if (!grouped.has(seriesName)) grouped.set(seriesName, []);
     grouped.get(seriesName).push(item);
   });
 
   return {
-    series: Array.from(grouped.entries()).map(([seriesName, books]) => ({ seriesName, books })),
+    series: Array.from(grouped.entries()).map(([seriesName, books]) => ({
+      seriesName,
+      books
+    })),
     singles
   };
 }
@@ -164,6 +173,7 @@ function renderBooksGroup(items = []) {
         </div>
       </section>
     `).join("")}
+
     ${singles.map(renderCard).join("")}
   `;
 }
@@ -211,11 +221,13 @@ function renderGroupedResults(grouped = {}, category = "") {
 function attachCardHandlers(root, items = []) {
   const byKey = new Map(items.map((item) => [item.canonical_key, item]));
   const booksBySeries = new Map();
+
   safeArray(items)
     .filter((item) => item.category === "books")
     .forEach((item) => {
       const series = getBookSeriesName(item);
       if (!series) return;
+
       if (!booksBySeries.has(series)) booksBySeries.set(series, []);
       booksBySeries.get(series).push(item);
     });
@@ -276,9 +288,11 @@ function attachCardHandlers(root, items = []) {
     button.addEventListener("click", async () => {
       const seriesName = button.dataset.addSeries || "";
       const seriesItems = booksBySeries.get(seriesName) || [];
+
       if (!seriesItems.length) return;
 
       const userId = state.user?.id;
+
       if (!userId) {
         openAuthModal("login");
         return;
@@ -287,7 +301,13 @@ function attachCardHandlers(root, items = []) {
       try {
         button.disabled = true;
         button.textContent = "Добавляем…";
-        await Promise.allSettled(seriesItems.map((item) => addSearchResultDirectlyToLibrary({ userId, item })));
+
+        await Promise.allSettled(
+          seriesItems.map((item) =>
+            addSearchResultDirectlyToLibrary({ userId, item })
+          )
+        );
+
         button.textContent = "Серия добавлена";
       } catch (error) {
         console.warn("Direct add series from search page error:", error);
@@ -302,9 +322,11 @@ async function performSearch(resultsRoot, query, category = "") {
   if (!resultsRoot) return;
 
   const cleanQuery = String(query || "").trim();
+  const selectedCategory = String(category || "").trim();
 
   activeSearchPageRequestId += 1;
   const requestId = activeSearchPageRequestId;
+
   resultsRoot.dataset.requestId = String(requestId);
 
   if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
@@ -315,8 +337,8 @@ async function performSearch(resultsRoot, query, category = "") {
   resultsRoot.innerHTML = renderEmpty("Ищем…");
 
   try {
-    const grouped = category
-      ? { [category]: await runCategorySearch(cleanQuery, category) }
+    const grouped = selectedCategory
+      ? { [selectedCategory]: await runCategorySearch(cleanQuery, selectedCategory) }
       : await runGlobalSearch(cleanQuery);
 
     if (
@@ -326,14 +348,14 @@ async function performSearch(resultsRoot, query, category = "") {
       return;
     }
 
-    const flat = flattenGroupedResults(grouped, category);
+    const flat = flattenGroupedResults(grouped, selectedCategory);
 
     if (!flat.length) {
       resultsRoot.innerHTML = renderEmpty("Ничего не найдено");
       return;
     }
 
-    resultsRoot.innerHTML = renderGroupedResults(grouped, category);
+    resultsRoot.innerHTML = renderGroupedResults(grouped, selectedCategory);
     attachCardHandlers(resultsRoot, flat);
   } catch (error) {
     console.warn("Search page error:", error);
@@ -349,9 +371,21 @@ async function performSearch(resultsRoot, query, category = "") {
   }
 }
 
+function buildCategoryOptions(selectedCategory = "") {
+  return SEARCH_CATEGORIES.map((category) => {
+    const label = category ? getCategoryLabel(state.language, category) : "Все";
+
+    return `
+      <option value="${escapeHtml(category)}" ${category === selectedCategory ? "selected" : ""}>
+        ${escapeHtml(label)}
+      </option>
+    `;
+  }).join("");
+}
+
 export function renderSearchPage(root, params = {}) {
   const initialQuery = params.q || state.searchQuery || "";
-  const searchCategory = params.category || "";
+  let searchCategory = String(params.category || "").trim();
 
   root.innerHTML = `
     <style>
@@ -373,7 +407,14 @@ export function renderSearchPage(root, params = {}) {
         color: var(--text);
       }
 
-      .search-input {
+      .search-controls {
+        display: grid;
+        grid-template-columns: minmax(120px, 190px) 1fr;
+        gap: 10px;
+      }
+
+      .search-input,
+      .search-category-select {
         width: 100%;
         min-height: 54px;
         border-radius: 16px;
@@ -564,6 +605,10 @@ export function renderSearchPage(root, params = {}) {
       }
 
       @media (max-width: 640px) {
+        .search-controls {
+          grid-template-columns: 1fr;
+        }
+
         .result-card {
           grid-template-columns: 1fr;
         }
@@ -576,16 +621,25 @@ export function renderSearchPage(root, params = {}) {
 
     <section class="page">
       <div class="search-header">
-        <div class="search-title">Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}</div>
+        <div class="search-title">
+          Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}
+        </div>
 
-        <input
-          class="search-input"
-          type="text"
-          value="${escapeHtml(initialQuery)}"
-          placeholder="Поиск книг, фильмов, аниме, манги..."
-          autocomplete="off"
-          spellcheck="false"
-        />
+        <div class="search-controls">
+          <select class="search-category-select" data-search-category>
+            ${buildCategoryOptions(searchCategory)}
+          </select>
+
+          <input
+            class="search-input"
+            data-search-input
+            type="text"
+            value="${escapeHtml(initialQuery)}"
+            placeholder="Поиск книг, фильмов, аниме, манги..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
       </div>
 
       <div class="search-results" data-results>
@@ -594,19 +648,41 @@ export function renderSearchPage(root, params = {}) {
     </section>
   `;
 
-  const input = root.querySelector(".search-input");
+  const input = root.querySelector("[data-search-input]");
+  const categorySelect = root.querySelector("[data-search-category]");
   const resultsRoot = root.querySelector("[data-results]");
+  const title = root.querySelector(".search-title");
 
-  const debouncedSearch = debounce((value) => {
+  const runCurrentSearch = () => {
+    const value = input?.value || "";
     performSearch(resultsRoot, value, searchCategory);
+  };
+
+  const debouncedSearch = debounce(() => {
+    runCurrentSearch();
   }, SEARCH_LIMITS.DEBOUNCE_MS);
 
   input?.addEventListener("input", () => {
-    const value = input.value || "";
-    debouncedSearch(value);
+    debouncedSearch();
+  });
+
+  categorySelect?.addEventListener("change", () => {
+    searchCategory = String(categorySelect.value || "").trim();
+
+    if (title) {
+      title.innerHTML = `Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}`;
+    }
+
+    const value = input?.value || "";
+
+    if (value.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+      runCurrentSearch();
+    } else if (resultsRoot) {
+      resultsRoot.innerHTML = renderEmpty("Введите запрос...");
+    }
   });
 
   if (initialQuery && initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    performSearch(resultsRoot, initialQuery, searchCategory);
+    runCurrentSearch();
   }
 }
