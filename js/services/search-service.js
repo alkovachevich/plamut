@@ -71,13 +71,27 @@ function normalizeCategory(category = "") {
   return VALID_CATEGORIES.includes(normalized) ? normalized : "";
 }
 
+function normalizeYear(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const year = Number(value);
+  return Number.isFinite(year) ? year : null;
+}
+
 function normalizeSearchItem(item = {}) {
   const category = normalizeCategory(item.category);
 
   if (!category) return null;
 
   const canonicalKey = String(item.canonical_key || "").trim();
-  const title = String(item.title || item.title_ru || item.title_en || item.original_title || "").trim();
+  const title = String(
+    item.title ||
+    item.title_primary ||
+    item.title_ru ||
+    item.title_en ||
+    item.original_title ||
+    ""
+  ).trim();
 
   if (!canonicalKey || !title) return null;
 
@@ -88,9 +102,7 @@ function normalizeSearchItem(item = {}) {
     title_ru: String(item.title_ru || "").trim(),
     title_en: String(item.title_en || "").trim(),
     original_title: String(item.original_title || title).trim(),
-    year: item.year === null || item.year === undefined || item.year === ""
-      ? null
-      : Number(item.year),
+    year: normalizeYear(item.year),
     cover_url: String(item.cover_url || "").trim(),
     description_ru: String(item.description_ru || "").trim(),
     description_en: String(item.description_en || "").trim(),
@@ -110,6 +122,36 @@ function normalizeSearchItems(items = []) {
     .filter(Boolean);
 }
 
+function mergeSearchItems(existing = {}, incoming = {}) {
+  return {
+    ...existing,
+    ...incoming,
+    canonical_key: existing.canonical_key || incoming.canonical_key,
+    category: existing.category || incoming.category,
+    title: existing.title || incoming.title,
+    title_ru: existing.title_ru || incoming.title_ru,
+    title_en: existing.title_en || incoming.title_en,
+    original_title: existing.original_title || incoming.original_title,
+    year: existing.year || incoming.year || null,
+    cover_url: existing.cover_url || incoming.cover_url,
+    description_ru: existing.description_ru || incoming.description_ru,
+    description_en: existing.description_en || incoming.description_en,
+    aliases: Array.from(new Set([
+      ...safeArray(existing.aliases),
+      ...safeArray(incoming.aliases)
+    ])),
+    external_ids: {
+      ...(existing.external_ids || {}),
+      ...(incoming.external_ids || {})
+    },
+    meta: {
+      ...(existing.meta || {}),
+      ...(incoming.meta || {})
+    },
+    score: Math.max(existing.score || 0, incoming.score || 0)
+  };
+}
+
 function dedupeByCanonical(items = []) {
   const map = new Map();
 
@@ -119,33 +161,10 @@ function dedupeByCanonical(items = []) {
       return;
     }
 
-    const existing = map.get(item.canonical_key);
-
-    map.set(item.canonical_key, {
-      ...existing,
-      ...item,
-      title: existing.title || item.title,
-      title_ru: existing.title_ru || item.title_ru,
-      title_en: existing.title_en || item.title_en,
-      original_title: existing.original_title || item.original_title,
-      year: existing.year || item.year || null,
-      cover_url: existing.cover_url || item.cover_url,
-      description_ru: existing.description_ru || item.description_ru,
-      description_en: existing.description_en || item.description_en,
-      aliases: Array.from(new Set([
-        ...safeArray(existing.aliases),
-        ...safeArray(item.aliases)
-      ])),
-      external_ids: {
-        ...(existing.external_ids || {}),
-        ...(item.external_ids || {})
-      },
-      meta: {
-        ...(existing.meta || {}),
-        ...(item.meta || {})
-      },
-      score: Math.max(existing.score || 0, item.score || 0)
-    });
+    map.set(
+      item.canonical_key,
+      mergeSearchItems(map.get(item.canonical_key), item)
+    );
   });
 
   return Array.from(map.values());
@@ -299,6 +318,10 @@ export function limitResults(items = [], limit = SEARCH_LIMITS.PAGE_RESULTS) {
   return limitInternal(items, limit);
 }
 
+export function groupResults(items = []) {
+  return groupItems(items);
+}
+
 export async function addSearchResultDirectlyToLibrary({ userId, item }) {
   if (!userId || !item) {
     throw new Error("Missing userId or item");
@@ -306,6 +329,6 @@ export async function addSearchResultDirectlyToLibrary({ userId, item }) {
 
   return addToUserLibrary({
     userId,
-    item
+    entity: item
   });
 }
