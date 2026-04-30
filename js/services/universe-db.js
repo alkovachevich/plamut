@@ -1,18 +1,43 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { safeArray } from "../utils.js";
 
-const DEFAULT_TIMEOUT_MS = 20000;
-const LIST_TIMEOUT_MS = 16000;
+const DEFAULT_TIMEOUT_MS = 25000;
+const LIST_TIMEOUT_MS = 25000;
+
+const FALLBACK_UNIVERSES = [
+  {
+    id: null,
+    universe_key: "mcu",
+    title: "Кинематографическая вселенная Marvel",
+    title_ru: "Кинематографическая вселенная Marvel",
+    title_en: "Marvel Cinematic Universe",
+    description: "Эталонная вселенная Plamut.",
+    description_ru: "Эталонная вселенная Plamut.",
+    description_en: "Plamut reference universe.",
+    cover_url: "",
+    source: "manual",
+    is_public: true,
+    metadata_json: {},
+    total: 0,
+    done: 0,
+    in_library_count: 0,
+    not_added_count: 0,
+    relations_count: 0,
+    branches_count: 0,
+    progress: 0,
+    __fallback: true
+  }
+];
 
 function clean(value = "") {
   return String(value || "").trim();
 }
 
 function normalizeUniverse(row = {}) {
-  if (!row?.id) return null;
+  if (!row?.id && !row?.universe_key) return null;
 
   return {
-    id: row.id,
+    id: row.id || null,
     universe_key: row.universe_key || "",
     title: row.title || row.title_ru || row.title_en || row.universe_key || "Вселенная",
     title_ru: row.title_ru || "",
@@ -90,7 +115,6 @@ function normalizeUniverseLink(row = {}) {
 
   return {
     id: row.id || null,
-
     universe_id: row.universe_id || universe?.id || null,
     continuity_id: row.continuity_id || continuity?.id || null,
     branch_id: row.branch_id || branch?.id || null,
@@ -177,25 +201,25 @@ function uniqueLinksByEntity(items = []) {
   return result;
 }
 
-async function safeQuery(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const { data, error } = await withTimeout(
-    promise,
-    label,
-    timeoutMs
-  ).catch((error) => ({ data: [], error }));
+async function safeQuery(query, label = "Запрос к БД", timeoutMs = DEFAULT_TIMEOUT_MS) {
+  try {
+    const { data, error } = await withTimeout(query, label, timeoutMs);
+    if (error) {
+      console.warn(`${label} skipped:`, error);
+      return [];
+    }
 
-  if (error) {
+    return safeArray(data);
+  } catch (error) {
     console.warn(`${label} skipped:`, error);
     return [];
   }
-
-  return safeArray(data);
 }
 
 export async function getUserUniversesFromDb() {
   const supabase = getSupabaseClient();
 
-  const { data: universeRows, error: universeError } = await withTimeout(
+  const universeRows = await safeQuery(
     supabase
       .from("universes")
       .select("*")
@@ -204,18 +228,15 @@ export async function getUserUniversesFromDb() {
       .limit(50),
     "Загрузка списка вселенных из БД",
     LIST_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
-
-  if (universeError) {
-    console.warn("getUserUniversesFromDb universes skipped:", universeError);
-    return [];
-  }
+  );
 
   const universes = safeArray(universeRows)
     .map(normalizeUniverse)
     .filter(Boolean);
 
-  if (!universes.length) return [];
+  if (!universes.length) {
+    return FALLBACK_UNIVERSES;
+  }
 
   const results = await Promise.all(
     universes.map(async (universe) => {
@@ -225,7 +246,7 @@ export async function getUserUniversesFromDb() {
             .from("universe_item_links")
             .select("entity_id")
             .eq("universe_id", universe.id)
-            .limit(1000),
+            .limit(5000),
           `Счётчик элементов ${universe.universe_key}`,
           LIST_TIMEOUT_MS
         ),
@@ -234,7 +255,7 @@ export async function getUserUniversesFromDb() {
             .from("universe_relations")
             .select("id")
             .eq("universe_id", universe.id)
-            .limit(1000),
+            .limit(5000),
           `Счётчик связей ${universe.universe_key}`,
           LIST_TIMEOUT_MS
         ),
@@ -243,7 +264,7 @@ export async function getUserUniversesFromDb() {
             .from("universe_branches")
             .select("id")
             .eq("universe_id", universe.id)
-            .limit(300),
+            .limit(1000),
           `Счётчик веток ${universe.universe_key}`,
           LIST_TIMEOUT_MS
         )
@@ -268,7 +289,7 @@ export async function getUserUniversesFromDb() {
     })
   );
 
-  return results;
+  return results.length ? results : FALLBACK_UNIVERSES;
 }
 
 export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
@@ -287,23 +308,21 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
 
   const supabase = getSupabaseClient();
 
-  const { data: universeRow, error: universeError } = await withTimeout(
+  const universeRows = await safeQuery(
     supabase
       .from("universes")
       .select("*")
       .eq("universe_key", key)
-      .maybeSingle(),
+      .limit(1),
     "Загрузка вселенной из БД",
     DEFAULT_TIMEOUT_MS
-  ).catch((error) => ({ data: null, error }));
+  );
 
-  if (universeError) throw universeError;
+  const universe = normalizeUniverse(safeArray(universeRows)[0]);
 
-  const universe = normalizeUniverse(universeRow);
-
-  if (!universe) {
+  if (!universe?.id) {
     return {
-      universe: null,
+      universe: normalizeUniverse(FALLBACK_UNIVERSES.find((item) => item.universe_key === key)),
       items: [],
       links: [],
       relations: [],
@@ -312,12 +331,7 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
     };
   }
 
-  const [
-    linkRows,
-    relationRows,
-    continuityRows,
-    branchRows
-  ] = await Promise.all([
+  const [linkRows, relationRows, continuityRows, branchRows] = await Promise.all([
     safeQuery(
       supabase
         .from("universe_item_links")
@@ -374,7 +388,7 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         `)
         .eq("universe_id", universe.id)
         .order("release_order", { ascending: true })
-        .limit(1000),
+        .limit(2000),
       "Загрузка V3 элементов вселенной",
       DEFAULT_TIMEOUT_MS
     ),
@@ -384,7 +398,7 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .select("*")
         .eq("universe_id", universe.id)
         .order("sort_order", { ascending: true })
-        .limit(1000),
+        .limit(2000),
       "Загрузка связей вселенной",
       DEFAULT_TIMEOUT_MS
     ),
@@ -393,7 +407,8 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .from("universe_continuities")
         .select("*")
         .eq("universe_id", universe.id)
-        .order("sort_order", { ascending: true }),
+        .order("sort_order", { ascending: true })
+        .limit(500),
       "Загрузка линий канона вселенной",
       DEFAULT_TIMEOUT_MS
     ),
@@ -402,7 +417,8 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .from("universe_branches")
         .select("*")
         .eq("universe_id", universe.id)
-        .order("sort_order", { ascending: true }),
+        .order("sort_order", { ascending: true })
+        .limit(1000),
       "Загрузка веток вселенной",
       DEFAULT_TIMEOUT_MS
     )
@@ -497,7 +513,8 @@ export async function getRelatedItemsForEntityFromDb({ entityId } = {}) {
         relations_built_at,
         relations_status
       `)
-      .in("id", relatedIds),
+      .in("id", relatedIds)
+      .limit(100),
     "Загрузка карточек связанных элементов",
     DEFAULT_TIMEOUT_MS
   );
