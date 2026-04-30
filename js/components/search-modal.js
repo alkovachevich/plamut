@@ -17,6 +17,7 @@ import {
 } from "../services/search-service.js";
 
 let activeSearchRequestId = 0;
+const SEARCH_CATEGORIES = ["", "books", "movies", "series", "anime", "manga"];
 
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
@@ -248,8 +249,9 @@ function attachResultHandlers(root, groupedResults, currentQuery) {
 
     const payload = { q: currentQuery || "" };
 
-    if (state.searchContextCategory) {
-      payload.category = state.searchContextCategory;
+    const selectedCategory = String(root.closest("[data-search-category-root]")?.dataset.searchCategory || state.searchContextCategory || "").trim();
+    if (selectedCategory) {
+      payload.category = selectedCategory;
     }
 
     navigate("/search", payload);
@@ -261,7 +263,7 @@ async function performSearch(root, query) {
   if (!resultsRoot) return;
 
   const cleanQuery = String(query || "").trim();
-  const contextCategory = String(state.searchContextCategory || "").trim();
+  const contextCategory = String(root.dataset.searchCategory || state.searchContextCategory || "").trim();
 
   root.dataset.currentQuery = cleanQuery;
 
@@ -330,7 +332,13 @@ export function renderSearchModal(root, options = {}) {
   const isOpen = state.searchModalOpen;
   const initialQuery = state.searchQuery || "";
   const contextCategory = options.category || state.searchContextCategory || "";
+  const categoryOptions = SEARCH_CATEGORIES.map((category) => {
+    const label = category ? getCategoryLabel(state.language, category) : "Все";
+    return `<option value="${escapeHtml(category)}" ${category === contextCategory ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
 
+  root.dataset.searchCategoryRoot = "1";
+  root.dataset.searchCategory = contextCategory;
   root.innerHTML = `
     <style>
       .search-modal-overlay {
@@ -616,6 +624,9 @@ export function renderSearchModal(root, options = {}) {
         </div>
 
         <div class="search-modal__searchbox">
+          <select class="search-modal__input" data-search-category style="max-width:180px;margin-right:8px;">
+            ${categoryOptions}
+          </select>
           <input
             class="search-modal__input"
             type="text"
@@ -635,6 +646,7 @@ export function renderSearchModal(root, options = {}) {
 
   const overlay = root.querySelector(".search-modal-overlay");
   const input = root.querySelector(".search-modal__input");
+  const categorySelect = root.querySelector("[data-search-category]");
 
   overlay?.addEventListener("click", (event) => {
     if (event.target === overlay) {
@@ -655,6 +667,14 @@ export function renderSearchModal(root, options = {}) {
   input.addEventListener("input", () => {
     const value = input.value || "";
     debouncedSearch(root, value);
+  });
+  categorySelect?.addEventListener("change", () => {
+    const category = String(categorySelect.value || "").trim();
+    root.dataset.searchCategory = category;
+    state.searchContextCategory = category;
+    if ((input.value || "").trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+      performSearch(root, input.value || "");
+    }
   });
 
   if (initialQuery.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
