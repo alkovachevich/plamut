@@ -15,15 +15,8 @@ import {
 } from "../services/entity-db.js";
 
 import {
-  getRelatedItemsForEntity,
-  buildUniverseForJob
+  getRelatedItemsForEntity
 } from "../services/universe-service.js";
-
-import {
-  createUniverseBuildJob,
-  getUniverseBuildJob,
-  UNIVERSE_JOB_STATUS
-} from "../services/universe-build-jobs.js";
 
 import {
   getSupabaseClient,
@@ -32,8 +25,8 @@ import {
 
 import {
   getCachedLibraryItem,
-  loadUserLibrary,
-  updateCachedLibraryItem
+  updateCachedLibraryItem,
+  removeCachedLibraryItem
 } from "../services/library-cache.js";
 
 const CARD_TIMEOUT_MS = 8000;
@@ -47,6 +40,36 @@ const USER_MEDIA_SELECT = `
   folder_name,
   created_at,
   updated_at
+`;
+
+const USER_MEDIA_WITH_ENTITY_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at,
+  media_entities (
+    id,
+    canonical_key,
+    category,
+    primary_source,
+    title_primary,
+    title_ru,
+    title_en,
+    original_title,
+    year,
+    cover_url,
+    description_ru,
+    description_en,
+    external_ids,
+    meta,
+    universe_key,
+    relations_built_at,
+    relations_status
+  )
 `;
 
 function clean(value = "") {
@@ -67,12 +90,15 @@ function isPersistableEntity(entity = {}) {
 
 function resolveTitle(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
+
   if ((entity.category || "") === "books") {
     if (lang === "en") {
       return entity.title_en || entity.title_primary || entity.title_ru || entity.original_title || entity.title || "Без названия";
     }
+
     return entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || entity.title || "Без названия";
   }
+
   return (
     entity.title_primary ||
     entity.title_ru ||
@@ -85,29 +111,14 @@ function resolveTitle(entity = {}) {
 
 function resolveDescription(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
+
   if ((entity.category || "") === "books") {
     return lang === "en"
       ? (entity.description_en || entity.description_ru || entity.description || "")
       : (entity.description_ru || entity.description_en || entity.description || "");
   }
-  return entity.description_ru || entity.description_en || entity.description || "";
-}
 
-function renderRelatedFallbackFromMeta(entity = {}) {
-  const relations = entity?.meta?.wikidata_relations || {};
-  const lines = [
-    { key: "series", label: "Серия" },
-    { key: "previous", label: "Предыдущая часть" },
-    { key: "next", label: "Следующая часть" },
-    { key: "adaptations", label: "Экранизации" }
-  ]
-    .map(({ key, label }) => {
-      const values = safeArray(relations?.[key]).filter(Boolean);
-      if (!values.length) return "";
-      return `<div class="related-card__meta"><b>${escapeHtml(label)}:</b> ${escapeHtml(values.slice(0, 4).join(", "))}</div>`;
-    })
-    .filter(Boolean);
-  return lines.join("");
+  return entity.description_ru || entity.description_en || entity.description || "";
 }
 
 function getCover(entity = {}) {
@@ -250,6 +261,41 @@ async function loadUserMedia(userId, entityId) {
   return data || null;
 }
 
+async function updateUserMedia(userMediaId, payload) {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .update(payload)
+      .eq("id", userMediaId)
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
+      .maybeSingle(),
+    "Обновление карточки",
+    CARD_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function deleteUserMedia(userMediaId) {
+  const supabase = getSupabaseClient();
+
+  const { error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .delete()
+      .eq("id", userMediaId),
+    "Удаление карточки",
+    CARD_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return true;
+}
+
 function renderCover(entity = {}) {
   const title = resolveTitle(entity);
   const cover = getCover(entity);
@@ -277,6 +323,25 @@ function renderStatusBadge(userMedia) {
 function renderFolderBadge(userMedia) {
   if (!userMedia?.folder_name) return "";
   return `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`;
+}
+
+function renderRelatedFallbackFromMeta(entity = {}) {
+  const relations = entity?.meta?.wikidata_relations || {};
+
+  const lines = [
+    { key: "series", label: "Серия" },
+    { key: "previous", label: "Предыдущая часть" },
+    { key: "next", label: "Следующая часть" },
+    { key: "adaptations", label: "Экранизации" }
+  ]
+    .map(({ key, label }) => {
+      const values = safeArray(relations?.[key]).filter(Boolean);
+      if (!values.length) return "";
+      return `<div class="related-card__meta"><b>${escapeHtml(label)}:</b> ${escapeHtml(values.slice(0, 4).join(", "))}</div>`;
+    })
+    .filter(Boolean);
+
+  return lines.join("");
 }
 
 function renderRelatedItem(item = {}) {
@@ -309,30 +374,33 @@ function renderStyles() {
   return `
     <style>
       .card-page { display:flex; flex-direction:column; gap:18px; }
-      .card-shell { display:grid; grid-template-columns:132px 1fr; gap:16px; padding:16px; border-radius:22px; border:1px solid var(--border-soft); background:var(--bg-elevated); }
+      .card-shell { position:relative; display:grid; grid-template-columns:132px 1fr; gap:16px; padding:16px; border-radius:22px; border:1px solid var(--border-soft); background:var(--bg-elevated); }
       .card-cover { width:132px; aspect-ratio:2/3; overflow:hidden; border-radius:16px; border:1px solid var(--border-soft); background:var(--surface); }
       .card-cover img { width:100%; height:100%; object-fit:cover; }
       .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:800; }
-      .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; }
+
+      .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; padding-right:44px; }
       .card-title { font-size:24px; line-height:1.15; font-weight:850; color:var(--text); }
       .card-subtitle { color:var(--text-soft); font-size:14px; line-height:1.4; }
       .card-badges { display:flex; gap:8px; flex-wrap:wrap; }
       .card-badge { display:inline-flex; align-items:center; min-height:26px; padding:5px 9px; border-radius:999px; background:var(--accent-soft); color:var(--text); font-size:12px; }
       .card-badge.folder { background:var(--bg-soft); }
-      .card-actions { display:flex; gap:10px; flex-wrap:wrap; }
-      .card-btn { min-height:42px; padding:10px 14px; border-radius:999px; font-weight:750; background:var(--bg-soft); color:var(--text); border:1px solid var(--border-soft); }
-      .card-btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
-      .card-btn:disabled { opacity:.55; cursor:default; }
+
+      .card-menu-wrap { position:absolute; top:14px; right:14px; z-index:10; }
+      .card-menu-btn { width:38px; height:38px; display:grid; place-items:center; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-size:22px; line-height:1; }
+      .card-menu { position:absolute; top:calc(100% + 8px); right:0; width:220px; display:none; flex-direction:column; gap:4px; padding:6px; border-radius:16px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); }
+      .card-menu.is-open { display:flex; }
+      .card-menu button { text-align:left; background:transparent; color:var(--text); padding:10px 12px; border-radius:11px; font-size:14px; }
+      .card-menu button:hover { background:var(--bg-soft); }
+      .card-menu button.danger { color:var(--danger); }
+      .card-menu button:disabled { opacity:.55; cursor:default; }
+
       .card-status { min-height:20px; font-size:13px; color:var(--text-soft); }
-      .build-progress { display:none; flex-direction:column; gap:8px; padding:12px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface); }
-      .build-progress.is-visible { display:flex; }
-      .build-progress__top { display:flex; justify-content:space-between; gap:12px; color:var(--text-soft); font-size:13px; }
-      .build-progress__bar { width:100%; height:8px; overflow:hidden; border-radius:999px; background:var(--bg-soft); }
-      .build-progress__fill { width:0%; height:100%; border-radius:inherit; background:var(--accent); transition:width .25s ease; }
       .card-section { padding:16px; border-radius:18px; border:1px solid var(--border-soft); background:var(--surface); }
       .card-section[hidden] { display:none; }
       .card-section__title { font-size:17px; font-weight:850; color:var(--text); margin-bottom:10px; }
       .card-description { color:var(--text-soft); font-size:15px; line-height:1.55; white-space:pre-line; }
+
       .related-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; }
       .related-card { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:center; padding:8px; border-radius:14px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
       .related-card__cover { width:54px; height:76px; border-radius:10px; overflow:hidden; background:var(--surface); }
@@ -341,14 +409,27 @@ function renderStyles() {
       .related-card__body { min-width:0; }
       .related-card__title { font-size:14px; font-weight:750; line-height:1.3; }
       .related-card__meta { margin-top:4px; font-size:12px; color:var(--text-soft); }
+
       .card-empty { padding:20px; border-radius:18px; background:var(--surface); border:1px solid var(--border-soft); color:var(--text-soft); }
+
+      .card-dialog-backdrop { position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:18px; background:rgba(5,10,20,.58); }
+      .card-dialog { width:min(420px, 100%); border-radius:20px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); padding:16px; display:flex; flex-direction:column; gap:12px; }
+      .card-dialog__title { font-size:18px; font-weight:850; color:var(--text); }
+      .card-dialog__text { color:var(--text-soft); font-size:14px; line-height:1.45; }
+      .card-dialog__input { min-height:46px; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); padding:0 12px; outline:none; }
+      .card-dialog__actions { display:flex; justify-content:flex-end; gap:8px; }
+      .card-dialog__btn { min-height:40px; padding:0 13px; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-weight:750; }
+      .card-dialog__btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
+      .card-dialog__btn.danger { background:var(--danger); color:#fff; border-color:transparent; }
+      .card-dialog__status-list { display:grid; gap:8px; }
+      .card-dialog__status-option { text-align:left; min-height:42px; border-radius:12px; padding:0 12px; background:var(--surface); color:var(--text); border:1px solid var(--border-soft); }
+      .card-dialog__status-option.active { background:var(--accent-soft); border-color:transparent; }
 
       @media (max-width:640px) {
         .card-shell { grid-template-columns:104px 1fr; gap:12px; padding:12px; border-radius:18px; }
         .card-cover { width:104px; border-radius:14px; }
+        .card-main { padding-right:38px; }
         .card-title { font-size:20px; }
-        .card-actions { flex-direction:column; }
-        .card-btn { width:100%; }
         .related-grid { grid-template-columns:1fr; }
       }
     </style>
@@ -369,6 +450,33 @@ function renderNotFound(root) {
   `;
 }
 
+function renderMenu(userMedia) {
+  if (userMedia?.id) {
+    return `
+      <div class="card-menu-wrap">
+        <button class="card-menu-btn" type="button" data-action="toggle-menu" aria-label="Меню карточки">⋯</button>
+        <div class="card-menu" data-card-menu>
+          <button type="button" data-action="set-status" data-value="planned">Planned</button>
+          <button type="button" data-action="set-status" data-value="in_progress">In progress</button>
+          <button type="button" data-action="set-status" data-value="done">Done</button>
+          <button type="button" data-action="set-status" data-value="dropped">Dropped</button>
+          <button type="button" data-action="set-folder">Папка</button>
+          <button type="button" class="danger" data-action="remove">Удалить из библиотеки</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="card-menu-wrap">
+      <button class="card-menu-btn" type="button" data-action="toggle-menu" aria-label="Меню карточки">⋯</button>
+      <div class="card-menu" data-card-menu>
+        <button type="button" data-action="add">Добавить в библиотеку</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderCard(root, { entity, userMedia, relatedItems = [] }) {
   const title = resolveTitle(entity);
   const description = resolveDescription(entity);
@@ -377,6 +485,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
     entity.original_title && entity.original_title !== title
       ? entity.original_title
       : "";
+
   const relatedFallbackHtml = !relatedItems.length ? renderRelatedFallbackFromMeta(entity) : "";
   const hasRelatedContent = relatedItems.length || relatedFallbackHtml;
 
@@ -385,6 +494,8 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
 
     <section class="card-page">
       <div class="card-shell">
+        ${renderMenu(userMedia)}
+
         <div class="card-cover">
           ${renderCover(entity)}
         </div>
@@ -402,31 +513,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
             ${renderFolderBadge(userMedia)}
           </div>
 
-          <div class="card-actions">
-            <button class="card-btn primary" type="button" data-action="add">
-              ${userMedia ? "В библиотеке" : "Добавить"}
-            </button>
-
-            <button class="card-btn" type="button" data-action="build">
-              Построить вселенную
-            </button>
-
-            <button class="card-btn" type="button" data-action="rebuild">
-              Пересобрать вселенную
-            </button>
-          </div>
-
           <div class="card-status" data-status></div>
-
-          <div class="build-progress" data-build-progress>
-            <div class="build-progress__top">
-              <span data-build-progress-label>Построение вселенной</span>
-              <span data-build-progress-percent>0%</span>
-            </div>
-            <div class="build-progress__bar">
-              <div class="build-progress__fill" data-build-progress-fill></div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -448,18 +535,14 @@ function renderCard(root, { entity, userMedia, relatedItems = [] }) {
 }
 
 function updateUserMediaUI(root, userMedia) {
-  const addButton = root.querySelector('[data-action="add"]');
   const badgesRoot = root.querySelector("[data-card-badges]");
 
-  if (addButton && userMedia?.id) {
-    addButton.textContent = "В библиотеке";
-    addButton.disabled = true;
-  }
-
-  if (!badgesRoot || !userMedia?.id) return;
+  if (!badgesRoot) return;
 
   badgesRoot.querySelector("[data-user-status]")?.remove();
   badgesRoot.querySelector("[data-user-folder]")?.remove();
+
+  if (!userMedia?.id) return;
 
   badgesRoot.insertAdjacentHTML("beforeend", renderStatusBadge(userMedia));
 
@@ -468,19 +551,99 @@ function updateUserMediaUI(root, userMedia) {
   }
 }
 
-function renderRelated(root, relatedItems = []) {
+function setStatus(root, message = "") {
+  const statusNode = root.querySelector("[data-status]");
+  if (statusNode) statusNode.textContent = message;
+}
+
+function closeMenu(root) {
+  root.querySelector("[data-card-menu]")?.classList.remove("is-open");
+}
+
+function openFolderDialog(currentFolder = "") {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "card-dialog-backdrop";
+
+    backdrop.innerHTML = `
+      <div class="card-dialog" role="dialog" aria-modal="true">
+        <div class="card-dialog__title">Папка</div>
+        <div class="card-dialog__text">Введи название папки. Оставь пустым, чтобы убрать папку.</div>
+        <input class="card-dialog__input" data-folder-input value="${escapeHtml(currentFolder)}" placeholder="Например: Любимое" />
+        <div class="card-dialog__actions">
+          <button class="card-dialog__btn" type="button" data-dialog-cancel>Отмена</button>
+          <button class="card-dialog__btn primary" type="button" data-dialog-save>Сохранить</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    const input = backdrop.querySelector("[data-folder-input]");
+    const cleanup = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+
+    backdrop.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => cleanup(null));
+    backdrop.querySelector("[data-dialog-save]")?.addEventListener("click", () => cleanup(input.value || ""));
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) cleanup(null);
+    });
+
+    input?.focus();
+    input?.select();
+  });
+}
+
+function openConfirmDialog({ title = "Подтверждение", text = "", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "card-dialog-backdrop";
+
+    backdrop.innerHTML = `
+      <div class="card-dialog" role="dialog" aria-modal="true">
+        <div class="card-dialog__title">${escapeHtml(title)}</div>
+        ${text ? `<div class="card-dialog__text">${escapeHtml(text)}</div>` : ""}
+        <div class="card-dialog__actions">
+          <button class="card-dialog__btn" type="button" data-dialog-cancel>Отмена</button>
+          <button class="card-dialog__btn ${danger ? "danger" : "primary"}" type="button" data-dialog-confirm>Да</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    const cleanup = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+
+    backdrop.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => cleanup(false));
+    backdrop.querySelector("[data-dialog-confirm]")?.addEventListener("click", () => cleanup(true));
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) cleanup(false);
+    });
+  });
+}
+
+function renderRelated(root, relatedItems = [], entity = {}) {
   const section = root.querySelector("[data-related-section]");
   const grid = root.querySelector("[data-related-grid]");
 
   if (!section || !grid) return;
 
   if (!relatedItems.length) {
-    const fallbackHtml = renderRelatedFallbackFromMeta(state.card.entity || {});
+    const fallbackHtml = renderRelatedFallbackFromMeta(entity);
+
     if (!fallbackHtml) {
       section.hidden = true;
       grid.innerHTML = "";
       return;
     }
+
     section.hidden = false;
     grid.innerHTML = fallbackHtml;
     return;
@@ -499,44 +662,6 @@ function bindRelated(root) {
       navigate("/card", { key });
     });
   });
-}
-
-function getProgressPercent(job = {}) {
-  const current = Number(job.progress_current || 0);
-  const total = Number(job.progress_total || 0);
-
-  if (!total) return 0;
-
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
-}
-
-function updateProgressUI(root, job = {}) {
-  const progressRoot = root.querySelector("[data-build-progress]");
-  const labelNode = root.querySelector("[data-build-progress-label]");
-  const percentNode = root.querySelector("[data-build-progress-percent]");
-  const fillNode = root.querySelector("[data-build-progress-fill]");
-  const statusNode = root.querySelector("[data-status]");
-
-  if (!progressRoot || !job) return;
-
-  const percent = getProgressPercent(job);
-  const label =
-    job.status === UNIVERSE_JOB_STATUS.READY
-      ? "Вселенная готова"
-      : job.status === UNIVERSE_JOB_STATUS.FAILED
-        ? job.error_message || "Ошибка построения"
-        : job.progress_label || "Построение вселенной";
-
-  progressRoot.classList.add("is-visible");
-
-  if (labelNode) labelNode.textContent = label;
-  if (percentNode) percentNode.textContent = `${percent}%`;
-  if (fillNode) fillNode.style.width = `${percent}%`;
-  if (statusNode) statusNode.textContent = label;
-}
-
-function isFinished(job = {}) {
-  return [UNIVERSE_JOB_STATUS.READY, UNIVERSE_JOB_STATUS.FAILED].includes(job.status);
 }
 
 async function hydrateUserMediaState(root, userId, entity) {
@@ -564,11 +689,13 @@ async function hydrateUserMediaState(root, userId, entity) {
     return loaded || null;
   } catch (error) {
     const message = String(error?.message || "").toLowerCase();
+
     if (message.includes("превышено время ожидания")) {
       console.info("CARD: user media load timeout, using fallback state");
     } else {
       console.warn("CARD: user media load skipped", error);
     }
+
     return null;
   }
 }
@@ -591,65 +718,12 @@ async function hydrateRelatedItems(root, userId, entity, userMedia) {
       return normalizeKey(relatedEntity.canonical_key || "") !== normalizeKey(entity.canonical_key || "");
     });
 
-    renderRelated(root, filtered);
+    renderRelated(root, filtered, entity);
     return filtered;
   } catch (error) {
     console.warn("CARD: related items skipped", error);
     return [];
   }
-}
-
-async function ensureEntitySavedForBuild({ userId, entity, userMedia }) {
-  if (!userId) {
-    throw new Error("Нет пользователя");
-  }
-
-  if (!entity || entity.__fallback) {
-    throw new Error("Карточка не загружена. Открой её через поиск или попробуй позже.");
-  }
-
-  if (entity?.id && userMedia?.id) {
-    return { entity, userMedia };
-  }
-
-  const result = await addToUserLibrary({
-    userId,
-    entity
-  });
-
-  const nextEntity = result?.entity || result?.userMedia?.media_entities || entity;
-  const nextUserMedia = result?.userMedia || userMedia || null;
-
-  if (!nextEntity?.id) {
-    throw new Error("Карточка не получила id после сохранения");
-  }
-
-  if (!nextUserMedia?.id) {
-    throw new Error("Элемент библиотеки не создан после сохранения");
-  }
-
-  updateCachedLibraryItem(userId, {
-    ...nextUserMedia,
-    media_entities: nextEntity
-  });
-
-  setTemporaryCardItem(nextEntity);
-
-  return {
-    entity: nextEntity,
-    userMedia: nextUserMedia
-  };
-}
-
-
-function isUniverseFresh(entity = {}, maxAgeMs = 24 * 60 * 60 * 1000) {
-  if (!entity?.universe_key) return false;
-  if (String(entity.relations_status || '').toLowerCase() !== 'ready') return false;
-
-  const ts = new Date(entity.relations_built_at || '').getTime();
-  if (!Number.isFinite(ts) || ts <= 0) return false;
-
-  return Date.now() - ts < maxAgeMs;
 }
 
 function bindCardActions({
@@ -658,136 +732,33 @@ function bindCardActions({
   setEntity,
   getUserMedia,
   setUserMedia,
-  userId,
-  destroyedRef
+  userId
 }) {
-  const statusNode = root.querySelector("[data-status]");
-  const addButton = root.querySelector('[data-action="add"]');
-  const buildButton = root.querySelector('[data-action="build"]');
-  const rebuildButton = root.querySelector('[data-action="rebuild"]');
+  root.querySelector('[data-action="toggle-menu"]')?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
 
-  let pollingTimer = null;
+    root.querySelector("[data-card-menu]")?.classList.toggle("is-open");
+  });
 
-  function setStatus(message = "") {
-    if (statusNode) statusNode.textContent = message;
-  }
-
-  function stopPolling() {
-    if (pollingTimer) {
-      clearInterval(pollingTimer);
-      pollingTimer = null;
+  root.addEventListener("click", (event) => {
+    if (!event.target.closest(".card-menu-wrap")) {
+      closeMenu(root);
     }
-  }
+  });
 
-  function startPolling(job) {
-    stopPolling();
+  root.querySelector('[data-action="add"]')?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
 
-    if (!job?.id) return;
-
-    updateProgressUI(root, job);
-
-    pollingTimer = setInterval(async () => {
-      if (destroyedRef.value) {
-        stopPolling();
-        return;
-      }
-
-      const updated = await getUniverseBuildJob(job.id).catch((error) => {
-        console.warn("CARD BUILD: poll failed", error);
-        return null;
-      });
-
-      if (!updated) return;
-
-      updateProgressUI(root, updated);
-
-      if (isFinished(updated)) {
-        stopPolling();
-
-        if (updated.status === UNIVERSE_JOB_STATUS.READY && updated.universe_key) {
-          navigate("/universe", { id: updated.universe_key });
-        }
-
-        if (updated.status === UNIVERSE_JOB_STATUS.FAILED) {
-          if (buildButton) buildButton.disabled = false;
-          if (rebuildButton) rebuildButton.disabled = false;
-        }
-      }
-    }, 1500);
-  }
-
-  async function startBuildFlow(forceRebuild = false) {
     if (!userId) {
       openAuthModal("login");
       return;
     }
 
     try {
-      buildButton && (buildButton.disabled = true);
-      rebuildButton && (rebuildButton.disabled = true);
-      setStatus(forceRebuild ? "Пересобираем вселенную…" : "Сохраняем карточку…");
-
-      const saved = await ensureEntitySavedForBuild({
-        userId,
-        entity: getEntity(),
-        userMedia: getUserMedia()
-      });
-
-      setEntity(saved.entity);
-      setUserMedia(saved.userMedia);
-      updateUserMediaUI(root, saved.userMedia);
-
-      if (!forceRebuild && isUniverseFresh(saved.entity)) {
-        navigate("/universe", { id: saved.entity.universe_key });
-        return;
-      }
-
-      setStatus("Создаём задачу построения…");
-
-      const job = await createUniverseBuildJob({
-        userId,
-        entityId: saved.entity.id,
-        canonicalKey: saved.entity.canonical_key || "",
-        universeKey: saved.entity.universe_key || "",
-        force: forceRebuild
-      });
-
-      updateProgressUI(root, job);
-      startPolling(job);
-      setStatus("Строим вселенную…");
-
-      buildUniverseForJob(job, saved.entity, { force: forceRebuild })
-        .then((result) => {
-          if (destroyedRef.value || !result?.universe_key) return;
-          navigate("/universe", { id: result.universe_key });
-        })
-        .catch((error) => {
-          console.warn("CARD BUILD: build failed", error);
-          setStatus(error.message || "Ошибка построения вселенной");
-        })
-        .finally(() => {
-          if (buildButton) buildButton.disabled = false;
-          if (rebuildButton) rebuildButton.disabled = false;
-        });
-    } catch (error) {
-      console.warn("CARD BUILD: start failed", error);
-      setStatus(error.message || "Ошибка запуска построения");
-      if (buildButton) buildButton.disabled = false;
-      if (rebuildButton) rebuildButton.disabled = false;
-    }
-  }
-
-  addButton?.addEventListener("click", async () => {
-    if (!userId) {
-      openAuthModal("login");
-      return;
-    }
-
-    if (getUserMedia()?.id) return;
-
-    try {
-      addButton.disabled = true;
-      setStatus("Добавляем…");
+      closeMenu(root);
+      setStatus(root, "Добавляем…");
 
       const result = await addToUserLibrary({
         userId,
@@ -809,31 +780,183 @@ function bindCardActions({
         setTemporaryCardItem(nextEntity);
       }
 
-      updateUserMediaUI(root, nextUserMedia);
+      renderCard(root, {
+        entity: nextEntity,
+        userMedia: nextUserMedia,
+        relatedItems: []
+      });
 
-      setStatus(result.alreadyExists
-        ? "Уже есть в библиотеке"
-        : "Добавлено в библиотеку");
+      bindCardActions({
+        root,
+        getEntity,
+        setEntity,
+        getUserMedia,
+        setUserMedia,
+        userId
+      });
 
-      if (nextUserMedia?.id) {
-        hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
-      }
+      setStatus(root, result.alreadyExists ? "Уже есть в библиотеке" : "Добавлено в библиотеку");
+
+      hydrateRelatedItems(root, userId, nextEntity, nextUserMedia);
     } catch (error) {
       console.warn("CARD: add to library error", error);
-      setStatus(error.message || "Ошибка добавления");
-      addButton.disabled = false;
+      setStatus(root, error.message || "Ошибка добавления");
     }
   });
 
-  buildButton?.addEventListener("click", async () => {
-    await startBuildFlow(false);
+  root.querySelectorAll('[data-action="set-status"]').forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const userMedia = getUserMedia();
+      const value = button.dataset.value || "";
+
+      if (!userId) {
+        openAuthModal("login");
+        return;
+      }
+
+      if (!userMedia?.id || !value) return;
+
+      try {
+        button.disabled = true;
+        closeMenu(root);
+        setStatus(root, "Обновляем статус…");
+
+        const updated = await updateUserMedia(userMedia.id, {
+          status: value
+        });
+
+        const nextUserMedia = updated || {
+          ...userMedia,
+          status: value
+        };
+
+        setUserMedia(nextUserMedia);
+
+        updateCachedLibraryItem(userId, updated || {
+          ...nextUserMedia,
+          media_entities: getEntity()
+        }, {
+          category: nextUserMedia.category || getEntity().category
+        });
+
+        updateUserMediaUI(root, nextUserMedia);
+        setStatus(root, "Статус обновлён");
+      } catch (error) {
+        console.warn("CARD: status update error", error);
+        setStatus(root, error.message || "Ошибка обновления статуса");
+      } finally {
+        button.disabled = false;
+      }
+    });
   });
 
-  rebuildButton?.addEventListener("click", async () => {
-    await startBuildFlow(true);
+  root.querySelector('[data-action="set-folder"]')?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const userMedia = getUserMedia();
+
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
+
+    if (!userMedia?.id) return;
+
+    closeMenu(root);
+
+    const folderName = await openFolderDialog(userMedia.folder_name || "");
+    if (folderName === null) return;
+
+    const cleanFolder = clean(folderName);
+
+    try {
+      setStatus(root, "Обновляем папку…");
+
+      const updated = await updateUserMedia(userMedia.id, {
+        folder_name: cleanFolder || null
+      });
+
+      const nextUserMedia = updated || {
+        ...userMedia,
+        folder_name: cleanFolder || null
+      };
+
+      setUserMedia(nextUserMedia);
+
+      updateCachedLibraryItem(userId, updated || {
+        ...nextUserMedia,
+        media_entities: getEntity()
+      }, {
+        category: nextUserMedia.category || getEntity().category
+      });
+
+      updateUserMediaUI(root, nextUserMedia);
+      setStatus(root, cleanFolder ? "Папка обновлена" : "Папка убрана");
+    } catch (error) {
+      console.warn("CARD: folder update error", error);
+      setStatus(root, error.message || "Ошибка обновления папки");
+    }
   });
 
-  return stopPolling;
+  root.querySelector('[data-action="remove"]')?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const userMedia = getUserMedia();
+
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
+
+    if (!userMedia?.id) return;
+
+    closeMenu(root);
+
+    const confirmed = await openConfirmDialog({
+      title: "Удалить из библиотеки?",
+      text: "Карточка будет удалена только из твоей библиотеки. Сама сущность останется в базе.",
+      danger: true
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setStatus(root, "Удаляем…");
+
+      await deleteUserMedia(userMedia.id);
+
+      removeCachedLibraryItem(userId, userMedia.id, {
+        category: userMedia.category || getEntity().category
+      });
+
+      setUserMedia(null);
+
+      renderCard(root, {
+        entity: getEntity(),
+        userMedia: null,
+        relatedItems: []
+      });
+
+      bindCardActions({
+        root,
+        getEntity,
+        setEntity,
+        getUserMedia,
+        setUserMedia,
+        userId
+      });
+
+      setStatus(root, "Удалено из библиотеки");
+    } catch (error) {
+      console.warn("CARD: remove error", error);
+      setStatus(root, error.message || "Ошибка удаления");
+    }
+  });
 }
 
 export async function renderCardPage(root, params = {}) {
@@ -842,8 +965,6 @@ export async function renderCardPage(root, params = {}) {
 
   let currentEntity = loadFastEntity(params);
   let userMedia = currentEntity ? getCachedUserMedia(userId, currentEntity) : null;
-  const destroyedRef = { value: false };
-  let stopPolling = null;
 
   if (!currentEntity) {
     renderLoading(root);
@@ -874,92 +995,73 @@ export async function renderCardPage(root, params = {}) {
     relatedItems: []
   });
 
-  const statusNode = root.querySelector("[data-status]");
-  const buildButton = root.querySelector('[data-action="build"]');
-  const rebuildButton = root.querySelector('[data-action="rebuild"]');
+  const getEntity = () => currentEntity;
+  const setEntity = (nextEntity) => {
+    currentEntity = nextEntity || currentEntity;
+  };
 
-  if (currentEntity.__fallback) {
-    if (statusNode) {
-      statusNode.textContent = "Карточка не загружена из БД. Действия временно недоступны.";
-    }
+  const getUserMedia = () => userMedia;
+  const setUserMedia = (nextUserMedia) => {
+    userMedia = nextUserMedia || null;
+  };
 
-    if (buildButton) {
-      buildButton.disabled = true;
-    }
-  } else if (!currentEntity.id && statusNode) {
-    statusNode.textContent =
-      "Карточка открыта из локального кэша. При действии она будет сохранена в БД.";
-  } else if (currentEntity.universe_key && currentEntity.relations_status === "ready" && statusNode) {
-    statusNode.textContent = "Вселенная уже построена.";
-  }
+  bindCardActions({
+    root,
+    getEntity,
+    setEntity,
+    getUserMedia,
+    setUserMedia,
+    userId
+  });
 
   bindRelated(root);
 
-  stopPolling = bindCardActions({
-    root,
-    userId,
-    destroyedRef,
-    getEntity: () => currentEntity,
-    setEntity: (entity) => {
-      currentEntity = entity;
-    },
-    getUserMedia: () => userMedia,
-    setUserMedia: (value) => {
-      userMedia = value;
-    }
-  });
+  if (currentEntity.__fallback) {
+    setStatus(root, "Карточка не загружена из БД. Действия временно ограничены.");
+    return () => {};
+  }
 
-  if (userId && currentEntity.id) {
-    loadUserLibrary(userId, {
-      category: currentEntity.category || "",
-      mode: "list",
-      allowStale: true,
-      backgroundRefresh: false
-    }).catch(() => []);
+  try {
+    const dbEntity = await loadEntityFromDb(currentEntity.canonical_key);
 
-    hydrateUserMediaState(root, userId, currentEntity).then((loadedUserMedia) => {
-      if (destroyedRef.value) return;
+    if (dbEntity?.canonical_key) {
+      currentEntity = {
+        ...currentEntity,
+        ...dbEntity
+      };
 
-      userMedia = loadedUserMedia || userMedia;
-
-      if (userMedia?.id) {
-        hydrateRelatedItems(root, userId, currentEntity, userMedia);
+      if (isPersistableEntity(currentEntity)) {
+        setTemporaryCardItem(currentEntity);
       }
-    });
+    }
+  } catch (error) {
+    console.warn("CARD: background DB entity refresh skipped", error);
   }
 
-  if (key && !currentEntity.__fallback) {
-    loadEntityFromDb(key)
-      .then((dbEntity) => {
-        if (destroyedRef.value || !dbEntity?.id) return;
+  if (userId && currentEntity?.id) {
+    const loadedUserMedia = await hydrateUserMediaState(root, userId, currentEntity);
 
-        currentEntity = dbEntity;
+    if (loadedUserMedia?.id) {
+      userMedia = loadedUserMedia;
 
-        if (isPersistableEntity(dbEntity)) {
-          setTemporaryCardItem(dbEntity);
-        }
-
-        if (!userMedia) {
-          userMedia = getCachedUserMedia(userId, dbEntity);
-        }
-
-        if (dbEntity.universe_key && dbEntity.relations_status === "ready") {
-          const status = root.querySelector("[data-status]");
-          if (status) status.textContent = "Вселенная уже построена.";
-        }
-      })
-      .catch((error) => {
-        const message = String(error?.message || "").toLowerCase();
-        if (message.includes("превышено время ожидания")) {
-          console.info("CARD: background DB refresh timeout, keeping current card");
-        } else {
-          console.warn("CARD: background DB refresh skipped", error);
-        }
+      renderCard(root, {
+        entity: currentEntity,
+        userMedia,
+        relatedItems: []
       });
+
+      bindCardActions({
+        root,
+        getEntity,
+        setEntity,
+        getUserMedia,
+        setUserMedia,
+        userId
+      });
+
+      hydrateRelatedItems(root, userId, currentEntity, userMedia);
+    }
   }
 
-  return () => {
-    destroyedRef.value = true;
-    if (stopPolling) stopPolling();
-  };
+  return () => {};
 }
