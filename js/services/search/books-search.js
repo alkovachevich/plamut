@@ -4,7 +4,7 @@ import { getSupabaseClient, withTimeout } from "../../lib/supabase-client.js";
 
 const SEARCH_TIMEOUT_MS = 9000;
 const SUPABASE_SEARCH_TIMEOUT_MS = 6000;
-const WIKIDATA_LIMIT = 10;
+const WIKIDATA_LIMIT = 12;
 const OPEN_LIBRARY_LIMIT = 18;
 const PLACEHOLDER_COVER_URL = "/placeholder.jpg";
 
@@ -60,6 +60,11 @@ function cleanTitle(value = "") {
     .replace(/\bnovel\b/g, "")
     .replace(/\bтом\b/g, "")
     .replace(/\bvolume\b/g, "")
+    .replace(/\bcomplete\b/g, "")
+    .replace(/\bseries\b/g, "")
+    .replace(/\bset\b/g, "")
+    .replace(/\bbox\b/g, "")
+    .replace(/\bcollection\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -136,6 +141,46 @@ function normalizeOpenLibraryWorkKey(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return "";
   return raw.startsWith("/works/") ? raw.replace("/works/", "") : raw;
+}
+
+function isNoisyOpenLibraryTitle(title = "") {
+  const text = normalizeString(title);
+
+  if (!text) return true;
+
+  return [
+    "complete series",
+    "complete dune series",
+    "box set",
+    "boxed set",
+    "collection",
+    "omnibus",
+    "study guide",
+    "summary",
+    "workbook",
+    "radiographie",
+    "guide",
+    "companion",
+    "analysis",
+    "set of",
+    "books"
+  ].some((pattern) => text.includes(pattern));
+}
+
+function isLanguageMismatchForRussianQuery(query = "", item = {}) {
+  if (!hasCyrillic(query)) return false;
+
+  const title = String(item.title || item.title_ru || item.title_en || item.original_title || "").trim();
+  const aliases = safeArray(item.aliases).join(" ");
+
+  if (hasCyrillic(title) || hasCyrillic(aliases)) return false;
+
+  const cleanQuery = cleanTitle(query);
+  const cleanTitleValue = cleanTitle(title);
+
+  if (!cleanQuery || !cleanTitleValue) return true;
+
+  return !cleanTitleValue.includes(cleanQuery) && !cleanQuery.includes(cleanTitleValue);
 }
 
 function normalizeBookItem(raw = {}, language = "ru") {
@@ -465,7 +510,9 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map()) {
   const authorNames = uniqueArray(
     authorIds.flatMap((id) => {
       const labels = labelMap.get(id) || {};
-      return [labels.ru, labels.en];
+      return language === "en"
+        ? [labels.en, labels.ru]
+        : [labels.ru, labels.en];
     }).filter(Boolean)
   );
 
@@ -473,7 +520,9 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map()) {
   const seriesNames = uniqueArray(
     seriesIds.flatMap((id) => {
       const labels = labelMap.get(id) || {};
-      return [labels.ru, labels.en];
+      return language === "en"
+        ? [labels.en, labels.ru]
+        : [labels.ru, labels.en];
     }).filter(Boolean)
   );
 
@@ -504,7 +553,7 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map()) {
       wikidata: wikidataId
     },
     primary_source: "wikidata",
-    score: 800,
+    score: 900,
     meta: {
       source: "wikidata",
       wikidata_labels: {
@@ -647,14 +696,20 @@ function extractOpenLibrarySeriesName(doc = {}) {
 }
 
 function mapOpenLibraryDoc(doc = {}, language = "ru") {
-  const workKey = normalizeOpenLibraryWorkKey(doc?.key || "");
   const sourceTitle = String(doc?.title || "").trim();
+
+  if (isNoisyOpenLibraryTitle(sourceTitle)) {
+    return null;
+  }
+
+  const workKey = normalizeOpenLibraryWorkKey(doc?.key || "");
   const alternatives = uniqueArray(safeArray(doc?.alternative_title).map(String).filter(Boolean));
   const ruAlternative = alternatives.find((value) => hasCyrillic(value)) || "";
   const authors = uniqueArray(safeArray(doc?.author_name).map(String).filter(Boolean));
 
   const titleRu = hasCyrillic(sourceTitle) ? sourceTitle : ruAlternative;
   const titleEn = sourceTitle;
+
   const title = language === "en"
     ? (titleEn || titleRu || sourceTitle)
     : (titleRu || titleEn || sourceTitle);
@@ -682,7 +737,7 @@ function mapOpenLibraryDoc(doc = {}, language = "ru") {
       openlibrary_work: workKey || null
     },
     primary_source: "openlibrary",
-    score: 200,
+    score: 150,
     meta: {
       source: "openlibrary",
       openlibrary_work: workKey || null,
@@ -784,12 +839,28 @@ function mergeBookItems(existing = {}, incoming = {}) {
     ...getBookAuthors(incoming)
   ]);
 
+  const resolvedMeta = wikidataId
+    ? {
+        ...incomingMeta,
+        ...existingMeta
+      }
+    : {
+        ...existingMeta,
+        ...incomingMeta
+      };
+
+  const resolvedAuthors = existingIds.wikidata
+    ? getBookAuthors(existing)
+    : incomingIds.wikidata
+      ? getBookAuthors(incoming)
+      : authors;
+
   return normalizeBookItem({
     ...existing,
     ...incoming,
     canonical_key: wikidataId
       ? `books:wikidata:${wikidataId}`
-      : `books:work:${normalizeWorkKey(title, authors[0] || "")}`,
+      : `books:work:${normalizeWorkKey(title, resolvedAuthors[0] || "")}`,
     title,
     title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
     title_en: pickBetterText(existing.title_en, incoming.title_en),
@@ -809,9 +880,8 @@ function mergeBookItems(existing = {}, incoming = {}) {
     primary_source: wikidataId ? "wikidata" : (existing.primary_source || incoming.primary_source || "merged"),
     score: Math.max(existing.score || 0, incoming.score || 0),
     meta: {
-      ...existingMeta,
-      ...incomingMeta,
-      author_names: authors,
+      ...resolvedMeta,
+      author_names: resolvedAuthors,
       series_name: existingMeta.series_name || incomingMeta.series_name || "",
       series_candidates: uniqueArray([
         ...safeArray(existingMeta.series_candidates),
@@ -860,8 +930,26 @@ function dedupeBooks(items = []) {
   return result;
 }
 
-function mergeBookSources(...groups) {
-  return dedupeBooks(groups.flatMap((group) => safeArray(group)));
+function filterRelevantOpenLibraryItems(query = "", items = []) {
+  return safeArray(items).filter((item) => {
+    if (!item) return false;
+    if (isNoisyOpenLibraryTitle(item.title || item.original_title)) return false;
+    if (isLanguageMismatchForRussianQuery(query, item)) return false;
+    return true;
+  });
+}
+
+function mergeBookSources(query = "", saved = [], wikidata = [], openLibrary = []) {
+  const cleanSaved = dedupeBooks(saved);
+  const cleanWikidata = dedupeBooks(wikidata);
+  const cleanOpenLibrary = filterRelevantOpenLibraryItems(query, dedupeBooks(openLibrary));
+
+  if (cleanWikidata.length) {
+    const enriched = dedupeBooks([...cleanWikidata, ...cleanOpenLibrary]);
+    return dedupeBooks([...cleanSaved, ...enriched]);
+  }
+
+  return dedupeBooks([...cleanSaved, ...cleanOpenLibrary]);
 }
 
 export async function runBooksSearch(query = "", options = {}) {
@@ -876,5 +964,5 @@ export async function runBooksSearch(query = "", options = {}) {
   const wikidata = await fetchWikidataBooks(cleanQuery, language);
   const openLibrary = await fetchOpenLibraryBooks(cleanQuery, wikidata, language);
 
-  return mergeBookSources(saved, wikidata, openLibrary);
+  return mergeBookSources(cleanQuery, saved, wikidata, openLibrary);
 }
