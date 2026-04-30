@@ -21,41 +21,104 @@ function getCover(entity = {}) {
   return cover;
 }
 
-function getOrderValue(item = {}, sortMode = "release", index = 0) {
-  if (sortMode === "story") {
-    return Number(item.story_order ?? item.release_order ?? index + 1);
-  }
+function sortEntries(entries = [], mode = "release") {
+  return [...safeArray(entries)].sort((a, b) => {
+    const ai = a.item || a;
+    const bi = b.item || b;
 
-  return Number(item.release_order ?? item.story_order ?? index + 1);
-}
+    const aOrder = mode === "story"
+      ? ai.story_order ?? ai.release_order ?? 9999
+      : ai.release_order ?? ai.story_order ?? 9999;
 
-function sortUniverseItems(items = [], sortMode = "release") {
-  return [...safeArray(items)].sort((a, b) => {
-    const ai = safeArray(items).indexOf(a);
-    const bi = safeArray(items).indexOf(b);
+    const bOrder = mode === "story"
+      ? bi.story_order ?? bi.release_order ?? 9999
+      : bi.release_order ?? bi.story_order ?? 9999;
 
-    const ao = getOrderValue(a, sortMode, ai);
-    const bo = getOrderValue(b, sortMode, bi);
+    if (Number(aOrder) !== Number(bOrder)) return Number(aOrder) - Number(bOrder);
 
-    if (ao !== bo) return ao - bo;
-
-    const ay = Number(a.media_entities?.year || 0);
-    const by = Number(b.media_entities?.year || 0);
+    const ay = Number(ai.media_entities?.year || 0);
+    const by = Number(bi.media_entities?.year || 0);
     if (ay && by && ay !== by) return ay - by;
 
-    return resolveTitle(a.media_entities || {}).localeCompare(
-      resolveTitle(b.media_entities || {}),
+    return resolveTitle(ai.media_entities || {}).localeCompare(
+      resolveTitle(bi.media_entities || {}),
       "ru"
     );
   });
 }
 
-function getBestRelationForEntity(entityId, relations = []) {
-  return (
-    safeArray(relations)
-      .filter((rel) => Number(rel.to_entity_id) === Number(entityId))
-      .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0] || null
-  );
+function groupItems(items = [], relations = [], viewMode = "release") {
+  const list = safeArray(items);
+
+  if (viewMode === "arc") {
+    const groups = new Map();
+
+    list.forEach((item) => {
+      const key = item.arc || "Без саги";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, relation: null });
+    });
+
+    return Array.from(groups.entries()).map(([title, entries]) => ({
+      title,
+      entries: sortEntries(entries, "release")
+    }));
+  }
+
+  if (viewMode === "branch") {
+    const groups = new Map();
+
+    list.forEach((item) => {
+      const key = item.phase || "Без ветки";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, relation: null });
+    });
+
+    return Array.from(groups.entries()).map(([title, entries]) => ({
+      title,
+      entries: sortEntries(entries, "story")
+    }));
+  }
+
+  if (viewMode === "relation") {
+    const byId = new Map(list.map((item) => [Number(item.media_entities?.id), item]));
+    const groups = new Map();
+
+    safeArray(relations).forEach((rel) => {
+      const target = byId.get(Number(rel.to_entity_id));
+      if (!target) return;
+
+      const title = getRelationLabel(rel.relation_type || "related_work") || "Связанное";
+      if (!groups.has(title)) groups.set(title, []);
+
+      groups.get(title).push({
+        item: target,
+        relation: rel
+      });
+    });
+
+    if (!groups.size) {
+      groups.set("Связанное", list.map((item) => ({ item, relation: null })));
+    }
+
+    return Array.from(groups.entries()).map(([title, entries]) => ({
+      title,
+      entries: sortEntries(
+        entries.filter(
+          (entry, index, arr) =>
+            index === arr.findIndex((x) => x.item.media_entities?.id === entry.item.media_entities?.id)
+        ),
+        "release"
+      )
+    }));
+  }
+
+  return [
+    {
+      title: viewMode === "story" ? "Хронология событий" : "Порядок выхода",
+      entries: sortEntries(list.map((item) => ({ item, relation: null })), viewMode)
+    }
+  ];
 }
 
 function renderCover(entity = {}) {
@@ -76,13 +139,14 @@ function renderCover(entity = {}) {
   return `<div class="item-cover-fallback">?</div>`;
 }
 
-function renderItem(item, index, relations = [], sortMode = "release") {
+function renderItem(entry, index) {
+  const item = entry.item || entry;
+  const relation = entry.relation || null;
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const status = STATUS_LABELS[item.status] || item.status || "";
-  const relation = getBestRelationForEntity(entity.id, relations);
-  const relationLabel = relation ? getRelationLabel(relation.relation_type) : "Участник";
-  const orderValue = getOrderValue(item, sortMode, index);
+  const relationLabel = relation ? getRelationLabel(relation.relation_type) : "";
+  const storyNote = item.metadata_json?.story_note || "";
 
   return `
     <button
@@ -91,7 +155,7 @@ function renderItem(item, index, relations = [], sortMode = "release") {
       data-key="${escapeHtml(entity.canonical_key || "")}"
       data-category="${escapeHtml(entity.category || item.category || "")}"
     >
-      <div class="timeline-index">${escapeHtml(String(orderValue || index + 1))}</div>
+      <div class="timeline-index">${escapeHtml(String(index + 1))}</div>
 
       <div class="item-cover">
         ${renderCover(entity)}
@@ -110,10 +174,12 @@ function renderItem(item, index, relations = [], sortMode = "release") {
           <span>${escapeHtml(getCategoryLabel(state.language, entity.category || ""))}</span>
           ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
           ${status ? `<span>${escapeHtml(status)}</span>` : ""}
-          ${item.role ? `<span>${escapeHtml(item.role)}</span>` : ""}
+          ${item.arc ? `<span>${escapeHtml(item.arc)}</span>` : ""}
           ${item.phase ? `<span>${escapeHtml(item.phase)}</span>` : ""}
           ${relationLabel ? `<span>${escapeHtml(relationLabel)}</span>` : ""}
         </div>
+
+        ${storyNote ? `<div class="item-note">${escapeHtml(storyNote)}</div>` : ""}
       </div>
     </button>
   `;
@@ -122,245 +188,257 @@ function renderItem(item, index, relations = [], sortMode = "release") {
 function renderStyles() {
   return `
     <style>
-      .page { display:flex; flex-direction:column; gap:20px; }
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
 
       .hero {
-        border-radius:24px;
-        border:1px solid var(--border-soft);
-        background:var(--bg-elevated);
-        padding:18px;
-        display:flex;
-        gap:16px;
-        align-items:center;
+        border-radius: 24px;
+        border: 1px solid var(--border-soft);
+        background: var(--bg-elevated);
+        padding: 18px;
+        display: flex;
+        gap: 16px;
+        align-items: center;
       }
 
       .hero-cover {
-        width:96px;
-        height:138px;
-        border-radius:18px;
-        overflow:hidden;
-        background:var(--surface);
-        border:1px solid var(--border-soft);
-        flex-shrink:0;
+        width: 96px;
+        height: 138px;
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
+        flex-shrink: 0;
       }
 
       .hero-cover img {
-        width:100%;
-        height:100%;
-        object-fit:cover;
-        display:block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
       }
 
       .hero-cover-fallback {
-        width:100%;
-        height:100%;
-        display:grid;
-        place-items:center;
-        color:var(--text-soft);
-        font-weight:800;
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--text-soft);
+        font-weight: 800;
       }
 
       .hero-meta {
-        min-width:0;
-        display:flex;
-        flex-direction:column;
-        gap:8px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
 
       .title {
-        font-size:28px;
-        font-weight:900;
-        line-height:1.15;
-        color:var(--text);
+        font-size: 28px;
+        font-weight: 900;
+        line-height: 1.15;
+        color: var(--text);
       }
 
       .description {
-        color:var(--text-soft);
-        line-height:1.55;
+        color: var(--text-soft);
+        line-height: 1.55;
       }
 
       .stats {
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .stat {
-        padding:6px 10px;
-        border-radius:999px;
-        background:var(--accent-soft);
-        color:var(--text);
-        font-size:12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--text);
+        font-size: 12px;
       }
 
-      .sort-switch {
-        display:inline-flex;
-        gap:6px;
-        background:var(--bg-soft);
-        padding:4px;
-        border-radius:999px;
-        border:1px solid var(--border-soft);
-        width:fit-content;
+      .view-switch {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        background: var(--bg-soft);
+        padding: 4px;
+        border-radius: 18px;
+        border: 1px solid var(--border-soft);
+        width: fit-content;
       }
 
-      .sort-btn {
-        border-radius:999px;
-        padding:7px 12px;
-        font-size:12px;
-        color:var(--text-soft);
-        cursor:pointer;
+      .view-btn {
+        border-radius: 999px;
+        padding: 7px 11px;
+        font-size: 12px;
+        color: var(--text-soft);
       }
 
-      .sort-btn.is-active {
-        background:var(--surface);
-        color:var(--text);
+      .view-btn.is-active {
+        background: var(--surface);
+        color: var(--text);
       }
 
       .section-title {
-        font-size:18px;
-        font-weight:800;
-        color:var(--text);
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--text);
       }
 
       .timeline {
-        display:flex;
-        flex-direction:column;
-        gap:12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
       }
 
       .timeline-item {
-        display:grid;
-        grid-template-columns:42px 74px 1fr;
-        gap:12px;
-        align-items:center;
-        padding:10px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface);
-        color:var(--text);
-        text-align:left;
+        display: grid;
+        grid-template-columns: 34px 74px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 10px;
+        border-radius: 18px;
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+        color: var(--text);
+        text-align: left;
       }
 
       .timeline-index {
-        width:42px;
-        height:42px;
-        border-radius:999px;
-        display:grid;
-        place-items:center;
-        background:var(--accent-soft);
-        color:var(--text);
-        font-size:13px;
-        font-weight:800;
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: var(--accent-soft);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 800;
       }
 
       .item-cover {
-        width:74px;
-        height:106px;
-        border-radius:14px;
-        overflow:hidden;
-        background:var(--bg-soft);
-        border:1px solid var(--border-soft);
+        width: 74px;
+        height: 106px;
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--bg-soft);
+        border: 1px solid var(--border-soft);
       }
 
       .item-cover img {
-        width:100%;
-        height:100%;
-        object-fit:cover;
-        display:block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
       }
 
       .item-cover.is-empty {
-        display:grid;
-        place-items:center;
+        display: grid;
+        place-items: center;
       }
 
       .item-cover-fallback {
-        width:100%;
-        height:100%;
-        display:grid;
-        place-items:center;
-        color:var(--text-soft);
-        font-weight:800;
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--text-soft);
+        font-weight: 800;
       }
 
       .item-meta {
-        min-width:0;
-        display:flex;
-        flex-direction:column;
-        gap:7px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
       }
 
       .item-title {
-        font-weight:800;
-        line-height:1.3;
+        font-weight: 800;
+        line-height: 1.3;
       }
 
-      .item-subtitle {
-        color:var(--text-soft);
-        font-size:13px;
+      .item-subtitle,
+      .item-note {
+        color: var(--text-soft);
+        font-size: 13px;
+        line-height: 1.35;
       }
 
       .item-badges {
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
       }
 
       .item-badges span {
-        font-size:12px;
-        color:var(--text-soft);
-        background:var(--bg-soft);
-        padding:4px 8px;
-        border-radius:999px;
+        font-size: 12px;
+        color: var(--text-soft);
+        background: var(--bg-soft);
+        padding: 4px 8px;
+        border-radius: 999px;
       }
 
       .empty-state {
-        padding:28px;
-        border-radius:20px;
-        border:1px solid var(--border-soft);
-        background:var(--surface);
-        display:flex;
-        flex-direction:column;
-        gap:10px;
-        color:var(--text-soft);
+        padding: 28px;
+        border-radius: 20px;
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        color: var(--text-soft);
       }
 
       .empty-title {
-        color:var(--text);
-        font-size:18px;
-        font-weight:800;
+        color: var(--text);
+        font-size: 18px;
+        font-weight: 800;
       }
 
       .login-btn {
-        width:fit-content;
-        padding:10px 16px;
-        border-radius:999px;
-        background:var(--accent);
-        color:#fff;
-        font-weight:700;
+        width: fit-content;
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
       }
 
-      @media (max-width:640px) {
-        .hero { align-items:flex-start; }
-        .hero-cover { width:82px; height:118px; }
+      @media (max-width: 640px) {
+        .hero {
+          align-items: flex-start;
+        }
+
+        .hero-cover {
+          width: 82px;
+          height: 118px;
+        }
 
         .timeline-item {
-          grid-template-columns:34px 62px 1fr;
-          gap:10px;
+          grid-template-columns: 28px 62px 1fr;
+          gap: 10px;
         }
 
         .timeline-index {
-          width:34px;
-          height:34px;
+          width: 28px;
+          height: 28px;
         }
 
         .item-cover {
-          width:62px;
-          height:90px;
+          width: 62px;
+          height: 90px;
         }
 
-        .title {
-          font-size:24px;
+        .view-switch {
+          width: 100%;
         }
       }
     </style>
@@ -376,7 +454,7 @@ function renderGuest(root) {
 
       <div class="empty-state">
         <div class="empty-title">Нужно войти</div>
-        <div class="empty-text">Войди, чтобы открыть вселенную.</div>
+        <div class="empty-text">Вселенные строятся на основе базы Plamut.</div>
         <button class="login-btn" type="button" data-action="login">Войти</button>
       </div>
     </section>
@@ -406,7 +484,7 @@ function renderNotFound(root, text = "Вселенная не найдена") {
     <section class="page">
       <div class="empty-state">
         <div class="empty-title">${escapeHtml(text)}</div>
-        <div class="empty-text">Эта вселенная пока не найдена в базе Plamut.</div>
+        <div class="empty-text">Эта вселенная пока не найдена в новой базе Plamut.</div>
       </div>
     </section>
   `;
@@ -441,6 +519,19 @@ function bindItems(root) {
   });
 }
 
+function renderGroups(items = [], relations = [], viewMode = "release") {
+  return groupItems(items, relations, viewMode)
+    .map(
+      (group) => `
+        <div class="section-title">${escapeHtml(group.title)}</div>
+        <div class="timeline">
+          ${group.entries.map((entry, index) => renderItem(entry, index)).join("")}
+        </div>
+      `
+    )
+    .join("");
+}
+
 export async function renderUniversePage(root, params = {}) {
   const userId = state.user?.id;
   const universeKey = params.id || params.key || "";
@@ -472,28 +563,11 @@ export async function renderUniversePage(root, params = {}) {
       items.find((item) => item.media_entities?.cover_url)?.media_entities?.cover_url ||
       "";
 
-    const done = items.filter((item) => item.status === "done").length;
-    const hasStoryChronology = items.some(
-      (item) => item.story_order !== null && item.story_order !== undefined
-    );
+    const storyCount = items.filter((item) => item.story_order !== null && item.story_order !== undefined).length;
+    const branchCount = new Set(items.map((item) => item.phase).filter(Boolean)).size;
+    const arcCount = new Set(items.map((item) => item.arc).filter(Boolean)).size;
 
-    let currentSortMode = "release";
-
-    function renderBody(sortMode = "release") {
-      const sortedItems = sortUniverseItems(items, sortMode);
-
-      return `
-        <div class="section-title">
-          ${sortMode === "story" ? "Хронология событий" : "Порядок выхода"}
-        </div>
-
-        <div class="timeline">
-          ${sortedItems
-            .map((item, index) => renderItem(item, index, relations, sortMode))
-            .join("")}
-        </div>
-      `;
-    }
+    let viewMode = "arc";
 
     root.innerHTML = `
       ${renderStyles()}
@@ -519,40 +593,41 @@ export async function renderUniversePage(root, params = {}) {
 
             <div class="stats">
               <span class="stat">${escapeHtml(String(items.length))} элементов</span>
-              <span class="stat">готово ${escapeHtml(String(done))}</span>
-              ${relations.length ? `<span class="stat">${escapeHtml(String(relations.length))} связей</span>` : ""}
-              ${universe.source ? `<span class="stat">${escapeHtml(universe.source === "manual" ? "БД" : universe.source)}</span>` : ""}
+              <span class="stat">${escapeHtml(String(relations.length))} связей</span>
+              <span class="stat">${escapeHtml(String(arcCount))} саг</span>
+              <span class="stat">${escapeHtml(String(branchCount))} веток</span>
+              <span class="stat">${escapeHtml(String(storyCount))} в хронологии</span>
             </div>
           </div>
         </div>
 
-        <div class="sort-switch">
-          <button class="sort-btn is-active" data-sort="release" type="button">По выходу</button>
-          <button class="sort-btn" data-sort="story" type="button">
-            По событиям${hasStoryChronology ? "" : " · черновик"}
-          </button>
+        <div class="view-switch">
+          <button class="view-btn is-active" data-view="arc" type="button">По сагам</button>
+          <button class="view-btn" data-view="branch" type="button">По веткам</button>
+          <button class="view-btn" data-view="release" type="button">По выходу</button>
+          <button class="view-btn" data-view="story" type="button">По событиям</button>
+          <button class="view-btn" data-view="relation" type="button">По связям</button>
         </div>
 
         <div data-groups-root>
-          ${renderBody(currentSortMode)}
+          ${renderGroups(items, relations, viewMode)}
         </div>
       </section>
     `;
 
     bindItems(root);
 
-    root.querySelectorAll("[data-sort]").forEach((button) => {
+    root.querySelectorAll("[data-view]").forEach((button) => {
       button.addEventListener("click", () => {
-        const mode = button.dataset.sort || "release";
-        currentSortMode = mode;
+        viewMode = button.dataset.view || "arc";
 
-        root.querySelectorAll("[data-sort]").forEach((node) => {
+        root.querySelectorAll("[data-view]").forEach((node) => {
           node.classList.toggle("is-active", node === button);
         });
 
         const groupsRoot = root.querySelector("[data-groups-root]");
         if (groupsRoot) {
-          groupsRoot.innerHTML = renderBody(currentSortMode);
+          groupsRoot.innerHTML = renderGroups(items, relations, viewMode);
           bindItems(root);
         }
       });
