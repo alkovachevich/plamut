@@ -26,8 +26,12 @@ function cleanText(value = "") {
   return String(value || "").trim();
 }
 
+function cleanLower(value = "") {
+  return cleanText(value).toLowerCase();
+}
+
 function normalizeCategory(category = "") {
-  const normalized = cleanText(category).toLowerCase();
+  const normalized = cleanLower(category);
   return VALID_CATEGORIES.includes(normalized) ? normalized : "";
 }
 
@@ -54,16 +58,12 @@ function normalizeAliases(value = []) {
   );
 }
 
-function isUsefulText(value = "") {
-  return Boolean(cleanText(value));
-}
-
 function isUsefulCover(value = "") {
   const cover = cleanText(value);
   if (!cover) return false;
   if (cover === "undefined" || cover === "null") return false;
   if (cover.includes("/placeholder")) return false;
-  return true;
+  return /^https?:\/\//i.test(cover) || cover.startsWith("/");
 }
 
 function pickStableText(previous = "", incoming = "") {
@@ -87,7 +87,7 @@ function pickStableCover(previous = "", incoming = "") {
 }
 
 function getSearchCacheKey(scope = "global", query = "", category = "") {
-  return `${scope}:${cleanText(query).toLowerCase()}:${category}`;
+  return `${scope}:${cleanLower(query)}:${cleanLower(category)}`;
 }
 
 function getCachedSearchResult(key = "") {
@@ -136,10 +136,24 @@ function emptyGroups() {
   };
 }
 
-function buildFallbackDescriptionFields(item = {}) {
+function extractDescriptionFields(item = {}) {
+  const meta = normalizeJson(item.meta, {});
   const description = cleanText(item.description);
-  const descriptionRu = cleanText(item.description_ru);
-  const descriptionEn = cleanText(item.description_en);
+  const descriptionRu = cleanText(
+    item.description_ru ||
+    meta.description_ru ||
+    meta.overview_ru ||
+    meta.extract_ru ||
+    ""
+  );
+  const descriptionEn = cleanText(
+    item.description_en ||
+    meta.description_en ||
+    meta.overview_en ||
+    meta.synopsis ||
+    meta.extract_en ||
+    ""
+  );
 
   return {
     description_ru: descriptionRu || (description && !descriptionEn ? description : ""),
@@ -147,12 +161,72 @@ function buildFallbackDescriptionFields(item = {}) {
   };
 }
 
+function extractExternalIds(item = {}) {
+  const ids = normalizeJson(item.external_ids, {});
+  const meta = normalizeJson(item.meta, {});
+
+  return {
+    ...ids,
+
+    wikidata: cleanText(ids.wikidata || item.wikidata_id || meta.wikidata_id || ""),
+    tmdb: cleanText(ids.tmdb || item.tmdb_id || meta.tmdb_id || ""),
+    imdb: cleanText(ids.imdb || item.imdb_id || meta.imdb_id || ""),
+    anilist: cleanText(ids.anilist || item.anilist_id || meta.anilist_id || ""),
+    mal: cleanText(ids.mal || item.mal_id || meta.mal_id || ""),
+    openlibrary_work: cleanText(
+      ids.openlibrary_work ||
+      ids.openlibrary ||
+      item.openlibrary_work ||
+      item.openlibrary_id ||
+      meta.openlibrary_work ||
+      ""
+    ).replace("/works/", "")
+  };
+}
+
+function buildCanonicalKey(item = {}) {
+  const existing = cleanLower(item.canonical_key);
+  if (existing) return existing;
+
+  const category = normalizeCategory(item.category);
+  const ids = extractExternalIds(item);
+
+  if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
+  if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
+  if (category && ids.imdb) return `${category}:imdb:${ids.imdb}`.toLowerCase();
+  if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
+  if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
+
+  if (category === "books" && ids.openlibrary_work) {
+    return `books:openlibrary:${ids.openlibrary_work}`.toLowerCase();
+  }
+
+  const title = cleanLower(
+    item.title ||
+    item.title_primary ||
+    item.title_ru ||
+    item.title_en ||
+    item.original_title ||
+    "untitled"
+  )
+    .replace(/ё/g, "е")
+    .replace(/[^a-z0-9а-яе]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  const year = normalizeYear(item.year);
+
+  return [category || "unknown", cleanLower(item.primary_source || item.source || "manual"), title, year || ""]
+    .filter(Boolean)
+    .join(":")
+    .toLowerCase();
+}
+
 function normalizeSearchItem(item = {}) {
   const category = normalizeCategory(item.category);
 
   if (!category) return null;
 
-  const canonicalKey = cleanText(item.canonical_key);
   const title = cleanText(
     item.title ||
     item.title_primary ||
@@ -162,11 +236,14 @@ function normalizeSearchItem(item = {}) {
     ""
   );
 
-  if (!canonicalKey || !title) return null;
+  if (!title) return null;
 
-  const fallbackDescriptions = buildFallbackDescriptionFields(item);
+  const canonicalKey = buildCanonicalKey(item);
+  if (!canonicalKey) return null;
+
   const meta = normalizeJson(item.meta, {});
-  const externalIds = normalizeJson(item.external_ids, {});
+  const externalIds = extractExternalIds(item);
+  const descriptions = extractDescriptionFields(item);
 
   const normalized = {
     canonical_key: canonicalKey,
@@ -179,16 +256,33 @@ function normalizeSearchItem(item = {}) {
     original_title: cleanText(item.original_title || title),
 
     year: normalizeYear(item.year),
-    cover_url: cleanText(item.cover_url),
+    cover_url: cleanText(item.cover_url || meta.cover_url || ""),
 
-    description_ru: fallbackDescriptions.description_ru,
-    description_en: fallbackDescriptions.description_en,
+    description_ru: descriptions.description_ru,
+    description_en: descriptions.description_en,
 
-    aliases: normalizeAliases(item.aliases),
+    aliases: normalizeAliases([
+      ...safeArray(item.aliases),
+      item.title,
+      item.title_primary,
+      item.title_ru,
+      item.title_en,
+      item.original_title
+    ]),
+
     external_ids: externalIds,
-    primary_source: cleanText(item.primary_source || item.source),
+    primary_source: cleanText(item.primary_source || item.source || meta.source || ""),
     score: Number.isFinite(Number(item.score)) ? Number(item.score) : 0,
-    meta
+
+    meta: {
+      ...meta,
+      search_source: cleanText(item.primary_source || item.source || meta.source || ""),
+      metadata_status:
+        isUsefulCover(item.cover_url || meta.cover_url) &&
+        (descriptions.description_ru || descriptions.description_en)
+          ? "partial"
+          : "needs_enrichment"
+    }
   };
 
   if (category === "books") {
@@ -199,37 +293,11 @@ function normalizeSearchItem(item = {}) {
       normalized.original_title ||
       normalized.title;
 
-    normalized.description_ru =
-      normalized.description_ru ||
-      cleanText(meta.description_ru) ||
-      "";
-
-    normalized.description_en =
-      normalized.description_en ||
-      cleanText(meta.description_en) ||
-      "";
-  }
-
-  if (category === "movies" || category === "series") {
-    normalized.description_ru =
-      normalized.description_ru ||
-      cleanText(meta.overview_ru) ||
-      cleanText(meta.description_ru) ||
-      "";
-
-    normalized.description_en =
-      normalized.description_en ||
-      cleanText(meta.overview_en) ||
-      cleanText(meta.description_en) ||
-      "";
-  }
-
-  if (category === "anime" || category === "manga") {
-    normalized.description_en =
-      normalized.description_en ||
-      cleanText(meta.description_en) ||
-      cleanText(meta.synopsis) ||
-      "";
+    normalized.meta = {
+      ...normalized.meta,
+      author_names: safeArray(meta.author_names || item.author_names || item.authors).filter(Boolean),
+      series_name: cleanText(meta.series_name || item.series_name || item.series || "")
+    };
   }
 
   return normalized;
