@@ -22,8 +22,12 @@ function now() {
   return Date.now();
 }
 
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
 function normalizeCategory(category = "") {
-  const normalized = String(category || "").trim().toLowerCase();
+  const normalized = cleanText(category).toLowerCase();
   return VALID_CATEGORIES.includes(normalized) ? normalized : "";
 }
 
@@ -34,8 +38,56 @@ function normalizeYear(value) {
   return Number.isFinite(year) ? year : null;
 }
 
+function normalizeJson(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function normalizeAliases(value = []) {
+  return Array.from(
+    new Set(
+      safeArray(value)
+        .map(cleanText)
+        .filter(Boolean)
+    )
+  );
+}
+
+function isUsefulText(value = "") {
+  return Boolean(cleanText(value));
+}
+
+function isUsefulCover(value = "") {
+  const cover = cleanText(value);
+  if (!cover) return false;
+  if (cover === "undefined" || cover === "null") return false;
+  if (cover.includes("/placeholder")) return false;
+  return true;
+}
+
+function pickStableText(previous = "", incoming = "") {
+  const left = cleanText(previous);
+  const right = cleanText(incoming);
+
+  if (!left) return right;
+  if (!right) return left;
+
+  return right.length > left.length ? right : left;
+}
+
+function pickStableCover(previous = "", incoming = "") {
+  const left = cleanText(previous);
+  const right = cleanText(incoming);
+
+  if (!isUsefulCover(left)) return right;
+  if (!isUsefulCover(right)) return left;
+
+  return left;
+}
+
 function getSearchCacheKey(scope = "global", query = "", category = "") {
-  return `${scope}:${String(query || "").trim().toLowerCase()}:${category}`;
+  return `${scope}:${cleanText(query).toLowerCase()}:${category}`;
 }
 
 function getCachedSearchResult(key = "") {
@@ -84,42 +136,103 @@ function emptyGroups() {
   };
 }
 
+function buildFallbackDescriptionFields(item = {}) {
+  const description = cleanText(item.description);
+  const descriptionRu = cleanText(item.description_ru);
+  const descriptionEn = cleanText(item.description_en);
+
+  return {
+    description_ru: descriptionRu || (description && !descriptionEn ? description : ""),
+    description_en: descriptionEn || (description && !descriptionRu ? description : "")
+  };
+}
+
 function normalizeSearchItem(item = {}) {
   const category = normalizeCategory(item.category);
 
   if (!category) return null;
 
-  const canonicalKey = String(item.canonical_key || "").trim();
-  const title = String(
+  const canonicalKey = cleanText(item.canonical_key);
+  const title = cleanText(
     item.title ||
     item.title_primary ||
     item.title_ru ||
     item.title_en ||
     item.original_title ||
     ""
-  ).trim();
+  );
 
   if (!canonicalKey || !title) return null;
 
-  return {
+  const fallbackDescriptions = buildFallbackDescriptionFields(item);
+  const meta = normalizeJson(item.meta, {});
+  const externalIds = normalizeJson(item.external_ids, {});
+
+  const normalized = {
     canonical_key: canonicalKey,
     category,
+
     title,
-    title_ru: String(item.title_ru || "").trim(),
-    title_en: String(item.title_en || "").trim(),
-    original_title: String(item.original_title || title).trim(),
+    title_primary: cleanText(item.title_primary || title),
+    title_ru: cleanText(item.title_ru),
+    title_en: cleanText(item.title_en),
+    original_title: cleanText(item.original_title || title),
+
     year: normalizeYear(item.year),
-    cover_url: String(item.cover_url || "").trim(),
-    description_ru: String(item.description_ru || "").trim(),
-    description_en: String(item.description_en || "").trim(),
-    aliases: safeArray(item.aliases).map(String).filter(Boolean),
-    external_ids: item.external_ids && typeof item.external_ids === "object"
-      ? item.external_ids
-      : {},
-    primary_source: String(item.primary_source || "").trim(),
+    cover_url: cleanText(item.cover_url),
+
+    description_ru: fallbackDescriptions.description_ru,
+    description_en: fallbackDescriptions.description_en,
+
+    aliases: normalizeAliases(item.aliases),
+    external_ids: externalIds,
+    primary_source: cleanText(item.primary_source || item.source),
     score: Number.isFinite(Number(item.score)) ? Number(item.score) : 0,
-    meta: item.meta && typeof item.meta === "object" ? item.meta : {}
+    meta
   };
+
+  if (category === "books") {
+    normalized.title_primary =
+      normalized.title_ru ||
+      normalized.title_primary ||
+      normalized.title_en ||
+      normalized.original_title ||
+      normalized.title;
+
+    normalized.description_ru =
+      normalized.description_ru ||
+      cleanText(meta.description_ru) ||
+      "";
+
+    normalized.description_en =
+      normalized.description_en ||
+      cleanText(meta.description_en) ||
+      "";
+  }
+
+  if (category === "movies" || category === "series") {
+    normalized.description_ru =
+      normalized.description_ru ||
+      cleanText(meta.overview_ru) ||
+      cleanText(meta.description_ru) ||
+      "";
+
+    normalized.description_en =
+      normalized.description_en ||
+      cleanText(meta.overview_en) ||
+      cleanText(meta.description_en) ||
+      "";
+  }
+
+  if (category === "anime" || category === "manga") {
+    normalized.description_en =
+      normalized.description_en ||
+      cleanText(meta.description_en) ||
+      cleanText(meta.synopsis) ||
+      "";
+  }
+
+  return normalized;
 }
 
 function normalizeSearchItems(items = []) {
@@ -129,31 +242,46 @@ function normalizeSearchItems(items = []) {
 }
 
 function mergeSearchItems(existing = {}, incoming = {}) {
+  const existingIds = normalizeJson(existing.external_ids, {});
+  const incomingIds = normalizeJson(incoming.external_ids, {});
+  const existingMeta = normalizeJson(existing.meta, {});
+  const incomingMeta = normalizeJson(incoming.meta, {});
+
   return {
     ...existing,
     ...incoming,
+
     canonical_key: existing.canonical_key || incoming.canonical_key,
     category: existing.category || incoming.category,
-    title: existing.title || incoming.title,
-    title_ru: existing.title_ru || incoming.title_ru,
-    title_en: existing.title_en || incoming.title_en,
-    original_title: existing.original_title || incoming.original_title,
+
+    title: pickStableText(existing.title, incoming.title),
+    title_primary: pickStableText(existing.title_primary, incoming.title_primary),
+    title_ru: pickStableText(existing.title_ru, incoming.title_ru),
+    title_en: pickStableText(existing.title_en, incoming.title_en),
+    original_title: pickStableText(existing.original_title, incoming.original_title),
+
     year: existing.year || incoming.year || null,
-    cover_url: existing.cover_url || incoming.cover_url,
-    description_ru: existing.description_ru || incoming.description_ru,
-    description_en: existing.description_en || incoming.description_en,
+    cover_url: pickStableCover(existing.cover_url, incoming.cover_url),
+
+    description_ru: pickStableText(existing.description_ru, incoming.description_ru),
+    description_en: pickStableText(existing.description_en, incoming.description_en),
+
     aliases: Array.from(new Set([
       ...safeArray(existing.aliases),
       ...safeArray(incoming.aliases)
-    ])),
+    ].map(cleanText).filter(Boolean))),
+
     external_ids: {
-      ...(existing.external_ids || {}),
-      ...(incoming.external_ids || {})
+      ...existingIds,
+      ...incomingIds
     },
+
     meta: {
-      ...(existing.meta || {}),
-      ...(incoming.meta || {})
+      ...existingMeta,
+      ...incomingMeta
     },
+
+    primary_source: existing.primary_source || incoming.primary_source || "",
     score: Math.max(existing.score || 0, incoming.score || 0)
   };
 }
@@ -237,7 +365,7 @@ async function runWithDedupedPromise(key, fn) {
 }
 
 export async function runCategorySearch(query = "", category = "") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = cleanText(query);
   const normalizedCategory = normalizeCategory(category);
 
   if (!cleanQuery || !normalizedCategory) return [];
@@ -271,7 +399,7 @@ export async function runCategorySearch(query = "", category = "") {
 }
 
 export async function runGlobalSearch(query = "") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = cleanText(query);
 
   if (!cleanQuery) {
     return emptyGroups();
@@ -347,8 +475,14 @@ export async function addSearchResultDirectlyToLibrary({ userId, item }) {
     throw new Error("Missing userId or item");
   }
 
+  const normalizedItem = normalizeSearchItem(item);
+
+  if (!normalizedItem) {
+    throw new Error("Search item is not valid");
+  }
+
   return addToUserLibrary({
     userId,
-    entity: item
+    entity: normalizedItem
   });
 }
