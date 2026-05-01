@@ -8,7 +8,8 @@ import {
   closeAuthModal,
   setTheme,
   setLanguage,
-  setAuthStatus
+  setAuthStatus,
+  initState
 } from "./state.js";
 
 import { renderHeader } from "./components/header.js";
@@ -28,7 +29,8 @@ import { renderGuestPage } from "./pages/guest.js";
 
 import {
   getSupabaseClient,
-  getCurrentSession
+  getCurrentSession,
+  fetchUserProfileSafe
 } from "./lib/supabase-client.js";
 
 const headerRoot = document.getElementById("app-header");
@@ -77,6 +79,7 @@ function renderFatalAppError(message) {
 
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", normalizeTheme(state.theme));
+  document.documentElement.lang = normalizeLanguage(state.language);
 }
 
 function readCachedUser() {
@@ -156,17 +159,17 @@ function buildAvatarUrl(user) {
   return user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
 }
 
-function normalizeAuthUser(user) {
-  if (!user?.id) return null;
+function normalizeAuthUser(authUser, profile = null) {
+  if (!authUser?.id) return null;
 
   return {
-    id: user.id,
-    email: user.email || null,
-    username: buildUsername(user),
-    display_name: buildDisplayName(user),
-    avatar_url: buildAvatarUrl(user),
-    preferred_theme: normalizeTheme(state.theme),
-    preferred_language: normalizeLanguage(state.language)
+    id: authUser.id,
+    email: authUser.email || null,
+    username: profile?.username || buildUsername(authUser),
+    display_name: profile?.display_name || buildDisplayName(authUser),
+    avatar_url: profile?.avatar_url || buildAvatarUrl(authUser),
+    preferred_theme: normalizeTheme(profile?.preferred_theme || state.theme),
+    preferred_language: normalizeLanguage(profile?.preferred_language || state.language)
   };
 }
 
@@ -211,12 +214,17 @@ function applyUserPreferences(user) {
   }
 }
 
-function applyAuthenticatedUser(user) {
-  const normalizedUser = normalizeAuthUser(user);
+async function applyAuthenticatedUser(authUser) {
+  if (!authUser?.id) return;
 
-  if (!normalizedUser?.id) {
-    return;
-  }
+  const profile = await fetchUserProfileSafe(authUser.id).catch((error) => {
+    console.warn("Profile load skipped:", error);
+    return null;
+  });
+
+  const normalizedUser = normalizeAuthUser(authUser, profile);
+
+  if (!normalizedUser?.id) return;
 
   setUserIfChanged(normalizedUser);
   setAuthStatus("authenticated");
@@ -229,7 +237,7 @@ async function hydrateAuthState() {
     const session = await getCurrentSession();
 
     if (session?.user?.id) {
-      applyAuthenticatedUser(session.user);
+      await applyAuthenticatedUser(session.user);
       return;
     }
 
@@ -272,7 +280,9 @@ function bindAuthListener() {
       }
 
       if (session?.user?.id) {
-        applyAuthenticatedUser(session.user);
+        applyAuthenticatedUser(session.user).catch((error) => {
+          console.warn("Auth state apply skipped:", error);
+        });
 
         if (
           event === "SIGNED_IN" ||
@@ -302,7 +312,8 @@ function getHeaderSignature() {
     userId: state.user?.id || null,
     displayName: state.user?.display_name || "",
     username: state.user?.username || "",
-    avatarUrl: state.user?.avatar_url || ""
+    avatarUrl: state.user?.avatar_url || "",
+    language: state.language
   });
 }
 
@@ -322,14 +333,16 @@ function getSearchModalSignature() {
   return JSON.stringify({
     searchModalOpen: state.searchModalOpen,
     searchQuery: state.searchQuery || "",
-    searchContextCategory: state.searchContextCategory || ""
+    searchContextCategory: state.searchContextCategory || "",
+    language: state.language
   });
 }
 
 function getAuthModalSignature() {
   return JSON.stringify({
     authModalOpen: state.authModalOpen,
-    authMode: state.authMode
+    authMode: state.authMode,
+    language: state.language
   });
 }
 
@@ -401,7 +414,7 @@ async function resolveRouteRenderer(route, params) {
 function renderBootShell() {
   mainRoot.innerHTML = `
     <section style="padding:16px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
-      Загрузка…
+      ${state.language === "en" ? "Loading…" : "Загрузка…"}
     </section>
   `;
 }
@@ -436,7 +449,7 @@ function renderRouteSafely() {
 
       mainRoot.innerHTML = `
         <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
-          Не удалось открыть страницу. Вернись на главную.
+          ${state.language === "en" ? "Could not open this page. Go back home." : "Не удалось открыть страницу. Вернись на главную."}
         </div>
       `;
     });
@@ -510,6 +523,7 @@ async function init() {
     return;
   }
 
+  initState();
   subscribe(renderApp);
 
   try {
