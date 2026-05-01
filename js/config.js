@@ -24,8 +24,29 @@ export const ROUTES = {
 export const DEFAULT_THEME = "dark";
 export const DEFAULT_LANGUAGE = "ru";
 
-export const THEMES = ["light", "dark"];
+export const THEMES = ["light", "dark", "system"];
 export const LANGUAGES = ["ru", "en"];
+
+export function normalizeTheme(value = "") {
+  return THEMES.includes(value) ? value : DEFAULT_THEME;
+}
+
+export function normalizeLanguage(value = "") {
+  return LANGUAGES.includes(value) ? value : DEFAULT_LANGUAGE;
+}
+
+export function resolveSystemTheme() {
+  try {
+    return window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+  } catch {
+    return DEFAULT_THEME;
+  }
+}
+
+export function resolveAppliedTheme(value = DEFAULT_THEME) {
+  const normalized = normalizeTheme(value);
+  return normalized === "system" ? resolveSystemTheme() : normalized;
+}
 
 export const SEARCH_LIMITS = {
   MODAL_RESULTS: 15,
@@ -61,7 +82,7 @@ export const CATEGORY_LABELS_I18N = {
 };
 
 export function getCategoryLabel(language = DEFAULT_LANGUAGE, category = "") {
-  const normalizedLanguage = language === "en" ? "en" : "ru";
+  const normalizedLanguage = normalizeLanguage(language);
   return (
     CATEGORY_LABELS_I18N?.[normalizedLanguage]?.[category] ||
     CATEGORY_LABELS_I18N?.en?.[category] ||
