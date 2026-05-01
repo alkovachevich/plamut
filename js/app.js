@@ -33,6 +33,8 @@ import {
   fetchUserProfileSafe
 } from "./lib/supabase-client.js";
 
+import { repairMissingMetadata } from "./services/metadata-enrichment.js";
+
 const headerRoot = document.getElementById("app-header");
 const mainRoot = document.getElementById("app-main");
 const sidebarRoot = document.getElementById("sidebar-root");
@@ -40,11 +42,17 @@ const searchModalRoot = document.getElementById("search-modal-root");
 const authModalRoot = document.getElementById("auth-modal-root");
 
 const CACHED_USER_KEY = "plamut_cached_user";
+const AUTO_REPAIR_KEY = "plamut_auto_metadata_repair_v1";
+
+const AUTO_REPAIR_INTERVAL_MS = 1000 * 60 * 60 * 4;
+const AUTO_REPAIR_LIMIT = 25;
+const AUTO_REPAIR_DELAY_MS = 2500;
 
 let initialized = false;
 let authSubscription = null;
 let routeCleanup = null;
 let routeRenderToken = 0;
+let autoRepairStarted = false;
 
 let lastHeaderSignature = "";
 let lastSidebarSignature = "";
@@ -124,6 +132,114 @@ function clearCachedUser() {
   } catch (error) {
     console.warn("Cached user clear skipped:", error);
   }
+}
+
+function readAutoRepairState() {
+  try {
+    const raw = localStorage.getItem(AUTO_REPAIR_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAutoRepairState(value) {
+  try {
+    localStorage.setItem(AUTO_REPAIR_KEY, JSON.stringify(value || {}));
+  } catch (error) {
+    console.warn("Auto repair state save skipped:", error);
+  }
+}
+
+function shouldRunAutoRepair(userId) {
+  if (!userId) return false;
+
+  const repairState = readAutoRepairState();
+  const lastRunAt = Number(repairState[userId]?.last_run_at || 0);
+
+  return !lastRunAt || Date.now() - lastRunAt > AUTO_REPAIR_INTERVAL_MS;
+}
+
+function markAutoRepairStarted(userId) {
+  if (!userId) return;
+
+  const repairState = readAutoRepairState();
+
+  repairState[userId] = {
+    last_run_at: Date.now()
+  };
+
+  writeAutoRepairState(repairState);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function runWhenIdle(callback) {
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(callback, { timeout: 6000 });
+    return;
+  }
+
+  window.setTimeout(callback, 1200);
+}
+
+function scheduleMetadataAutoRepair(userId) {
+  const cleanUserId = String(userId || "").trim();
+
+  if (!cleanUserId) return;
+  if (autoRepairStarted) return;
+  if (!shouldRunAutoRepair(cleanUserId)) return;
+
+  autoRepairStarted = true;
+  markAutoRepairStarted(cleanUserId);
+
+  runWhenIdle(() => {
+    runMetadataAutoRepair().catch((error) => {
+      console.warn("Auto metadata repair skipped:", error);
+    });
+  });
+}
+
+async function runMetadataAutoRepair() {
+  await delay(1500);
+
+  await repairMissingMetadata({
+    category: "movies",
+    limit: AUTO_REPAIR_LIMIT
+  });
+
+  await delay(AUTO_REPAIR_DELAY_MS);
+
+  await repairMissingMetadata({
+    category: "series",
+    limit: AUTO_REPAIR_LIMIT
+  });
+
+  await delay(AUTO_REPAIR_DELAY_MS);
+
+  await repairMissingMetadata({
+    category: "books",
+    limit: AUTO_REPAIR_LIMIT
+  });
+
+  await delay(AUTO_REPAIR_DELAY_MS);
+
+  await repairMissingMetadata({
+    category: "anime",
+    limit: AUTO_REPAIR_LIMIT
+  });
+
+  await delay(AUTO_REPAIR_DELAY_MS);
+
+  await repairMissingMetadata({
+    category: "manga",
+    limit: AUTO_REPAIR_LIMIT
+  });
 }
 
 function buildUsername(user) {
@@ -230,6 +346,7 @@ async function applyAuthenticatedUser(authUser) {
   setAuthStatus("authenticated");
   writeCachedUser(normalizedUser);
   applyUserPreferences(normalizedUser);
+  scheduleMetadataAutoRepair(normalizedUser.id);
 }
 
 async function hydrateAuthState() {
@@ -243,6 +360,7 @@ async function hydrateAuthState() {
 
     if (state.user?.id) {
       setAuthStatus("authenticated");
+      scheduleMetadataAutoRepair(state.user.id);
       return;
     }
 
@@ -254,6 +372,7 @@ async function hydrateAuthState() {
 
     if (state.user?.id) {
       setAuthStatus("authenticated");
+      scheduleMetadataAutoRepair(state.user.id);
       return;
     }
 
@@ -507,6 +626,7 @@ function restoreCachedUserBeforeNetwork() {
   if (cachedUser?.id) {
     setUserIfChanged(cachedUser);
     setAuthStatus("authenticated");
+    scheduleMetadataAutoRepair(cachedUser.id);
     return true;
   }
 
@@ -541,6 +661,7 @@ async function init() {
 
     if (state.user?.id) {
       setAuthStatus("authenticated");
+      scheduleMetadataAutoRepair(state.user.id);
       return;
     }
 
