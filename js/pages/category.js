@@ -10,12 +10,15 @@ import {
   setCategoryViewState
 } from "../state.js";
 import { clampText, escapeHtml, safeArray } from "../utils.js";
-import { getSupabaseClient } from "../lib/supabase-client.js";
+import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import {
   loadUserLibrary,
+  refreshUserLibrary,
   updateCachedLibraryItem,
   removeCachedLibraryItem
 } from "../services/library-cache.js";
+
+const USER_MEDIA_UPDATE_TIMEOUT_MS = 8000;
 
 const USER_MEDIA_UPDATE_SELECT = `
   id,
@@ -43,12 +46,16 @@ const USER_MEDIA_UPDATE_SELECT = `
 async function updateUserMedia(userMediaId, payload) {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("user_media")
-    .update(payload)
-    .eq("id", userMediaId)
-    .select(USER_MEDIA_UPDATE_SELECT)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .update(payload)
+      .eq("id", userMediaId)
+      .select(USER_MEDIA_UPDATE_SELECT)
+      .maybeSingle(),
+    "Обновление элемента библиотеки",
+    USER_MEDIA_UPDATE_TIMEOUT_MS
+  );
 
   if (error) throw error;
   return data;
@@ -57,10 +64,14 @@ async function updateUserMedia(userMediaId, payload) {
 async function removeFromLibrary(userMediaId) {
   const supabase = getSupabaseClient();
 
-  const { error } = await supabase
-    .from("user_media")
-    .delete()
-    .eq("id", userMediaId);
+  const { error } = await withTimeout(
+    supabase
+      .from("user_media")
+      .delete()
+      .eq("id", userMediaId),
+    "Удаление из библиотеки",
+    USER_MEDIA_UPDATE_TIMEOUT_MS
+  );
 
   if (error) throw error;
   return true;
@@ -139,6 +150,7 @@ function renderCover(entity = {}) {
         src="${escapeHtml(cover)}"
         alt="${escapeHtml(title)}"
         loading="lazy"
+        decoding="async"
         onerror="this.style.display='none';this.parentElement.classList.add('is-empty-cover');"
       />
     `;
@@ -191,8 +203,8 @@ function renderLibraryCard(item) {
       <div class="library-card__body">
         <div class="library-card__top">
           <div class="library-card__badges">
-            <span class="library-badge">${escapeHtml(status)}</span>
-            ${folderName ? `<span class="library-badge folder">${escapeHtml(folderName)}</span>` : ""}
+            <span class="library-badge" data-card-status>${escapeHtml(status)}</span>
+            ${folderName ? `<span class="library-badge folder" data-card-folder>${escapeHtml(folderName)}</span>` : ""}
           </div>
 
           <div class="library-card__menu-wrap">
@@ -244,11 +256,21 @@ function renderEmptyState(categoryTitle) {
   `;
 }
 
-function renderErrorState() {
+function renderLoadingState() {
+  return `
+    <div class="empty-state">
+      <div class="empty-state__title">Загрузка…</div>
+    </div>
+  `;
+}
+
+function renderErrorState(hasItems = false) {
+  if (hasItems) return "";
+
   return `
     <div class="empty-state">
       <div class="empty-state__title">Ошибка загрузки</div>
-      <div class="empty-state__text">Не удалось загрузить библиотеку.</div>
+      <div class="empty-state__text">Не удалось загрузить библиотеку. Если данные есть в кэше, они появятся после обновления страницы.</div>
     </div>
   `;
 }
@@ -261,6 +283,7 @@ function closeAllMenus(root) {
 
 function renderGuestState(root, title) {
   root.innerHTML = `
+    ${renderStyles()}
     <section class="category-guest">
       <div class="category-guest__title">${escapeHtml(title)}</div>
       <div class="category-guest__card">
@@ -370,6 +393,11 @@ function renderStyles() {
       .library-card:hover {
         transform: translateY(-2px);
         border-color: var(--border);
+      }
+
+      .library-card.is-busy {
+        pointer-events: none;
+        opacity: .72;
       }
 
       .library-card__cover {
@@ -514,6 +542,11 @@ function renderStyles() {
         color: var(--danger);
       }
 
+      .library-card__menu button:disabled {
+        opacity: .55;
+        cursor: default;
+      }
+
       .empty-state {
         padding: 40px 20px;
         text-align: center;
@@ -593,22 +626,55 @@ function renderStyles() {
   `;
 }
 
+function sameItemList(a = [], b = []) {
+  if (a.length !== b.length) return false;
+
+  return a.every((item, index) => {
+    const other = b[index];
+
+    return JSON.stringify({
+      id: item?.id || null,
+      status: item?.status || "",
+      folder_name: item?.folder_name || "",
+      updated_at: item?.updated_at || "",
+      entity_id: item?.entity_id || null,
+      title: item?.media_entities?.title_primary || "",
+      cover: item?.media_entities?.cover_url || "",
+      year: item?.media_entities?.year || null
+    }) === JSON.stringify({
+      id: other?.id || null,
+      status: other?.status || "",
+      folder_name: other?.folder_name || "",
+      updated_at: other?.updated_at || "",
+      entity_id: other?.entity_id || null,
+      title: other?.media_entities?.title_primary || "",
+      cover: other?.media_entities?.cover_url || "",
+      year: other?.media_entities?.year || null
+    });
+  });
+}
+
+function openFolderDialog(currentFolder = "") {
+  return window.prompt(
+    "Название папки. Оставь пустым, чтобы убрать папку.",
+    currentFolder
+  );
+}
+
 export async function renderCategoryPage(root, params = {}) {
   const category = params.category || "unknown";
   const title = getCategoryLabel(state.language, category);
   const userId = state.user?.id;
   const authStatus = state.authStatus;
 
-  if (authStatus === "restoring") {
+  if (!userId && authStatus === "restoring") {
     root.innerHTML = `
       ${renderStyles()}
       <section class="page">
         <div class="page-header">
           <div class="page-title">${escapeHtml(title)}</div>
         </div>
-        <div class="empty-state">
-          <div class="empty-state__title">Восстановление сессии…</div>
-        </div>
+        ${renderLoadingState()}
       </section>
     `;
     return () => {};
@@ -616,7 +682,7 @@ export async function renderCategoryPage(root, params = {}) {
 
   if (!userId) {
     renderGuestState(root, title);
-    return;
+    return () => {};
   }
 
   const savedViewState = getCategoryViewState(category) || {};
@@ -624,6 +690,7 @@ export async function renderCategoryPage(root, params = {}) {
   let activeFolder = savedViewState.folder || "all";
   let activeSort = savedViewState.sort || "recent";
   let isDestroyed = false;
+  let isRefreshing = false;
 
   root.innerHTML = `
     ${renderStyles()}
@@ -645,9 +712,7 @@ export async function renderCategoryPage(root, params = {}) {
       <div class="folder-row" data-folders></div>
 
       <div data-content>
-        <div class="empty-state">
-          <div class="empty-state__title">Загрузка…</div>
-        </div>
+        ${renderLoadingState()}
       </div>
     </section>
   `;
@@ -660,11 +725,11 @@ export async function renderCategoryPage(root, params = {}) {
     sortSelect.value = activeSort;
   }
 
+  setCurrentCategory(category);
+
   function findItemById(userMediaId) {
     return items.find((item) => Number(item.id) === Number(userMediaId)) || null;
   }
-
-  setCurrentCategory(category);
 
   function persistViewState() {
     setCategoryViewState(category, {
@@ -673,8 +738,18 @@ export async function renderCategoryPage(root, params = {}) {
     });
   }
 
+  function normalizeActiveFolder() {
+    const existingFolders = new Set(uniqueFolders(items));
+
+    if (activeFolder !== "all" && !existingFolders.has(activeFolder)) {
+      activeFolder = "all";
+    }
+  }
+
   function renderList() {
     if (isDestroyed || !foldersRoot || !contentRoot) return;
+
+    normalizeActiveFolder();
 
     const folders = uniqueFolders(items);
     const visibleItems = sortItems(filterItems(items, activeFolder), activeSort);
@@ -688,158 +763,44 @@ export async function renderCategoryPage(root, params = {}) {
         </div>
       `
       : renderEmptyState(title);
+  }
 
-    foldersRoot.querySelectorAll("[data-folder]").forEach((button) => {
-      button.addEventListener("click", () => {
-        activeFolder = button.dataset.folder || "all";
-        persistViewState();
-        renderList();
+  function applyItems(nextItems = [], { force = false } = {}) {
+    const normalized = safeArray(nextItems);
+
+    if (!force && sameItemList(items, normalized)) {
+      return;
+    }
+
+    items = normalized;
+    persistViewState();
+    renderList();
+  }
+
+  function setCardBusy(userMediaId, busy = true) {
+    const card = contentRoot?.querySelector(`[data-user-media-id="${userMediaId}"]`);
+    if (!card) return;
+    card.classList.toggle("is-busy", Boolean(busy));
+  }
+
+  async function refreshVisibleListInBackground() {
+    if (isDestroyed || isRefreshing) return;
+
+    isRefreshing = true;
+
+    try {
+      const fresh = await refreshUserLibrary(userId, {
+        category,
+        mode: "list"
       });
-    });
 
-    contentRoot.querySelectorAll(".library-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        const key = card.dataset.key || "";
-        const itemCategory = card.dataset.category || category;
-        const userMediaId = Number(card.dataset.userMediaId);
-        const item = findItemById(userMediaId);
-
-        if (!key) return;
-
-        if (item?.media_entities) {
-          setTemporaryCardItem(item.media_entities);
-        }
-
-        navigate("/card", {
-          key,
-          category: itemCategory
-        });
-      });
-    });
-
-    contentRoot.querySelectorAll('[data-action="toggle-menu"]').forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const userMediaId = button.dataset.userMediaId;
-        const menu = contentRoot.querySelector(`[data-menu="${userMediaId}"]`);
-        const isOpen = menu?.classList.contains("is-open");
-
-        closeAllMenus(contentRoot);
-
-        if (menu && !isOpen) {
-          menu.classList.add("is-open");
-        }
-      });
-    });
-
-    contentRoot.querySelectorAll('[data-action="set-status"]').forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const userMediaId = Number(button.dataset.userMediaId);
-        const newStatus = button.dataset.value;
-
-        if (!userMediaId || !newStatus) return;
-
-        try {
-          button.disabled = true;
-
-          const updated = await updateUserMedia(userMediaId, {
-            status: newStatus
-          });
-
-          items = items.map((item) =>
-            Number(item.id) === userMediaId ? updated : item
-          );
-
-          updateCachedLibraryItem(userId, updated, {
-            category: updated.category || category
-          });
-
-          renderList();
-        } catch (error) {
-          console.warn("Update status error:", error);
-          button.disabled = false;
-        }
-      });
-    });
-
-    contentRoot.querySelectorAll('[data-action="set-folder"]').forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const userMediaId = Number(button.dataset.userMediaId);
-        if (!userMediaId) return;
-
-        const current = findItemById(userMediaId);
-        const currentFolder = current?.folder_name || "";
-
-        const folderName = window.prompt(
-          "Название папки. Оставь пустым, чтобы убрать папку.",
-          currentFolder
-        );
-
-        if (folderName === null) return;
-
-        const cleanFolder = String(folderName || "").trim();
-
-        try {
-          button.disabled = true;
-
-          const updated = await updateUserMedia(userMediaId, {
-            folder_name: cleanFolder || null
-          });
-
-          items = items.map((item) =>
-            Number(item.id) === userMediaId ? updated : item
-          );
-
-          updateCachedLibraryItem(userId, updated, {
-            category: updated.category || category
-          });
-
-          if (activeFolder !== "all" && activeFolder !== cleanFolder) {
-            activeFolder = "all";
-          }
-
-          renderList();
-        } catch (error) {
-          console.warn("Update folder error:", error);
-          button.disabled = false;
-        }
-      });
-    });
-
-    contentRoot.querySelectorAll('[data-action="remove"]').forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const userMediaId = Number(button.dataset.userMediaId);
-        if (!userMediaId) return;
-
-        try {
-          button.disabled = true;
-
-          await removeFromLibrary(userMediaId);
-
-          items = items.filter((item) => Number(item.id) !== userMediaId);
-
-          removeCachedLibraryItem(userId, userMediaId, {
-            category
-          });
-
-          renderList();
-        } catch (error) {
-          console.warn("Remove from library error:", error);
-          button.disabled = false;
-        }
-      });
-    });
+      if (isDestroyed) return;
+      applyItems(fresh);
+    } catch (error) {
+      console.warn("Category background refresh skipped:", error);
+    } finally {
+      isRefreshing = false;
+    }
   }
 
   root.querySelector('[data-action="add"]')?.addEventListener("click", () => {
@@ -852,6 +813,181 @@ export async function renderCategoryPage(root, params = {}) {
     renderList();
   });
 
+  foldersRoot?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-folder]");
+    if (!button) return;
+
+    activeFolder = button.dataset.folder || "all";
+    persistViewState();
+    renderList();
+  });
+
+  contentRoot?.addEventListener("click", async (event) => {
+    const actionNode = event.target.closest("[data-action]");
+    const cardNode = event.target.closest(".library-card");
+
+    if (!actionNode && !cardNode) {
+      closeAllMenus(contentRoot);
+      return;
+    }
+
+    const action = actionNode?.dataset?.action || cardNode?.dataset?.action || "";
+
+    if (action === "toggle-menu") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const userMediaId = actionNode.dataset.userMediaId;
+      const menu = contentRoot.querySelector(`[data-menu="${userMediaId}"]`);
+      const isOpen = menu?.classList.contains("is-open");
+
+      closeAllMenus(contentRoot);
+
+      if (menu && !isOpen) {
+        menu.classList.add("is-open");
+      }
+
+      return;
+    }
+
+    if (action === "set-status") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const button = actionNode;
+      const userMediaId = Number(button.dataset.userMediaId);
+      const newStatus = button.dataset.value;
+
+      if (!userMediaId || !newStatus) return;
+
+      try {
+        button.disabled = true;
+        setCardBusy(userMediaId, true);
+
+        const updated = await updateUserMedia(userMediaId, {
+          status: newStatus
+        });
+
+        if (!updated) return;
+
+        items = items.map((item) =>
+          Number(item.id) === userMediaId ? updated : item
+        );
+
+        updateCachedLibraryItem(userId, updated, {
+          category: updated.category || category
+        });
+
+        renderList();
+      } catch (error) {
+        console.warn("Update status error:", error);
+        button.disabled = false;
+        setCardBusy(userMediaId, false);
+      }
+
+      return;
+    }
+
+    if (action === "set-folder") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const button = actionNode;
+      const userMediaId = Number(button.dataset.userMediaId);
+      if (!userMediaId) return;
+
+      const current = findItemById(userMediaId);
+      const currentFolder = current?.folder_name || "";
+      const folderName = openFolderDialog(currentFolder);
+
+      if (folderName === null) return;
+
+      const cleanFolder = String(folderName || "").trim();
+
+      try {
+        button.disabled = true;
+        setCardBusy(userMediaId, true);
+
+        const updated = await updateUserMedia(userMediaId, {
+          folder_name: cleanFolder || null
+        });
+
+        if (!updated) return;
+
+        items = items.map((item) =>
+          Number(item.id) === userMediaId ? updated : item
+        );
+
+        updateCachedLibraryItem(userId, updated, {
+          category: updated.category || category
+        });
+
+        if (activeFolder !== "all" && activeFolder !== cleanFolder) {
+          activeFolder = "all";
+        }
+
+        renderList();
+      } catch (error) {
+        console.warn("Update folder error:", error);
+        button.disabled = false;
+        setCardBusy(userMediaId, false);
+      }
+
+      return;
+    }
+
+    if (action === "remove") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const button = actionNode;
+      const userMediaId = Number(button.dataset.userMediaId);
+      if (!userMediaId) return;
+
+      try {
+        button.disabled = true;
+        setCardBusy(userMediaId, true);
+
+        await removeFromLibrary(userMediaId);
+
+        items = items.filter((item) => Number(item.id) !== userMediaId);
+
+        removeCachedLibraryItem(userId, userMediaId, {
+          category
+        });
+
+        renderList();
+      } catch (error) {
+        console.warn("Remove from library error:", error);
+        button.disabled = false;
+        setCardBusy(userMediaId, false);
+      }
+
+      return;
+    }
+
+    if (action === "open-card") {
+      const card = cardNode || actionNode.closest(".library-card");
+      if (!card) return;
+
+      const key = card.dataset.key || "";
+      const itemCategory = card.dataset.category || category;
+      const userMediaId = Number(card.dataset.userMediaId);
+      const item = findItemById(userMediaId);
+
+      if (!key) return;
+
+      if (item?.media_entities) {
+        setTemporaryCardItem(item.media_entities);
+      }
+
+      navigate("/card", {
+        key,
+        category: itemCategory
+      });
+    }
+  });
+
   root.addEventListener("click", (event) => {
     if (!event.target.closest(".library-card__menu-wrap")) {
       closeAllMenus(root);
@@ -859,27 +995,23 @@ export async function renderCategoryPage(root, params = {}) {
   });
 
   try {
-    items = await loadUserLibrary(userId, {
+    const cachedItems = await loadUserLibrary(userId, {
       category,
       mode: "list",
       allowStale: true,
-      backgroundRefresh: false
+      backgroundRefresh: true
     });
 
     if (isDestroyed) return;
 
-    const existingFolders = new Set(uniqueFolders(items));
-    if (activeFolder !== "all" && !existingFolders.has(activeFolder)) {
-      activeFolder = "all";
-    }
+    applyItems(cachedItems, { force: true });
 
-    persistViewState();
-    renderList();
+    refreshVisibleListInBackground();
   } catch (error) {
     console.warn("Category library load error:", error);
 
     if (contentRoot) {
-      contentRoot.innerHTML = renderErrorState();
+      contentRoot.innerHTML = renderErrorState(items.length > 0);
     }
   }
 
