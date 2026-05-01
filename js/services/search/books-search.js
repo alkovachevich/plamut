@@ -6,7 +6,6 @@ const SEARCH_TIMEOUT_MS = 9000;
 const SUPABASE_SEARCH_TIMEOUT_MS = 6000;
 const WIKIDATA_LIMIT = 14;
 const OPEN_LIBRARY_LIMIT = 18;
-const PLACEHOLDER_COVER_URL = "/placeholder.jpg";
 
 const WIKIDATA_BOOK_TYPES = new Set([
   "Q571",
@@ -43,6 +42,10 @@ function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
   }).finally(() => {
     clearTimeout(timer);
   });
+}
+
+function clean(value = "") {
+  return String(value || "").trim();
 }
 
 function hasCyrillic(value = "") {
@@ -84,7 +87,7 @@ function getBookAuthors(item = {}) {
     ...safeArray(item?.meta?.authors),
     ...safeArray(item?.authors),
     ...safeArray(item?.author_names)
-  ].map((value) => String(value || "").trim()).filter(Boolean));
+  ].map(clean).filter(Boolean));
 }
 
 function getTitleKeys(item = {}) {
@@ -103,8 +106,8 @@ function getTitleKeys(item = {}) {
 }
 
 function pickBetterText(existingValue = "", incomingValue = "") {
-  const existing = String(existingValue || "").trim();
-  const incoming = String(incomingValue || "").trim();
+  const existing = clean(existingValue);
+  const incoming = clean(incomingValue);
 
   if (!existing) return incoming;
   if (!incoming) return existing;
@@ -113,9 +116,9 @@ function pickBetterText(existingValue = "", incomingValue = "") {
 }
 
 function pickTitleByLanguage(row = {}, language = "ru") {
-  const titleRu = String(row.title_ru || "").trim();
-  const titleEn = String(row.title_en || "").trim();
-  const originalTitle = String(row.original_title || row.title_primary || titleEn || titleRu || "").trim();
+  const titleRu = clean(row.title_ru);
+  const titleEn = clean(row.title_en);
+  const originalTitle = clean(row.original_title || row.title_primary || titleEn || titleRu);
 
   if (language === "en") {
     return titleEn || titleRu || originalTitle;
@@ -125,9 +128,9 @@ function pickTitleByLanguage(row = {}, language = "ru") {
 }
 
 function wikimediaFileUrl(filename = "") {
-  const clean = String(filename || "").trim();
-  if (!clean) return "";
-  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(clean)}`;
+  const value = clean(filename);
+  if (!value) return "";
+  return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(value)}`;
 }
 
 function openLibraryCoverUrlFromId(coverId) {
@@ -135,12 +138,11 @@ function openLibraryCoverUrlFromId(coverId) {
 }
 
 function buildOpenLibraryCover(doc = {}) {
-  if (doc.cover_i) return openLibraryCoverUrlFromId(doc.cover_i);
-  return "";
+  return doc.cover_i ? openLibraryCoverUrlFromId(doc.cover_i) : "";
 }
 
 function normalizeOpenLibraryWorkKey(value = "") {
-  const raw = String(value || "").trim();
+  const raw = clean(value);
   if (!raw) return "";
   return raw.startsWith("/works/") ? raw.replace("/works/", "") : raw;
 }
@@ -174,18 +176,19 @@ function normalizeBookItem(raw = {}, language = "ru") {
     ? raw.external_ids
     : {};
 
-  const wikidataId = String(ids.wikidata || "").trim();
+  const wikidataId = clean(ids.wikidata);
+  const openLibraryWork = normalizeOpenLibraryWorkKey(ids.openlibrary_work || ids.openlibrary || raw.openlibrary_work || "");
 
   const authors = uniqueArray([
     ...safeArray(raw?.meta?.author_names),
     ...safeArray(raw?.authors),
     ...safeArray(raw?.author_names)
-  ].map((value) => String(value || "").trim()).filter(Boolean));
+  ].map(clean).filter(Boolean));
 
   const title =
-    String(raw.title || "").trim() ||
+    clean(raw.title) ||
     pickTitleByLanguage(raw, language) ||
-    String(raw.original_title || "").trim();
+    clean(raw.original_title);
 
   if (!title) return null;
 
@@ -193,27 +196,47 @@ function normalizeBookItem(raw = {}, language = "ru") {
     ? `books:wikidata:${wikidataId}`
     : `books:work:${normalizeWorkKey(title, authors[0] || "")}`;
 
+  const titleRu = clean(raw.title_ru);
+  const titleEn = clean(raw.title_en);
+  const descriptionRu = clean(raw.description_ru || raw?.meta?.description_ru || "");
+  const descriptionEn = clean(raw.description_en || raw?.meta?.description_en || raw?.meta?.synopsis || "");
+
   return {
     canonical_key: canonicalKey,
     category: "books",
+
     title,
-    title_ru: String(raw.title_ru || "").trim(),
-    title_en: String(raw.title_en || "").trim(),
-    original_title: String(raw.original_title || raw.title_en || raw.title_ru || title).trim(),
+    title_primary: language === "en"
+      ? titleEn || titleRu || title
+      : titleRu || titleEn || title,
+    title_ru: titleRu,
+    title_en: titleEn,
+    original_title: clean(raw.original_title || titleEn || titleRu || title),
+
     year: safeYear(raw.year),
-    cover_url: String(raw.cover_url || "").trim(),
-    description_ru: String(raw.description_ru || "").trim(),
-    description_en: String(raw.description_en || "").trim(),
-    aliases: uniqueArray(safeArray(raw.aliases).map((value) => String(value || "").trim()).filter(Boolean)),
+    cover_url: clean(raw.cover_url),
+
+    description_ru: descriptionRu,
+    description_en: descriptionEn,
+
+    aliases: uniqueArray(safeArray(raw.aliases).map(clean).filter(Boolean)),
+
     external_ids: {
       wikidata: wikidataId || null,
-      openlibrary_work: ids.openlibrary_work || null
+      openlibrary_work: openLibraryWork || null
     },
-    primary_source: String(raw.primary_source || "").trim(),
+
+    primary_source: clean(raw.primary_source || raw.source || ""),
     score: Number.isFinite(Number(raw.score)) ? Number(raw.score) : 0,
+
     meta: {
       ...(raw.meta && typeof raw.meta === "object" ? raw.meta : {}),
-      author_names: authors
+      source: clean(raw.primary_source || raw.source || raw?.meta?.source || ""),
+      author_names: authors,
+      metadata_status:
+        raw.cover_url && (descriptionRu || descriptionEn)
+          ? "partial"
+          : "needs_enrichment"
     }
   };
 }
@@ -227,7 +250,7 @@ function mapSupabaseBookRow(row = {}, language = "ru") {
     row.title_ru,
     row.title_en,
     row.original_title
-  ].map((value) => String(value || "").trim()).filter(Boolean));
+  ].map(clean).filter(Boolean));
 
   return normalizeBookItem({
     title: pickTitleByLanguage(row, language),
@@ -250,7 +273,7 @@ function mapSupabaseBookRow(row = {}, language = "ru") {
 }
 
 async function fetchBooksFromSupabase(query = "", language = "ru") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = clean(query);
   if (!cleanQuery) return [];
 
   try {
@@ -306,7 +329,7 @@ async function fetchBooksFromSupabase(query = "", language = "ru") {
     aliasRows.forEach((row) => {
       if (!row?.entity_id) return;
       if (!aliasByEntityId.has(row.entity_id)) aliasByEntityId.set(row.entity_id, []);
-      aliasByEntityId.get(row.entity_id).push(String(row.alias || "").trim());
+      aliasByEntityId.get(row.entity_id).push(clean(row.alias));
     });
 
     return dedupeBooks(
@@ -315,7 +338,8 @@ async function fetchBooksFromSupabase(query = "", language = "ru") {
           ...row,
           aliases: aliasByEntityId.get(row.id) || []
         }, language))
-        .filter(Boolean)
+        .filter(Boolean),
+      language
     );
   } catch (error) {
     console.warn("Books Supabase search skipped:", error);
@@ -324,7 +348,7 @@ async function fetchBooksFromSupabase(query = "", language = "ru") {
 }
 
 async function fetchWikidataSearch(query = "") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = clean(query);
   if (!cleanQuery) return [];
 
   const runSearch = async (language = "ru") => {
@@ -363,7 +387,7 @@ async function fetchWikidataSearch(query = "") {
 }
 
 async function fetchWikidataEntities(ids = []) {
-  const cleanIds = uniqueArray(safeArray(ids).map(String).filter(Boolean));
+  const cleanIds = uniqueArray(safeArray(ids).map(clean).filter(Boolean));
   if (!cleanIds.length) return [];
 
   const url = new URL("https://www.wikidata.org/w/api.php");
@@ -456,7 +480,7 @@ function isLikelyBookEntity(entity = {}) {
 }
 
 function getYearFromWikidataTime(value) {
-  const time = String(value?.time || "").trim();
+  const time = clean(value?.time);
   if (!time) return null;
 
   const match = time.match(/[+-]?(\d{4})/);
@@ -467,7 +491,7 @@ function getYearFromWikidataTime(value) {
 }
 
 async function fetchWikidataLabels(ids = []) {
-  const cleanIds = uniqueArray(safeArray(ids).map(String).filter(Boolean)).slice(0, 20);
+  const cleanIds = uniqueArray(safeArray(ids).map(clean).filter(Boolean)).slice(0, 20);
   if (!cleanIds.length) return new Map();
 
   try {
@@ -475,12 +499,12 @@ async function fetchWikidataLabels(ids = []) {
     const map = new Map();
 
     entities.forEach((entity) => {
-      const id = String(entity?.id || "").trim();
+      const id = clean(entity?.id);
       if (!id || id === "-1") return;
 
       map.set(id, {
-        ru: String(entity?.labels?.ru?.value || "").trim(),
-        en: String(entity?.labels?.en?.value || "").trim()
+        ru: clean(entity?.labels?.ru?.value),
+        en: clean(entity?.labels?.en?.value)
       });
     });
 
@@ -492,21 +516,21 @@ async function fetchWikidataLabels(ids = []) {
 }
 
 function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map()) {
-  const wikidataId = String(entity?.id || "").trim();
+  const wikidataId = clean(entity?.id);
   if (!wikidataId || wikidataId === "-1") return null;
   if (!isLikelyBookEntity(entity)) return null;
 
-  const titleRu = String(entity?.labels?.ru?.value || "").trim();
-  const titleEn = String(entity?.labels?.en?.value || "").trim();
-  const descriptionRu = String(entity?.descriptions?.ru?.value || "").trim();
-  const descriptionEn = String(entity?.descriptions?.en?.value || "").trim();
+  const titleRu = clean(entity?.labels?.ru?.value);
+  const titleEn = clean(entity?.labels?.en?.value);
+  const descriptionRu = clean(entity?.descriptions?.ru?.value);
+  const descriptionEn = clean(entity?.descriptions?.en?.value);
 
   const aliasesRu = safeArray(entity?.aliases?.ru).map((row) => row?.value).filter(Boolean);
   const aliasesEn = safeArray(entity?.aliases?.en).map((row) => row?.value).filter(Boolean);
 
   const title = language === "en"
-    ? (titleEn || titleRu)
-    : (titleRu || titleEn);
+    ? titleEn || titleRu
+    : titleRu || titleEn;
 
   if (!title) return null;
 
@@ -601,7 +625,8 @@ async function fetchWikidataBooks(query = "", language = "ru") {
     return dedupeBooks(
       filtered
         .map((entity) => mapWikidataEntity(entity, language, labelMap))
-        .filter(Boolean)
+        .filter(Boolean),
+      language
     );
   } catch (error) {
     console.warn("Wikidata books search failed:", error);
@@ -610,7 +635,7 @@ async function fetchWikidataBooks(query = "", language = "ru") {
 }
 
 async function fetchOpenLibraryByTitle(query = "") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = clean(query);
   if (!cleanQuery) return [];
 
   const url = new URL("https://openlibrary.org/search.json");
@@ -644,6 +669,26 @@ async function fetchOpenLibraryByTitle(query = "") {
   return safeArray(payload?.docs);
 }
 
+async function fetchOpenLibraryWorkDescription(workKey = "") {
+  const cleanWorkKey = normalizeOpenLibraryWorkKey(workKey);
+  if (!cleanWorkKey) return "";
+
+  try {
+    const response = await fetchWithTimeout(`https://openlibrary.org/works/${encodeURIComponent(cleanWorkKey)}.json`, {
+      headers: { Accept: "application/json" }
+    });
+
+    if (!response.ok) return "";
+
+    const payload = await response.json();
+    return typeof payload.description === "string"
+      ? clean(payload.description)
+      : clean(payload.description?.value);
+  } catch {
+    return "";
+  }
+}
+
 function extractOpenLibrarySeriesName(doc = {}) {
   const subjectPool = [
     ...safeArray(doc?.subject),
@@ -652,15 +697,15 @@ function extractOpenLibrarySeriesName(doc = {}) {
     ...safeArray(doc?.time)
   ];
 
-  const subjects = subjectPool.map((value) => String(value || "").trim()).filter(Boolean);
+  const subjects = subjectPool.map(clean).filter(Boolean);
 
   return subjects.find((value) =>
     /(book series|книжн(ая|ой) серия|цикл|series)/i.test(value)
   ) || "";
 }
 
-function mapOpenLibraryDoc(doc = {}, language = "ru") {
-  const sourceTitle = String(doc?.title || "").trim();
+async function mapOpenLibraryDoc(doc = {}, language = "ru") {
+  const sourceTitle = clean(doc?.title);
 
   if (isNoisyOpenLibraryTitle(sourceTitle)) {
     return null;
@@ -675,12 +720,13 @@ function mapOpenLibraryDoc(doc = {}, language = "ru") {
   const titleEn = sourceTitle;
 
   const title = language === "en"
-    ? (titleEn || titleRu || sourceTitle)
-    : (titleRu || titleEn || sourceTitle);
+    ? titleEn || titleRu || sourceTitle
+    : titleRu || titleEn || sourceTitle;
 
   if (!title) return null;
 
   const seriesName = extractOpenLibrarySeriesName(doc);
+  const descriptionEn = await fetchOpenLibraryWorkDescription(workKey);
 
   return normalizeBookItem({
     title,
@@ -690,18 +736,18 @@ function mapOpenLibraryDoc(doc = {}, language = "ru") {
     year: doc?.first_publish_year || null,
     cover_url: buildOpenLibraryCover(doc),
     description_ru: "",
-    description_en: "",
+    description_en: descriptionEn,
     aliases: uniqueArray([
       sourceTitle,
       ...alternatives,
       doc?.subtitle,
       ...authors
-    ].map((value) => String(value || "").trim()).filter(Boolean)),
+    ].map(clean).filter(Boolean)),
     external_ids: {
       openlibrary_work: workKey || null
     },
     primary_source: "openlibrary",
-    score: 150,
+    score: descriptionEn ? 190 : 150,
     meta: {
       source: "openlibrary",
       openlibrary_work: workKey || null,
@@ -723,15 +769,16 @@ async function fetchOpenLibraryBooks(query = "", wikidataItems = [], language = 
       item.title_en,
       item.original_title
     ])
-  ].map((value) => String(value || "").trim()).filter(Boolean)).slice(0, 4);
+  ].map(clean).filter(Boolean)).slice(0, 4);
 
   const titleResults = await Promise.allSettled(
     titleQueries.map((value) => fetchOpenLibraryByTitle(value))
   );
 
-  return dedupeBooks([
-    ...titleResults.flatMap((result) => result.status === "fulfilled" ? result.value : [])
-  ].map((doc) => mapOpenLibraryDoc(doc, language)).filter(Boolean));
+  const docs = titleResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  const mapped = await Promise.all(docs.map((doc) => mapOpenLibraryDoc(doc, language)));
+
+  return dedupeBooks(mapped.filter(Boolean), language);
 }
 
 function hasSharedTitle(a = {}, b = {}) {
@@ -753,10 +800,13 @@ function hasSharedSeries(a = {}, b = {}) {
 function areSameBook(a = {}, b = {}) {
   if (a.category !== "books" || b.category !== "books") return false;
 
-  const aWikidata = String(a?.external_ids?.wikidata || "").trim();
-  const bWikidata = String(b?.external_ids?.wikidata || "").trim();
+  const aWikidata = clean(a?.external_ids?.wikidata);
+  const bWikidata = clean(b?.external_ids?.wikidata);
+  const aOpenLibrary = clean(a?.external_ids?.openlibrary_work);
+  const bOpenLibrary = clean(b?.external_ids?.openlibrary_work);
 
   if (aWikidata && bWikidata && aWikidata === bWikidata) return true;
+  if (aOpenLibrary && bOpenLibrary && aOpenLibrary === bOpenLibrary) return true;
   if (hasSharedTitle(a, b) && hasSharedAuthor(a, b)) return true;
   if (hasSharedTitle(a, b) && hasSharedSeries(a, b)) return true;
 
@@ -764,21 +814,17 @@ function areSameBook(a = {}, b = {}) {
 }
 
 function pickBestCover(existing = "", incoming = "") {
-  const current = String(existing || "").trim();
-  const next = String(incoming || "").trim();
+  const current = clean(existing);
+  const next = clean(incoming);
 
   if (!current) return next;
   if (!next) return current;
-
-  const currentIsPlaceholder = current === PLACEHOLDER_COVER_URL;
-  const nextIsPlaceholder = next === PLACEHOLDER_COVER_URL;
-
-  if (currentIsPlaceholder && !nextIsPlaceholder) return next;
+  if (current === "/placeholder.jpg" && next !== "/placeholder.jpg") return next;
 
   return current;
 }
 
-function mergeBookItems(existing = {}, incoming = {}) {
+function mergeBookItems(existing = {}, incoming = {}, language = "ru") {
   const existingIds = existing.external_ids || {};
   const incomingIds = incoming.external_ids || {};
   const existingMeta = existing.meta && typeof existing.meta === "object" ? existing.meta : {};
@@ -787,8 +833,7 @@ function mergeBookItems(existing = {}, incoming = {}) {
   const wikidataId = existingIds.wikidata || incomingIds.wikidata || null;
   const title = pickBetterText(existing.title, incoming.title);
 
-  const wikidataItem = existingIds.wikidata ? existing : incomingIds.wikidata ? incoming : null;
-  const resolvedAuthors = wikidataItem ? getBookAuthors(wikidataItem) : uniqueArray([
+  const resolvedAuthors = uniqueArray([
     ...getBookAuthors(existing),
     ...getBookAuthors(incoming)
   ]);
@@ -818,8 +863,8 @@ function mergeBookItems(existing = {}, incoming = {}) {
     primary_source: wikidataId ? "wikidata" : (existing.primary_source || incoming.primary_source || "merged"),
     score: Math.max(existing.score || 0, incoming.score || 0),
     meta: {
-      ...(incomingMeta || {}),
-      ...(existingMeta || {}),
+      ...incomingMeta,
+      ...existingMeta,
       author_names: resolvedAuthors,
       series_name: existingMeta.series_name || incomingMeta.series_name || "",
       series_candidates: uniqueArray([
@@ -831,20 +876,20 @@ function mergeBookItems(existing = {}, incoming = {}) {
         ...(incomingMeta.wikidata_relations && typeof incomingMeta.wikidata_relations === "object" ? incomingMeta.wikidata_relations : {})
       }
     }
-  });
+  }, language);
 }
 
-function dedupeBooks(items = []) {
+function dedupeBooks(items = [], language = "ru") {
   const result = [];
 
   safeArray(items).filter(Boolean).forEach((item) => {
-    const normalized = normalizeBookItem(item);
+    const normalized = normalizeBookItem(item, language);
     if (!normalized) return;
 
     const existingIndex = result.findIndex((candidate) => areSameBook(candidate, normalized));
 
     if (existingIndex >= 0) {
-      result[existingIndex] = mergeBookItems(result[existingIndex], normalized);
+      result[existingIndex] = mergeBookItems(result[existingIndex], normalized, language);
     } else {
       result.push(normalized);
     }
@@ -853,75 +898,70 @@ function dedupeBooks(items = []) {
   return result;
 }
 
-function enrichWikidataWithOpenLibrary(wikidataItems = [], openLibraryItems = []) {
+function enrichWikidataWithOpenLibrary(wikidataItems = [], openLibraryItems = [], language = "ru") {
   return safeArray(wikidataItems).map((wikidataItem) => {
     const match = safeArray(openLibraryItems).find((openLibraryItem) =>
       areSameBook(wikidataItem, openLibraryItem)
     );
 
     if (!match) return wikidataItem;
-
-    return mergeBookItems(wikidataItem, {
-      ...match,
-      title: wikidataItem.title,
-      title_ru: wikidataItem.title_ru,
-      title_en: wikidataItem.title_en,
-      original_title: wikidataItem.original_title,
-      description_ru: wikidataItem.description_ru,
-      description_en: wikidataItem.description_en,
-      meta: {
-        ...(match.meta || {}),
-        ...(wikidataItem.meta || {})
-      }
-    });
+    return mergeBookItems(wikidataItem, match, language);
   });
 }
 
-function sortBooksForQuery(query = "", items = [], language = "ru") {
-  const cleanQuery = cleanTitle(query);
-  const queryIsRu = hasCyrillic(query);
+function scoreBookResult(item = {}, query = "") {
+  const q = compactString(query);
+  const titles = getTitleKeys(item).map(compactString);
+  const authors = getBookAuthors(item).map(compactString);
 
-  return [...safeArray(items)].sort((a, b) => {
-    const aHasRu = hasCyrillic(a.title_ru || a.title || "");
-    const bHasRu = hasCyrillic(b.title_ru || b.title || "");
+  let score = Number(item.score || 0);
 
-    if (queryIsRu && aHasRu !== bHasRu) {
-      return aHasRu ? -1 : 1;
-    }
+  if (titles.some((title) => title === q)) score += 250;
+  if (titles.some((title) => title.includes(q))) score += 120;
+  if (authors.some((author) => author.includes(q))) score += 40;
+  if (item.cover_url) score += 25;
+  if (item.description_ru || item.description_en) score += 20;
+  if (item.external_ids?.wikidata) score += 80;
+  if (item.external_ids?.openlibrary_work) score += 35;
+  if (item.meta?.author_names?.length) score += 20;
+  if (item.meta?.series_name) score += 10;
 
-    const aExact = getTitleKeys(a).some((title) => title === cleanQuery);
-    const bExact = getTitleKeys(b).some((title) => title === cleanQuery);
-
-    if (aExact !== bExact) return aExact ? -1 : 1;
-
-    return (b.score || 0) - (a.score || 0);
-  });
-}
-
-function mergeBookSources(query = "", saved = [], wikidata = [], openLibrary = [], language = "ru") {
-  const cleanSaved = dedupeBooks(saved);
-  const cleanWikidata = dedupeBooks(wikidata);
-  const cleanOpenLibrary = dedupeBooks(openLibrary).filter((item) => !isNoisyOpenLibraryTitle(item.title || item.original_title));
-
-  if (cleanWikidata.length) {
-    const enrichedWikidata = enrichWikidataWithOpenLibrary(cleanWikidata, cleanOpenLibrary);
-    return sortBooksForQuery(query, dedupeBooks([...cleanSaved, ...enrichedWikidata]), language);
-  }
-
-  return sortBooksForQuery(query, dedupeBooks([...cleanSaved, ...cleanOpenLibrary]), language);
+  return score;
 }
 
 export async function runBooksSearch(query = "", options = {}) {
-  const cleanQuery = String(query || "").trim();
-  const language = options.language || "ru";
+  const cleanQuery = clean(query);
+  const language = options.language === "en" ? "en" : "ru";
 
-  if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
+  if (!cleanQuery || cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return [];
   }
 
-  const saved = await fetchBooksFromSupabase(cleanQuery, language);
-  const wikidata = await fetchWikidataBooks(cleanQuery, language);
-  const openLibrary = await fetchOpenLibraryBooks(cleanQuery, wikidata, language);
+  const [supabaseItems, wikidataItems] = await Promise.all([
+    fetchBooksFromSupabase(cleanQuery, language),
+    fetchWikidataBooks(cleanQuery, language)
+  ]);
 
-  return mergeBookSources(cleanQuery, saved, wikidata, openLibrary, language);
+  const openLibraryItems = await fetchOpenLibraryBooks(cleanQuery, wikidataItems, language);
+
+  const enrichedWikidataItems = enrichWikidataWithOpenLibrary(
+    wikidataItems,
+    openLibraryItems,
+    language
+  );
+
+  return dedupeBooks(
+    [
+      ...supabaseItems,
+      ...enrichedWikidataItems,
+      ...openLibraryItems
+    ],
+    language
+  )
+    .map((item) => ({
+      ...item,
+      score: scoreBookResult(item, cleanQuery)
+    }))
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, options.global ? SEARCH_LIMITS.MODAL_RESULTS : SEARCH_LIMITS.PAGE_RESULTS);
 }
