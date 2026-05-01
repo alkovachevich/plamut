@@ -52,6 +52,7 @@ function normalizeJson(value, fallback = {}) {
 
 function normalizeYear(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const year = Number(value);
   return Number.isFinite(year) ? year : null;
 }
@@ -62,9 +63,11 @@ function hasUsefulText(value = "", minLength = 40) {
 
 function hasUsefulCover(value = "") {
   const cover = cleanText(value);
+
   if (!cover) return false;
   if (cover === "undefined" || cover === "null") return false;
   if (cover.includes("/placeholder")) return false;
+
   return /^https?:\/\//i.test(cover) || cover.startsWith("/");
 }
 
@@ -123,20 +126,24 @@ function pickBetterText(current = "", incoming = "") {
   return left;
 }
 
-function pickBetterCover(entity = {}, patch = {}) {
-  const currentCover = cleanText(entity.cover_url);
-  const incomingCover = cleanText(patch.cover_url);
+function isProtectedEntity(entity = {}) {
+  const canonicalKey = cleanLower(entity.canonical_key);
+  const universeKey = cleanLower(entity.universe_key);
+  const meta = normalizeJson(entity.meta, {});
+  const ids = normalizeJson(entity.external_ids, {});
 
-  if (!hasUsefulCover(incomingCover)) return currentCover;
-  if (!hasUsefulCover(currentCover)) return incomingCover;
-
-  const currentConfidence = getCurrentCoverConfidence(entity);
-  const incomingConfidence = getPatchCoverConfidence(patch);
-
-  return incomingConfidence > currentConfidence ? incomingCover : currentCover;
+  return (
+    universeKey === "marvel" ||
+    cleanLower(meta.franchise) === "marvel" ||
+    cleanLower(meta.branch) === "mcu" ||
+    canonicalKey.startsWith("marvel:") ||
+    Boolean(ids.tmdb || ids.tmdb_id || ids.wikidata || ids.wikidata_id)
+  );
 }
 
 function mergeEntityMetadata(entity = {}, patch = {}) {
+  const protectedEntity = isProtectedEntity(entity);
+
   const currentMeta = normalizeJson(entity.meta, {});
   const patchMeta = normalizeJson(patch.meta, {});
   const externalIds = {
@@ -163,10 +170,40 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
     metadata_checked_at: new Date().toISOString()
   };
 
+  if (protectedEntity) {
+    meta.enrichment_protected = true;
+    meta.enrichment_protected_at = new Date().toISOString();
+  }
+
   if (shouldUseIncomingCover) {
     meta.cover_source = cleanText(patch.__cover_source || patch.__source || "unknown");
     meta.cover_confidence = incomingConfidence;
     meta.cover_updated_at = new Date().toISOString();
+  }
+
+  if (protectedEntity) {
+    return {
+      ...entity,
+
+      title_primary: entity.title_primary,
+      title_ru: entity.title_ru,
+      title_en: entity.title_en,
+      original_title: entity.original_title,
+      year: entity.year,
+
+      cover_url: shouldUseIncomingCover ? incomingCover : currentCover,
+
+      description_ru: hasUsefulText(entity.description_ru, 20)
+        ? entity.description_ru
+        : cleanText(patch.description_ru),
+
+      description_en: hasUsefulText(entity.description_en, 20)
+        ? entity.description_en
+        : cleanText(patch.description_en),
+
+      external_ids: externalIds,
+      meta
+    };
   }
 
   return {
@@ -222,6 +259,11 @@ function getYearFromDate(value = "") {
 function buildTmdbCover(path = "") {
   const clean = cleanText(path);
   return clean ? `${TMDB_IMAGE_BASE_URL}${clean}` : "";
+}
+
+function getTmdbId(entity = {}) {
+  const ids = normalizeJson(entity.external_ids, {});
+  return cleanText(ids.tmdb || ids.tmdb_id);
 }
 
 function getTmdbType(entity = {}) {
@@ -383,7 +425,7 @@ function pickBestTmdbCandidate(results = [], entity = {}, type = "movie", option
 
 async function fetchTmdbDetails(entity = {}, language = "ru") {
   const ids = normalizeJson(entity.external_ids, {});
-  const tmdbId = cleanText(ids.tmdb);
+  const tmdbId = getTmdbId(entity);
 
   if (!tmdbId || !TMDB_API_KEY) return null;
 
@@ -429,6 +471,7 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
     external_ids: {
       ...ids,
       tmdb: tmdbId,
+      tmdb_id: ids.tmdb_id || tmdbId,
       imdb: cleanText(payload?.external_ids?.imdb_id) || ids.imdb || null
     },
     meta: {
@@ -549,7 +592,7 @@ async function fetchTmdbPatch(entity = {}, language = "ru") {
 
   const ids = normalizeJson(entity.external_ids, {});
 
-  if (ids.tmdb) return fetchTmdbDetails(entity, language);
+  if (ids.tmdb || ids.tmdb_id) return fetchTmdbDetails(entity, language);
 
   if (ids.imdb) {
     const byImdb = await fetchTmdbFindByImdb(entity, language).catch((error) => {
@@ -737,7 +780,7 @@ async function fetchWikidataEntities(ids = []) {
 
 async function fetchWikidataPatch(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
-  let wikidataId = cleanText(ids.wikidata);
+  let wikidataId = cleanText(ids.wikidata || ids.wikidata_id);
 
   if (!wikidataId) {
     const titles = getTitleCandidates(entity).slice(0, 2);
@@ -915,15 +958,47 @@ function buildUpdatePayload(entity = {}) {
       ...meta,
       metadata_status: getMetadataStatus(entity),
       metadata_updated_at: new Date().toISOString()
-    }
+    },
+    missing_fields: getMissingFields(entity),
+    metadata_status: getMetadataStatus(entity),
+    last_enriched_at: new Date().toISOString()
   };
 }
 
-async function saveEntityMetadata(entity = {}) {
-  if (!entity?.id) return null;
+export function shouldEnrichEntity(entity = {}) {
+  if (!entity?.id) return false;
+
+  const missing = getMissingFields(entity);
+  if (!missing.length) return false;
+
+  const meta = normalizeJson(entity.meta, {});
+  const lastCheckedAt = Date.parse(meta.metadata_checked_at || meta.metadata_updated_at || "");
+
+  if (Number.isFinite(lastCheckedAt)) {
+    const hoursSinceCheck = (Date.now() - lastCheckedAt) / (1000 * 60 * 60);
+    if (hoursSinceCheck < 12) return false;
+  }
+
+  return true;
+}
+
+export async function enrichMediaEntity(entity = {}) {
+  if (!entity?.id) return entity || null;
+
+  const patches = await collectPatches(entity);
+
+  if (!patches.length) {
+    return entity;
+  }
+
+  const enriched = patches.reduce(
+    (current, patch) => mergeEntityMetadata(current, patch),
+    entity
+  );
+
+  const payload = buildUpdatePayload(enriched);
 
   const supabase = getSupabaseClient();
-  const payload = buildUpdatePayload(entity);
 
   const { data, error } = await withTimeout(
     supabase
@@ -931,74 +1006,18 @@ async function saveEntityMetadata(entity = {}) {
       .update(payload)
       .eq("id", entity.id)
       .select("*")
-      .maybeSingle(),
-    "Сохранение метаданных",
+      .single(),
+    "Обогащение карточки",
     WRITE_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  return data || entity;
+  return data || enriched;
 }
 
-export function shouldEnrichEntity(entity = {}) {
-  if (!entity?.id) return false;
-
-  const category = normalizeCategory(entity.category);
-  if (!category) return false;
-
-  const meta = normalizeJson(entity.meta, {});
-  const checkedAt = meta.metadata_checked_at || meta.metadata_updated_at || "";
-  const checkedTime = checkedAt ? new Date(checkedAt).getTime() : 0;
-
-  if (checkedTime && Date.now() - checkedTime < 1000 * 60 * 60 * 6) {
-    return getMissingFields(entity).length > 0 && meta.metadata_status !== "ready";
-  }
-
-  return getMissingFields(entity).length > 0;
-}
-
-export async function enrichMediaEntity(entity = {}) {
-  if (!entity?.id) return entity || null;
-
-  if (!shouldEnrichEntity(entity)) {
-    return entity;
-  }
-
-  const patches = await collectPatches(entity);
-
-  if (!patches.length) {
-    const next = {
-      ...entity,
-      meta: {
-        ...normalizeJson(entity.meta, {}),
-        metadata_status: getMetadataStatus(entity),
-        metadata_checked_at: new Date().toISOString(),
-        metadata_sources_checked: true
-      }
-    };
-
-    return saveEntityMetadata(next).catch(() => next);
-  }
-
-  let merged = { ...entity };
-
-  patches.forEach((patch) => {
-    merged = mergeEntityMetadata(merged, patch);
-  });
-
-  merged.meta = {
-    ...normalizeJson(merged.meta, {}),
-    metadata_status: getMetadataStatus(merged),
-    metadata_sources_checked: true,
-    metadata_checked_at: new Date().toISOString()
-  };
-
-  return saveEntityMetadata(merged);
-}
-
-export function enrichMediaEntityInBackground(entity = {}) {
-  if (!entity?.id) return;
+export async function enrichMediaEntityInBackground(entity = {}) {
+  if (!entity?.id) return null;
 
   const key = String(entity.id);
 
@@ -1009,7 +1028,7 @@ export function enrichMediaEntityInBackground(entity = {}) {
   const promise = enrichMediaEntity(entity)
     .catch((error) => {
       console.warn("Background metadata enrichment skipped:", error);
-      return null;
+      return entity;
     })
     .finally(() => {
       pendingEnrichmentByEntityId.delete(key);
@@ -1019,71 +1038,53 @@ export function enrichMediaEntityInBackground(entity = {}) {
   return promise;
 }
 
-async function fetchEntitiesNeedingRepair({ category = "", limit = 25 } = {}) {
+export async function repairMissingMetadata({ category = "", limit = 20 } = {}) {
   const cleanCategory = normalizeCategory(category);
-  const cleanLimit = Math.max(1, Math.min(Number(limit) || 25, 50));
+  const cleanLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
 
-  const supabase = getSupabaseClient();
-
-  let query = supabase
-    .from(MEDIA_ENTITIES_TABLE)
-    .select("*")
-    .order("updated_at", { ascending: false })
-    .limit(cleanLimit * 4);
-
-  if (cleanCategory) {
-    query = query.eq("category", cleanCategory);
-  }
-
-  const { data, error } = await withTimeout(
-    query,
-    "Поиск карточек для обогащения",
-    READ_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-
-  return safeArray(data)
-    .filter((entity) => shouldEnrichEntity(entity))
-    .slice(0, cleanLimit);
-}
-
-export async function repairMissingMetadata({ category = "", limit = 25 } = {}) {
-  const cleanCategory = normalizeCategory(category) || "all";
-  const key = `${cleanCategory}:${Number(limit) || 25}`;
+  const key = `${cleanCategory || "all"}:${cleanLimit}`;
 
   if (pendingRepairByCategory.has(key)) {
     return pendingRepairByCategory.get(key);
   }
 
   const promise = (async () => {
-    const entities = await fetchEntitiesNeedingRepair({ category, limit });
-    const results = [];
+    const supabase = getSupabaseClient();
 
-    for (const entity of entities) {
-      try {
-        const updated = await enrichMediaEntity(entity);
-        results.push({
-          id: entity.id,
-          ok: true,
-          entity: updated
-        });
-      } catch (error) {
-        console.warn("Metadata repair item skipped:", error);
-        results.push({
-          id: entity.id,
-          ok: false,
-          error
-        });
-      }
+    let query = supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .select("*")
+      .or("cover_url.is.null,description_ru.is.null,description_en.is.null")
+      .order("updated_at", { ascending: true })
+      .limit(cleanLimit);
+
+    if (cleanCategory) {
+      query = query.eq("category", cleanCategory);
     }
 
-    return {
-      category: cleanCategory,
-      checked: entities.length,
-      repaired: results.filter((row) => row.ok).length,
-      results
-    };
+    const { data, error } = await withTimeout(
+      query,
+      "Поиск карточек для обогащения",
+      READ_TIMEOUT_MS
+    );
+
+    if (error) throw error;
+
+    const rows = Array.isArray(data) ? data : [];
+    const results = [];
+
+    for (const entity of rows) {
+      if (!shouldEnrichEntity(entity)) continue;
+
+      const result = await enrichMediaEntity(entity).catch((error) => {
+        console.warn("Repair metadata item skipped:", error);
+        return null;
+      });
+
+      if (result) results.push(result);
+    }
+
+    return results;
   })().finally(() => {
     pendingRepairByCategory.delete(key);
   });
