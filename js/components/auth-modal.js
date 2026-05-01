@@ -3,9 +3,10 @@ import {
   closeAuthModal,
   setAuthMode
 } from "../state.js";
+
 import {
-  signInWithEmail,
-  signUpWithEmail
+  signIn,
+  signUp
 } from "../lib/supabase-client.js";
 
 function escapeHtml(value = "") {
@@ -17,6 +18,48 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+const I18N = {
+  ru: {
+    loginTitle: "Вход",
+    registerTitle: "Регистрация",
+    email: "Email",
+    password: "Пароль",
+    loginSubmit: "Войти",
+    registerSubmit: "Создать аккаунт",
+    loggingIn: "Входим…",
+    registering: "Создаём…",
+    switchToRegister: "Нет аккаунта? Зарегистрироваться",
+    switchToLogin: "Уже есть аккаунт? Войти",
+    emptyFields: "Заполни email и пароль.",
+    registerNote: "Аккаунт создан. Проверь email, если включено подтверждение почты.",
+    loginFailed: "Не удалось войти.",
+    authError: "Ошибка авторизации",
+    close: "Закрыть"
+  },
+  en: {
+    loginTitle: "Sign in",
+    registerTitle: "Create account",
+    email: "Email",
+    password: "Password",
+    loginSubmit: "Sign in",
+    registerSubmit: "Create account",
+    loggingIn: "Signing in…",
+    registering: "Creating…",
+    switchToRegister: "No account? Create one",
+    switchToLogin: "Already have an account? Sign in",
+    emptyFields: "Enter email and password.",
+    registerNote: "Account created. Check your email if confirmation is enabled.",
+    loginFailed: "Could not sign in.",
+    authError: "Authentication error",
+    close: "Close"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
 function renderError(message = "") {
   return message ? `<div class="auth-error">${escapeHtml(message)}</div>` : "";
 }
@@ -26,22 +69,44 @@ function renderNote(message = "") {
 }
 
 function getSubmitLabel(mode) {
-  return mode === "login" ? "Войти" : "Создать аккаунт";
+  return mode === "login" ? t("loginSubmit") : t("registerSubmit");
+}
+
+function getLoadingLabel(mode) {
+  return mode === "login" ? t("loggingIn") : t("registering");
 }
 
 function getTitle(mode) {
-  return mode === "login" ? "Вход" : "Регистрация";
+  return mode === "login" ? t("loginTitle") : t("registerTitle");
 }
 
 function getSwitchLabel(mode) {
-  return mode === "login"
-    ? "Нет аккаунта? Зарегистрироваться"
-    : "Уже есть аккаунт? Войти";
+  return mode === "login" ? t("switchToRegister") : t("switchToLogin");
+}
+
+function normalizeAuthError(error) {
+  const message = String(error?.message || "").trim();
+
+  if (!message) return t("authError");
+
+  if (message.toLowerCase().includes("invalid login credentials")) {
+    return state.language === "en"
+      ? "Invalid email or password."
+      : "Неверный email или пароль.";
+  }
+
+  if (message.toLowerCase().includes("email not confirmed")) {
+    return state.language === "en"
+      ? "Email is not confirmed."
+      : "Email не подтверждён.";
+  }
+
+  return message;
 }
 
 export function renderAuthModal(root) {
   const isOpen = state.authModalOpen;
-  const mode = state.authMode;
+  const mode = state.authMode === "register" ? "register" : "login";
 
   root.innerHTML = `
     <style>
@@ -142,23 +207,23 @@ export function renderAuthModal(root) {
 
     <div class="auth-overlay ${isOpen ? "is-open" : ""}">
       <div class="auth-panel">
-        <button class="auth-close" data-close type="button">✕</button>
+        <button class="auth-close" data-close type="button" aria-label="${escapeHtml(t("close"))}">✕</button>
 
-        <div class="auth-title">${getTitle(mode)}</div>
+        <div class="auth-title">${escapeHtml(getTitle(mode))}</div>
 
         <form class="auth-form">
-          <input class="auth-input" name="email" type="email" placeholder="Email" required />
-          <input class="auth-input" name="password" type="password" placeholder="Пароль" required />
+          <input class="auth-input" name="email" type="email" placeholder="${escapeHtml(t("email"))}" autocomplete="email" required />
+          <input class="auth-input" name="password" type="password" placeholder="${escapeHtml(t("password"))}" autocomplete="${mode === "login" ? "current-password" : "new-password"}" required />
 
           <div data-message></div>
 
           <button class="auth-button" type="submit">
-            ${getSubmitLabel(mode)}
+            ${escapeHtml(getSubmitLabel(mode))}
           </button>
         </form>
 
         <div class="auth-switch" data-switch>
-          ${getSwitchLabel(mode)}
+          ${escapeHtml(getSwitchLabel(mode))}
         </div>
       </div>
     </div>
@@ -187,43 +252,59 @@ export function renderAuthModal(root) {
     const email = form.querySelector('input[name="email"]')?.value?.trim() || "";
     const password = form.querySelector('input[name="password"]')?.value || "";
 
-    messageBox.innerHTML = "";
+    if (messageBox) {
+      messageBox.innerHTML = "";
+    }
 
     if (!email || !password) {
-      messageBox.innerHTML = renderError("Заполни email и пароль.");
+      if (messageBox) {
+        messageBox.innerHTML = renderError(t("emptyFields"));
+      }
       return;
     }
 
     try {
-      submitButton.disabled = true;
-      submitButton.textContent = mode === "login" ? "Входим…" : "Создаём…";
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = getLoadingLabel(mode);
+      }
 
       const result =
         mode === "login"
-          ? await signInWithEmail(email, password)
-          : await signUpWithEmail(email, password);
+          ? await signIn(email, password)
+          : await signUp(email, password);
 
       const user = result?.user || result?.session?.user || null;
 
       if (!user?.id) {
         if (mode === "register") {
-          messageBox.innerHTML = renderNote(
-            "Аккаунт создан. Проверь email, если включено подтверждение почты."
-          );
-          submitButton.disabled = false;
-          submitButton.textContent = getSubmitLabel(mode);
+          if (messageBox) {
+            messageBox.innerHTML = renderNote(t("registerNote"));
+          }
+
+          if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = getSubmitLabel(mode);
+          }
+
           return;
         }
 
-        throw new Error("Не удалось войти.");
+        throw new Error(t("loginFailed"));
       }
 
       closeAuthModal();
     } catch (error) {
       console.warn("Auth submit error:", error);
-      messageBox.innerHTML = renderError(error.message || "Ошибка авторизации");
-      submitButton.disabled = false;
-      submitButton.textContent = getSubmitLabel(mode);
+
+      if (messageBox) {
+        messageBox.innerHTML = renderError(normalizeAuthError(error));
+      }
+
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = getSubmitLabel(mode);
+      }
     }
   });
 }
