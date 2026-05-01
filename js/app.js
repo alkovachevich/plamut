@@ -298,7 +298,10 @@ async function hydrateAuthStateSafely() {
 
   authHydrationPromise = (async () => {
     try {
-      setAuthStatus("restoring");
+      if (!state.user?.id) {
+        setAuthStatus("restoring");
+      }
+
       const authState = await getCurrentAuthState();
 
       if (authState?.status === "authenticated" && authState?.session?.user) {
@@ -316,23 +319,35 @@ async function hydrateAuthStateSafely() {
 
       if (authState?.status === "restoring") {
         const cachedUser = readCachedUser();
+
         if (cachedUser?.id) {
           setUserIfChanged(cachedUser);
+          setAuthStatus("authenticated");
+          return;
         }
+
         setAuthStatus("restoring");
         return;
       }
-
-      setAuthStatus("error");
 
       if (!state.user?.id) {
         const cachedUser = readCachedUser();
         if (cachedUser?.id) {
           setUserIfChanged(cachedUser);
+          setAuthStatus("authenticated");
+          return;
         }
       }
+
+      setAuthStatus(state.user?.id ? "authenticated" : "error");
     } catch (error) {
       console.warn("Auth hydration skipped:", error);
+
+      if (state.user?.id && isTimeoutError(error)) {
+        setAuthStatus("authenticated");
+        return;
+      }
+
       setAuthStatus(isTimeoutError(error) ? "restoring" : "error");
     } finally {
       authHydrationPromise = null;
@@ -366,8 +381,17 @@ function bindAuthListenerSafely() {
 
         if (!session?.user) {
           if (event === "INITIAL_SESSION") {
+            if (state.user?.id) {
+              setAuthStatus("authenticated");
+              hydrateAuthStateSafely().catch((error) => {
+                console.warn("Auth hydration after initial session skipped:", error);
+              });
+              return;
+            }
+
             setAuthStatus("guest");
           }
+
           return;
         }
 
@@ -429,17 +453,17 @@ function getAuthModalSignature() {
   });
 }
 
-function getRouteSignature() {
-  const authBucket = state.authStatus === "authenticated"
-    ? "authenticated"
-    : state.authStatus === "guest" || state.authStatus === "error"
-      ? "guest"
-      : "restoring";
+function getRouteAuthBucket() {
+  if (state.user?.id) return "authenticated";
+  if (state.authStatus === "guest" || state.authStatus === "error") return "guest";
+  return "restoring";
+}
 
+function getRouteSignature() {
   return JSON.stringify({
     route: state.route,
     routeParams: state.routeParams,
-    authBucket,
+    authBucket: getRouteAuthBucket(),
     language: state.language,
     theme: state.theme
   });
@@ -491,7 +515,7 @@ function renderBootShell() {
 }
 
 function renderRouteSafely() {
-  if (state.authStatus === "restoring") {
+  if (state.authStatus === "restoring" && !state.user?.id) {
     cleanupCurrentRoute();
     renderBootShell();
     return;
@@ -600,24 +624,29 @@ async function init() {
   }
 
   const cachedUser = readCachedUser();
+
   if (cachedUser?.id) {
     setUserIfChanged(cachedUser);
+    setAuthStatus("authenticated");
+  } else {
+    setAuthStatus("restoring");
   }
 
-  setAuthStatus("restoring");
   renderApp();
   bindAuthListenerSafely();
 
-  Promise.resolve().then(async () => {
-    await hydrateAuthStateSafely();
+  Promise.resolve()
+    .then(async () => {
+      await hydrateAuthStateSafely();
 
-    if (state.authStatus === "restoring") {
-      setAuthStatus(state.user?.id ? "authenticated" : "guest");
-    }
-  }).catch((error) => {
-    console.warn("Auth hydration deferred skipped:", error);
-    setAuthStatus("error");
-  });
+      if (state.authStatus === "restoring") {
+        setAuthStatus(state.user?.id ? "authenticated" : "guest");
+      }
+    })
+    .catch((error) => {
+      console.warn("Auth hydration deferred skipped:", error);
+      setAuthStatus(state.user?.id ? "authenticated" : "error");
+    });
 }
 
 init();
