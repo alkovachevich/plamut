@@ -19,6 +19,7 @@ import {
 } from "../services/library-cache.js";
 
 const USER_MEDIA_UPDATE_TIMEOUT_MS = 8000;
+const EMPTY_FOLDERS_KEY = "plamut_empty_folders_by_category_v1";
 
 const USER_MEDIA_UPDATE_SELECT = `
   id,
@@ -42,6 +43,131 @@ const USER_MEDIA_UPDATE_SELECT = `
     universe_key
   )
 `;
+
+const I18N = {
+  ru: {
+    all: "Все",
+    add: "+ Добавить",
+    folders: "Папки",
+    createFolder: "Создать папку",
+    newFolderName: "Название новой папки",
+    folderName: "Название папки",
+    removeFolder: "Убрать из папки",
+    status: "Статус",
+    folder: "Папка",
+    delete: "Удалить",
+    close: "Закрыть",
+    empty: "Здесь пока ничего нет",
+    emptyText: "Добавь первый элемент в раздел",
+    loading: "Загрузка…",
+    errorTitle: "Ошибка загрузки",
+    errorText: "Не удалось загрузить библиотеку. Если данные есть в кэше, они будут показаны автоматически.",
+    guestText: "Чтобы увидеть свою библиотеку и управлять статусами, нужно войти в аккаунт.",
+    login: "Войти",
+    sortRecent: "Сначала новые",
+    sortTitle: "По названию",
+    sortYear: "По году",
+    confirmDelete: "Удалить эту карточку из библиотеки?",
+    planned: "Запланировано",
+    in_progress: "В процессе",
+    done: "Завершено",
+    dropped: "Брошено"
+  },
+  en: {
+    all: "All",
+    add: "+ Add",
+    folders: "Folders",
+    createFolder: "Create folder",
+    newFolderName: "New folder name",
+    folderName: "Folder name",
+    removeFolder: "Remove from folder",
+    status: "Status",
+    folder: "Folder",
+    delete: "Delete",
+    close: "Close",
+    empty: "Nothing here yet",
+    emptyText: "Add the first item to",
+    loading: "Loading…",
+    errorTitle: "Loading error",
+    errorText: "Could not load the library. Cached data will be shown automatically if available.",
+    guestText: "Sign in to view your library and manage statuses.",
+    login: "Sign in",
+    sortRecent: "Newest first",
+    sortTitle: "By title",
+    sortYear: "By year",
+    confirmDelete: "Delete this item from your library?",
+    planned: "Planned",
+    in_progress: "In progress",
+    done: "Done",
+    dropped: "Dropped"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeFolderName(value = "") {
+  return cleanText(value).replace(/\s+/g, " ").slice(0, 48);
+}
+
+function readEmptyFolders() {
+  try {
+    const raw = localStorage.getItem(EMPTY_FOLDERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeEmptyFolders(value) {
+  try {
+    localStorage.setItem(EMPTY_FOLDERS_KEY, JSON.stringify(value || {}));
+  } catch (error) {
+    console.warn("empty folders save skipped:", error);
+  }
+}
+
+function getEmptyFolders(category = "") {
+  const data = readEmptyFolders();
+  return safeArray(data[category]).map(normalizeFolderName).filter(Boolean);
+}
+
+function addEmptyFolder(category = "", folderName = "") {
+  const cleanCategory = cleanText(category);
+  const cleanFolder = normalizeFolderName(folderName);
+
+  if (!cleanCategory || !cleanFolder) return [];
+
+  const data = readEmptyFolders();
+  const current = new Set(safeArray(data[cleanCategory]).map(normalizeFolderName).filter(Boolean));
+  current.add(cleanFolder);
+
+  data[cleanCategory] = [...current].sort((a, b) => a.localeCompare(b, state.language === "en" ? "en" : "ru"));
+  writeEmptyFolders(data);
+
+  return data[cleanCategory];
+}
+
+function removeEmptyFolderIfUsed(category = "", folderName = "", items = []) {
+  const cleanCategory = cleanText(category);
+  const cleanFolder = normalizeFolderName(folderName);
+
+  if (!cleanCategory || !cleanFolder) return;
+
+  const stillUsed = safeArray(items).some((item) => item.folder_name === cleanFolder);
+  if (stillUsed) return;
+
+  const data = readEmptyFolders();
+  data[cleanCategory] = safeArray(data[cleanCategory]).filter((folder) => folder !== cleanFolder);
+  writeEmptyFolders(data);
+}
 
 async function updateUserMedia(userMediaId, payload) {
   const supabase = getSupabaseClient();
@@ -99,15 +225,16 @@ function getCover(entity = {}) {
   return cover;
 }
 
-function uniqueFolders(items = []) {
-  return [
-    ...new Set(
-      safeArray(items)
-        .map((item) => item.folder_name || "")
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b, "ru"))
-    )
-  ];
+function uniqueFolders(items = [], category = "") {
+  const fromItems = safeArray(items)
+    .map((item) => item.folder_name || "")
+    .filter(Boolean);
+
+  const emptyFolders = getEmptyFolders(category);
+
+  return [...new Set([...fromItems, ...emptyFolders])]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, state.language === "en" ? "en" : "ru"));
 }
 
 function sortItems(items = [], sort = "recent") {
@@ -115,7 +242,7 @@ function sortItems(items = [], sort = "recent") {
 
   if (sort === "title") {
     return result.sort((a, b) =>
-      resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), "ru")
+      resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), state.language === "en" ? "en" : "ru")
     );
   }
 
@@ -161,7 +288,7 @@ function renderCover(entity = {}) {
 function renderFolderTabs(folders = [], activeFolder = "all") {
   const all = `
     <button class="folder-chip ${activeFolder === "all" ? "active" : ""}" type="button" data-folder="all">
-      Все
+      ${escapeHtml(t("all"))}
     </button>
   `;
 
@@ -178,11 +305,16 @@ function renderFolderTabs(folders = [], activeFolder = "all") {
   return all + rest;
 }
 
+function getStatusLabel(status = "") {
+  const key = cleanText(status);
+  return t(key) || STATUS_LABELS[key] || key || t("planned");
+}
+
 function renderLibraryCard(item) {
   const entity = item.media_entities || {};
   const title = resolveTitle(entity);
   const subtitle = resolveSubtitle(entity);
-  const status = STATUS_LABELS[item.status] || item.status || "Planned";
+  const status = getStatusLabel(item.status);
   const folderName = item.folder_name || "";
   const canonicalKey = entity.canonical_key || "";
   const entityCategory = entity.category || item.category || "";
@@ -197,35 +329,22 @@ function renderLibraryCard(item) {
     >
       <div class="library-card__cover">
         ${renderCover(entity)}
+
+        <button
+          class="library-card__menu-btn"
+          type="button"
+          aria-label="Menu"
+          data-action="open-item-menu"
+          data-user-media-id="${item.id}"
+        >
+          ⋯
+        </button>
       </div>
 
       <div class="library-card__body">
-        <div class="library-card__top">
-          <div class="library-card__badges">
-            <span class="library-badge" data-card-status>${escapeHtml(status)}</span>
-            ${folderName ? `<span class="library-badge folder" data-card-folder>${escapeHtml(folderName)}</span>` : ""}
-          </div>
-
-          <div class="library-card__menu-wrap">
-            <button
-              class="library-card__menu-btn"
-              type="button"
-              aria-label="Открыть меню"
-              data-action="toggle-menu"
-              data-user-media-id="${item.id}"
-            >
-              ⋯
-            </button>
-
-            <div class="library-card__menu" data-menu="${item.id}">
-              <button type="button" data-action="set-status" data-value="planned" data-user-media-id="${item.id}">Planned</button>
-              <button type="button" data-action="set-status" data-value="in_progress" data-user-media-id="${item.id}">In progress</button>
-              <button type="button" data-action="set-status" data-value="done" data-user-media-id="${item.id}">Done</button>
-              <button type="button" data-action="set-status" data-value="dropped" data-user-media-id="${item.id}">Dropped</button>
-              <button type="button" data-action="set-folder" data-user-media-id="${item.id}">Папка</button>
-              <button type="button" class="danger" data-action="remove" data-user-media-id="${item.id}">Удалить</button>
-            </div>
-          </div>
+        <div class="library-card__badges">
+          <span class="library-badge" data-card-status>${escapeHtml(status)}</span>
+          ${folderName ? `<span class="library-badge folder" data-card-folder>${escapeHtml(folderName)}</span>` : ""}
         </div>
 
         <div class="library-card__title">${escapeHtml(clampText(title, 80))}</div>
@@ -247,9 +366,9 @@ function renderLibraryCard(item) {
 function renderEmptyState(categoryTitle) {
   return `
     <div class="empty-state">
-      <div class="empty-state__title">Здесь пока ничего нет</div>
+      <div class="empty-state__title">${escapeHtml(t("empty"))}</div>
       <div class="empty-state__text">
-        Добавь первый элемент в раздел ${escapeHtml(categoryTitle)}.
+        ${escapeHtml(t("emptyText"))} ${escapeHtml(categoryTitle)}.
       </div>
     </div>
   `;
@@ -258,7 +377,7 @@ function renderEmptyState(categoryTitle) {
 function renderLoadingState() {
   return `
     <div class="empty-state">
-      <div class="empty-state__title">Загрузка…</div>
+      <div class="empty-state__title">${escapeHtml(t("loading"))}</div>
     </div>
   `;
 }
@@ -268,16 +387,10 @@ function renderErrorState(hasItems = false) {
 
   return `
     <div class="empty-state">
-      <div class="empty-state__title">Ошибка загрузки</div>
-      <div class="empty-state__text">Не удалось загрузить библиотеку. Если данные есть в кэше, они будут показаны автоматически.</div>
+      <div class="empty-state__title">${escapeHtml(t("errorTitle"))}</div>
+      <div class="empty-state__text">${escapeHtml(t("errorText"))}</div>
     </div>
   `;
-}
-
-function closeAllMenus(root) {
-  root.querySelectorAll(".library-card__menu.is-open").forEach((menu) => {
-    menu.classList.remove("is-open");
-  });
 }
 
 function renderGuestState(root, title) {
@@ -287,10 +400,10 @@ function renderGuestState(root, title) {
       <div class="category-guest__title">${escapeHtml(title)}</div>
       <div class="category-guest__card">
         <div class="category-guest__text">
-          Чтобы увидеть свою библиотеку и управлять статусами, нужно войти в аккаунт.
+          ${escapeHtml(t("guestText"))}
         </div>
         <button class="category-guest__button" type="button" data-action="login">
-          Войти
+          ${escapeHtml(t("login"))}
         </button>
       </div>
     </section>
@@ -299,6 +412,92 @@ function renderGuestState(root, title) {
   root.querySelector('[data-action="login"]')?.addEventListener("click", () => {
     openAuthModal("login");
   });
+}
+
+function renderActionModal({ item = null, folders = [], category = "" } = {}) {
+  const currentStatus = item?.status || "";
+  const currentFolder = item?.folder_name || "";
+
+  const statusButtons = ["planned", "in_progress", "done", "dropped"]
+    .map((status) => `
+      <button
+        class="action-modal__option ${currentStatus === status ? "active" : ""}"
+        type="button"
+        data-action="modal-set-status"
+        data-value="${status}"
+      >
+        ${escapeHtml(t(status))}
+      </button>
+    `)
+    .join("");
+
+  const folderButtons = safeArray(folders)
+    .map((folder) => `
+      <button
+        class="action-modal__option ${currentFolder === folder ? "active" : ""}"
+        type="button"
+        data-action="modal-set-folder"
+        data-value="${escapeHtml(folder)}"
+      >
+        ${escapeHtml(folder)}
+      </button>
+    `)
+    .join("");
+
+  const showDelete = Boolean(item?.id);
+
+  return `
+    <div class="action-modal-backdrop" data-action="close-action-modal">
+      <div class="action-modal" role="dialog" aria-modal="true" data-modal-card="${item?.id || ""}" data-modal-category="${escapeHtml(category)}">
+        <div class="action-modal__header">
+          <div class="action-modal__title">${escapeHtml(item ? resolveTitle(item.media_entities || {}) : t("folders"))}</div>
+          <button class="action-modal__close" type="button" data-action="close-action-modal">×</button>
+        </div>
+
+        ${item ? `
+          <section class="action-modal__group">
+            <div class="action-modal__group-title">${escapeHtml(t("status"))}</div>
+            <div class="action-modal__options">
+              ${statusButtons}
+            </div>
+          </section>
+        ` : ""}
+
+        <section class="action-modal__group">
+          <div class="action-modal__group-title">${escapeHtml(t("folder"))}</div>
+          <div class="action-modal__options">
+            ${folderButtons || `<div class="action-modal__hint">${escapeHtml(t("folders"))}</div>`}
+            ${item && currentFolder ? `
+              <button class="action-modal__option muted" type="button" data-action="modal-remove-folder">
+                ${escapeHtml(t("removeFolder"))}
+              </button>
+            ` : ""}
+          </div>
+
+          <form class="action-modal__folder-form" data-action="modal-create-folder">
+            <input
+              class="action-modal__input"
+              type="text"
+              maxlength="48"
+              placeholder="${escapeHtml(t("newFolderName"))}"
+              data-folder-input
+            />
+            <button class="action-modal__small-btn" type="submit">
+              ${escapeHtml(t("createFolder"))}
+            </button>
+          </form>
+        </section>
+
+        ${showDelete ? `
+          <section class="action-modal__group danger">
+            <button class="action-modal__delete" type="button" data-action="modal-delete">
+              ${escapeHtml(t("delete"))}
+            </button>
+          </section>
+        ` : ""}
+      </div>
+    </div>
+  `;
 }
 
 function renderStyles() {
@@ -339,12 +538,22 @@ function renderStyles() {
         padding: 0 12px;
       }
 
-      .add-btn {
+      .add-btn,
+      .folder-action-btn {
         padding: 11px 16px;
         border-radius: 999px;
+        font-weight: 700;
+      }
+
+      .add-btn {
         background: var(--accent);
         color: #fff;
-        font-weight: 700;
+      }
+
+      .folder-action-btn {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
       }
 
       .folder-row {
@@ -400,6 +609,7 @@ function renderStyles() {
       }
 
       .library-card__cover {
+        position: relative;
         width: 100%;
         aspect-ratio: 2 / 3;
         border-radius: 16px;
@@ -440,18 +650,27 @@ function renderStyles() {
         color: var(--text-soft);
       }
 
+      .library-card__menu-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 3;
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+        color: var(--text);
+        font-size: 20px;
+        line-height: 1;
+        box-shadow: var(--shadow);
+      }
+
       .library-card__body {
         display: flex;
         flex-direction: column;
         gap: 7px;
         padding: 12px 4px 4px;
-      }
-
-      .library-card__top {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 10px;
       }
 
       .library-card__badges {
@@ -487,63 +706,6 @@ function renderStyles() {
         font-size: 13px;
         color: var(--text-soft);
         line-height: 1.4;
-      }
-
-      .library-card__menu-wrap {
-        position: relative;
-        flex-shrink: 0;
-      }
-
-      .library-card__menu-btn {
-        width: 34px;
-        height: 34px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--surface-strong);
-        color: var(--text);
-        font-size: 20px;
-        line-height: 1;
-      }
-
-      .library-card__menu {
-        position: absolute;
-        top: calc(100% + 6px);
-        right: 0;
-        z-index: 100;
-        width: 190px;
-        padding: 6px;
-        border-radius: 14px;
-        border: 1px solid var(--border);
-        background: var(--bg-elevated);
-        box-shadow: var(--shadow);
-        display: none;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .library-card__menu.is-open {
-        display: flex;
-      }
-
-      .library-card__menu button {
-        text-align: left;
-        background: transparent;
-        color: var(--text);
-        padding: 10px 12px;
-        border-radius: 10px;
-      }
-
-      .library-card__menu button:hover {
-        background: var(--bg-soft);
-      }
-
-      .library-card__menu button.danger {
-        color: var(--danger);
-      }
-
-      .library-card__menu button:disabled {
-        opacity: .55;
-        cursor: default;
       }
 
       .empty-state {
@@ -597,6 +759,134 @@ function renderStyles() {
         font-weight: 700;
       }
 
+      .action-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(0, 0, 0, .48);
+      }
+
+      .action-modal {
+        width: min(100%, 440px);
+        max-height: min(86vh, 720px);
+        overflow: auto;
+        border-radius: 24px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow);
+        padding: 18px;
+        color: var(--text);
+      }
+
+      .action-modal__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+
+      .action-modal__title {
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1.35;
+      }
+
+      .action-modal__close {
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 22px;
+        line-height: 1;
+      }
+
+      .action-modal__group {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 0;
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .action-modal__group-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: var(--text-soft);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+
+      .action-modal__options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .action-modal__option {
+        padding: 10px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 650;
+      }
+
+      .action-modal__option.active {
+        background: var(--accent);
+        border-color: transparent;
+        color: #fff;
+      }
+
+      .action-modal__option.muted {
+        color: var(--text-soft);
+      }
+
+      .action-modal__folder-form {
+        display: flex;
+        gap: 8px;
+      }
+
+      .action-modal__input {
+        flex: 1;
+        min-width: 0;
+        min-height: 42px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        padding: 0 12px;
+      }
+
+      .action-modal__small-btn {
+        min-height: 42px;
+        border-radius: 14px;
+        background: var(--accent-soft);
+        color: var(--text);
+        padding: 0 12px;
+        font-weight: 750;
+      }
+
+      .action-modal__delete {
+        width: 100%;
+        min-height: 44px;
+        border-radius: 14px;
+        background: transparent;
+        color: var(--danger);
+        border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+        font-weight: 800;
+      }
+
+      .action-modal__hint {
+        color: var(--text-soft);
+        font-size: 14px;
+      }
+
       @media (max-width: 640px) {
         .library-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -609,16 +899,27 @@ function renderStyles() {
 
         .page-actions {
           width: 100%;
+          flex-wrap: wrap;
         }
 
         .sort-select,
-        .add-btn {
+        .add-btn,
+        .folder-action-btn {
           flex: 1;
         }
 
         .library-card {
           border-radius: 18px;
           padding: 8px;
+        }
+
+        .action-modal {
+          border-radius: 22px;
+          padding: 16px;
+        }
+
+        .action-modal__folder-form {
+          flex-direction: column;
         }
       }
     </style>
@@ -653,13 +954,6 @@ function sameItemList(a = [], b = []) {
   });
 }
 
-function openFolderDialog(currentFolder = "") {
-  return window.prompt(
-    "Название папки. Оставь пустым, чтобы убрать папку.",
-    currentFolder
-  );
-}
-
 export async function renderCategoryPage(root, params = {}) {
   const category = params.category || "unknown";
   const title = getCategoryLabel(state.language, category);
@@ -692,6 +986,7 @@ export async function renderCategoryPage(root, params = {}) {
   let isDestroyed = false;
   let isRefreshing = false;
   let lastListSignature = "";
+  let activeModalItemId = null;
 
   root.innerHTML = `
     ${renderStyles()}
@@ -702,11 +997,12 @@ export async function renderCategoryPage(root, params = {}) {
 
         <div class="page-actions">
           <select class="sort-select" data-sort>
-            <option value="recent">Сначала новые</option>
-            <option value="title">По названию</option>
-            <option value="year">По году</option>
+            <option value="recent">${escapeHtml(t("sortRecent"))}</option>
+            <option value="title">${escapeHtml(t("sortTitle"))}</option>
+            <option value="year">${escapeHtml(t("sortYear"))}</option>
           </select>
-          <button class="add-btn" data-action="add">+ Добавить</button>
+          <button class="folder-action-btn" type="button" data-action="open-category-folder-menu">${escapeHtml(t("folders"))}</button>
+          <button class="add-btn" type="button" data-action="add">${escapeHtml(t("add"))}</button>
         </div>
       </div>
 
@@ -715,12 +1011,15 @@ export async function renderCategoryPage(root, params = {}) {
       <div data-content>
         ${renderLoadingState()}
       </div>
+
+      <div data-action-modal-root></div>
     </section>
   `;
 
   const foldersRoot = root.querySelector("[data-folders]");
   const contentRoot = root.querySelector("[data-content]");
   const sortSelect = root.querySelector("[data-sort]");
+  const modalRoot = root.querySelector("[data-action-modal-root]");
 
   if (sortSelect) {
     sortSelect.value = activeSort;
@@ -740,7 +1039,7 @@ export async function renderCategoryPage(root, params = {}) {
   }
 
   function normalizeActiveFolder() {
-    const existingFolders = new Set(uniqueFolders(items));
+    const existingFolders = new Set(uniqueFolders(items, category));
 
     if (activeFolder !== "all" && !existingFolders.has(activeFolder)) {
       activeFolder = "all";
@@ -755,7 +1054,7 @@ export async function renderCategoryPage(root, params = {}) {
     const visibleItems = getVisibleItems();
 
     return JSON.stringify({
-      folders: uniqueFolders(items),
+      folders: uniqueFolders(items, category),
       activeFolder,
       activeSort,
       ids: visibleItems.map((item) => ({
@@ -782,7 +1081,7 @@ export async function renderCategoryPage(root, params = {}) {
 
     lastListSignature = nextSignature;
 
-    const folders = uniqueFolders(items);
+    const folders = uniqueFolders(items, category);
     const visibleItems = getVisibleItems();
 
     foldersRoot.innerHTML = renderFolderTabs(folders, activeFolder);
@@ -826,6 +1125,69 @@ export async function renderCategoryPage(root, params = {}) {
     items = items.filter((item) => Number(item.id) !== Number(userMediaId));
   }
 
+  function openItemModal(userMediaId) {
+    activeModalItemId = Number(userMediaId);
+    const item = findItemById(activeModalItemId);
+    if (!item || !modalRoot) return;
+
+    modalRoot.innerHTML = renderActionModal({
+      item,
+      folders: uniqueFolders(items, category),
+      category
+    });
+  }
+
+  function openCategoryFolderModal() {
+    activeModalItemId = null;
+
+    if (!modalRoot) return;
+
+    modalRoot.innerHTML = renderActionModal({
+      item: null,
+      folders: uniqueFolders(items, category),
+      category
+    });
+  }
+
+  function closeActionModal() {
+    activeModalItemId = null;
+    if (modalRoot) modalRoot.innerHTML = "";
+  }
+
+  async function assignFolderToActiveItem(folderName = "") {
+    const userMediaId = Number(activeModalItemId || 0);
+    if (!userMediaId) return;
+
+    const cleanFolder = normalizeFolderName(folderName);
+
+    setCardBusy(userMediaId, true);
+
+    const updated = await updateUserMedia(userMediaId, {
+      folder_name: cleanFolder || null
+    });
+
+    if (!updated) return;
+
+    updateItemInMemory(updated);
+
+    updateCachedLibraryItem(userId, updated, {
+      category: updated.category || category
+    });
+
+    if (cleanFolder) {
+      addEmptyFolder(category, cleanFolder);
+    } else {
+      removeEmptyFolderIfUsed(category, findItemById(userMediaId)?.folder_name || "", items);
+    }
+
+    if (activeFolder !== "all" && activeFolder !== cleanFolder) {
+      activeFolder = "all";
+    }
+
+    renderList({ force: true });
+    closeActionModal();
+  }
+
   async function refreshVisibleListInBackground() {
     if (isDestroyed || isRefreshing) return;
 
@@ -850,6 +1212,10 @@ export async function renderCategoryPage(root, params = {}) {
     openSearchModal("", { category });
   });
 
+  root.querySelector('[data-action="open-category-folder-menu"]')?.addEventListener("click", () => {
+    openCategoryFolderModal();
+  });
+
   sortSelect?.addEventListener("change", () => {
     activeSort = sortSelect.value || "recent";
     persistViewState();
@@ -865,143 +1231,18 @@ export async function renderCategoryPage(root, params = {}) {
     renderList({ force: true });
   });
 
-  contentRoot?.addEventListener("click", async (event) => {
+  contentRoot?.addEventListener("click", (event) => {
     const actionNode = event.target.closest("[data-action]");
     const cardNode = event.target.closest(".library-card");
 
-    if (!actionNode && !cardNode) {
-      closeAllMenus(contentRoot);
-      return;
-    }
+    if (!actionNode && !cardNode) return;
 
     const action = actionNode?.dataset?.action || cardNode?.dataset?.action || "";
 
-    if (action === "toggle-menu") {
+    if (action === "open-item-menu") {
       event.preventDefault();
       event.stopPropagation();
-
-      const userMediaId = actionNode.dataset.userMediaId;
-      const menu = contentRoot.querySelector(`[data-menu="${userMediaId}"]`);
-      const isOpen = menu?.classList.contains("is-open");
-
-      closeAllMenus(contentRoot);
-
-      if (menu && !isOpen) {
-        menu.classList.add("is-open");
-      }
-
-      return;
-    }
-
-    if (action === "set-status") {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const button = actionNode;
-      const userMediaId = Number(button.dataset.userMediaId);
-      const newStatus = button.dataset.value;
-
-      if (!userMediaId || !newStatus) return;
-
-      try {
-        button.disabled = true;
-        setCardBusy(userMediaId, true);
-
-        const updated = await updateUserMedia(userMediaId, {
-          status: newStatus
-        });
-
-        if (!updated) return;
-
-        updateItemInMemory(updated);
-
-        updateCachedLibraryItem(userId, updated, {
-          category: updated.category || category
-        });
-
-        renderList({ force: true });
-      } catch (error) {
-        console.warn("Update status error:", error);
-        button.disabled = false;
-        setCardBusy(userMediaId, false);
-      }
-
-      return;
-    }
-
-    if (action === "set-folder") {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const button = actionNode;
-      const userMediaId = Number(button.dataset.userMediaId);
-      if (!userMediaId) return;
-
-      const current = findItemById(userMediaId);
-      const currentFolder = current?.folder_name || "";
-      const folderName = openFolderDialog(currentFolder);
-
-      if (folderName === null) return;
-
-      const cleanFolder = String(folderName || "").trim();
-
-      try {
-        button.disabled = true;
-        setCardBusy(userMediaId, true);
-
-        const updated = await updateUserMedia(userMediaId, {
-          folder_name: cleanFolder || null
-        });
-
-        if (!updated) return;
-
-        updateItemInMemory(updated);
-
-        updateCachedLibraryItem(userId, updated, {
-          category: updated.category || category
-        });
-
-        if (activeFolder !== "all" && activeFolder !== cleanFolder) {
-          activeFolder = "all";
-        }
-
-        renderList({ force: true });
-      } catch (error) {
-        console.warn("Update folder error:", error);
-        button.disabled = false;
-        setCardBusy(userMediaId, false);
-      }
-
-      return;
-    }
-
-    if (action === "remove") {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const button = actionNode;
-      const userMediaId = Number(button.dataset.userMediaId);
-      if (!userMediaId) return;
-
-      try {
-        button.disabled = true;
-        setCardBusy(userMediaId, true);
-
-        await removeFromLibrary(userMediaId);
-
-        removeItemFromMemory(userMediaId);
-
-        removeCachedLibraryItem(userId, userMediaId, {
-          category
-        });
-
-        renderList({ force: true });
-      } catch (error) {
-        console.warn("Remove from library error:", error);
-        button.disabled = false;
-        setCardBusy(userMediaId, false);
-      }
-
+      openItemModal(actionNode.dataset.userMediaId);
       return;
     }
 
@@ -1027,9 +1268,145 @@ export async function renderCategoryPage(root, params = {}) {
     }
   });
 
-  root.addEventListener("click", (event) => {
-    if (!event.target.closest(".library-card__menu-wrap")) {
-      closeAllMenus(root);
+  modalRoot?.addEventListener("click", async (event) => {
+    const actionNode = event.target.closest("[data-action]");
+    if (!actionNode) return;
+
+    const action = actionNode.dataset.action || "";
+
+    if (action === "close-action-modal") {
+      if (event.target === actionNode || actionNode.classList.contains("action-modal__close")) {
+        closeActionModal();
+      }
+      return;
+    }
+
+    if (action === "modal-set-status") {
+      event.preventDefault();
+
+      const userMediaId = Number(activeModalItemId || 0);
+      const newStatus = actionNode.dataset.value || "";
+      if (!userMediaId || !newStatus) return;
+
+      try {
+        actionNode.disabled = true;
+        setCardBusy(userMediaId, true);
+
+        const updated = await updateUserMedia(userMediaId, {
+          status: newStatus
+        });
+
+        if (!updated) return;
+
+        updateItemInMemory(updated);
+
+        updateCachedLibraryItem(userId, updated, {
+          category: updated.category || category
+        });
+
+        renderList({ force: true });
+        closeActionModal();
+      } catch (error) {
+        console.warn("Update status error:", error);
+        actionNode.disabled = false;
+        setCardBusy(userMediaId, false);
+      }
+
+      return;
+    }
+
+    if (action === "modal-set-folder") {
+      event.preventDefault();
+
+      try {
+        actionNode.disabled = true;
+        await assignFolderToActiveItem(actionNode.dataset.value || "");
+      } catch (error) {
+        console.warn("Update folder error:", error);
+        actionNode.disabled = false;
+        if (activeModalItemId) setCardBusy(activeModalItemId, false);
+      }
+
+      return;
+    }
+
+    if (action === "modal-remove-folder") {
+      event.preventDefault();
+
+      try {
+        actionNode.disabled = true;
+        await assignFolderToActiveItem("");
+      } catch (error) {
+        console.warn("Remove folder error:", error);
+        actionNode.disabled = false;
+        if (activeModalItemId) setCardBusy(activeModalItemId, false);
+      }
+
+      return;
+    }
+
+    if (action === "modal-delete") {
+      event.preventDefault();
+
+      const userMediaId = Number(activeModalItemId || 0);
+      if (!userMediaId) return;
+
+      const confirmed = window.confirm(t("confirmDelete"));
+      if (!confirmed) return;
+
+      try {
+        actionNode.disabled = true;
+        setCardBusy(userMediaId, true);
+
+        await removeFromLibrary(userMediaId);
+
+        const removed = findItemById(userMediaId);
+        removeItemFromMemory(userMediaId);
+
+        if (removed?.folder_name) {
+          removeEmptyFolderIfUsed(category, removed.folder_name, items);
+        }
+
+        removeCachedLibraryItem(userId, userMediaId, {
+          category
+        });
+
+        renderList({ force: true });
+        closeActionModal();
+      } catch (error) {
+        console.warn("Remove from library error:", error);
+        actionNode.disabled = false;
+        setCardBusy(userMediaId, false);
+      }
+    }
+  });
+
+  modalRoot?.addEventListener("submit", async (event) => {
+    const form = event.target.closest('[data-action="modal-create-folder"]');
+    if (!form) return;
+
+    event.preventDefault();
+
+    const input = form.querySelector("[data-folder-input]");
+    const folderName = normalizeFolderName(input?.value || "");
+    if (!folderName) return;
+
+    const button = form.querySelector("button[type='submit']");
+    if (button) button.disabled = true;
+
+    try {
+      addEmptyFolder(category, folderName);
+
+      if (activeModalItemId) {
+        await assignFolderToActiveItem(folderName);
+      } else {
+        renderList({ force: true });
+        openCategoryFolderModal();
+      }
+    } catch (error) {
+      console.warn("Create folder error:", error);
+    } finally {
+      if (button) button.disabled = false;
     }
   });
 
@@ -1055,5 +1432,6 @@ export async function renderCategoryPage(root, params = {}) {
 
   return () => {
     isDestroyed = true;
+    closeActionModal();
   };
 }
