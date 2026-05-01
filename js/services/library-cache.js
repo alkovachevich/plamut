@@ -1,22 +1,20 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 
-const CACHE_KEY = "plamut_library_cache_v4";
+const CACHE_KEY = "plamut_library_cache_v5";
+
 const LEGACY_CACHE_KEYS = [
+  "plamut_library_cache_v4",
   "plamut_library_cache_v3",
   "plamut_library_cache_v2",
   "plamut_library_cache"
 ];
 
-const CACHE_TTL = 1000 * 60 * 10;
+const CACHE_TTL_MS = 1000 * 60 * 10;
 const LIST_DB_TIMEOUT_MS = 8000;
 const FULL_DB_TIMEOUT_MS = 12000;
-const RETRY_AFTER_TIMEOUT_MS = 2500;
-const MAX_DEFERRED_RETRIES = 2;
 
-const loadPromisesByKey = new Map();
-const refreshPromisesByKey = new Map();
-const retryTimersByUserId = new Map();
-const retryAttemptsByUserId = new Map();
+const loadPromises = new Map();
+const refreshPromises = new Map();
 
 function now() {
   return Date.now();
@@ -30,6 +28,10 @@ function cleanLower(value = "") {
   return clean(value).toLowerCase();
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function safeJsonParse(value, fallback) {
   try {
     return JSON.parse(value);
@@ -38,7 +40,7 @@ function safeJsonParse(value, fallback) {
   }
 }
 
-function readRawCache() {
+function readCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return {};
@@ -50,7 +52,7 @@ function readRawCache() {
   }
 }
 
-function writeRawCache(cache) {
+function writeCache(cache) {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   } catch (error) {
@@ -58,25 +60,7 @@ function writeRawCache(cache) {
   }
 }
 
-function readLegacyCache() {
-  try {
-    for (const key of LEGACY_CACHE_KEYS) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-
-      const parsed = safeJsonParse(raw, {});
-      if (parsed && typeof parsed === "object") {
-        return parsed;
-      }
-    }
-  } catch {
-    return {};
-  }
-
-  return {};
-}
-
-function cleanupLegacyCacheKeys() {
+function cleanupLegacyCache() {
   try {
     LEGACY_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
   } catch (error) {
@@ -84,110 +68,172 @@ function cleanupLegacyCacheKeys() {
   }
 }
 
-function normalizeCategoryBucket(input = {}) {
+function migrateLegacyCache() {
+  const current = readCache();
+
+  if (Object.keys(current).length) {
+    cleanupLegacyCache();
+    return;
+  }
+
+  try {
+    for (const key of LEGACY_CACHE_KEYS) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+
+      const parsed = safeJsonParse(raw, {});
+      if (!parsed || typeof parsed !== "object") continue;
+
+      const migrated = {};
+
+      Object.entries(parsed).forEach(([userId, bucket]) => {
+        const cleanUserId = clean(userId);
+        if (!cleanUserId) return;
+
+        const list = safeArray(bucket?.list);
+        const full = safeArray(bucket?.full);
+
+        migrated[cleanUserId] = {
+          list,
+          full,
+          categories: normalizeCategoriesFromItems(list, full),
+          updated_at: {
+            list: Number(bucket?.updated_at?.list || bucket?.list_updated_at || bucket?.updated_at || 0),
+            full: Number(bucket?.updated_at?.full || bucket?.full_updated_at || bucket?.updated_at || 0)
+          }
+        };
+      });
+
+      if (Object.keys(migrated).length) {
+        writeCache(migrated);
+      }
+
+      break;
+    }
+  } catch (error) {
+    console.warn("library-cache: migration skipped", error);
+  }
+
+  cleanupLegacyCache();
+}
+
+function emptyBucket() {
   return {
-    list: Array.isArray(input.list) ? input.list : [],
-    full: Array.isArray(input.full) ? input.full : [],
+    list: [],
+    full: [],
+    categories: {},
     updated_at: {
-      list: Number(input?.updated_at?.list || input?.list_updated_at || 0),
-      full: Number(input?.updated_at?.full || input?.full_updated_at || 0)
+      list: 0,
+      full: 0
     }
   };
 }
 
-function normalizeBucket(input = {}) {
-  const categories = input.categories && typeof input.categories === "object"
-    ? input.categories
-    : {};
-
-  const normalizedCategories = {};
-
-  Object.entries(categories).forEach(([category, value]) => {
-    const cleanCategory = cleanLower(category);
-    if (!cleanCategory) return;
-    normalizedCategories[cleanCategory] = normalizeCategoryBucket(value);
-  });
-
-  const legacyUpdatedAt = Number(input.updated_at || 0);
-
+function emptyCategoryBucket() {
   return {
+    list: [],
+    full: [],
     updated_at: {
-      list: Number(input?.updated_at?.list || input.list_updated_at || legacyUpdatedAt || 0),
-      full: Number(input?.updated_at?.full || input.full_updated_at || legacyUpdatedAt || 0)
-    },
-    full: Array.isArray(input.full) ? input.full : [],
-    list: Array.isArray(input.list) ? input.list : [],
-    categories: normalizedCategories
+      list: 0,
+      full: 0
+    }
   };
 }
 
-function isBrokenBucket(bucket = {}) {
-  if (!bucket || typeof bucket !== "object") return true;
-  if (!Array.isArray(bucket.list) || !Array.isArray(bucket.full)) return true;
-  if (!bucket.categories || typeof bucket.categories !== "object") return true;
-  return false;
+function normalizeBucket(bucket = {}) {
+  const normalized = emptyBucket();
+
+  normalized.list = dedupeAndSort(safeArray(bucket.list));
+  normalized.full = dedupeAndSort(safeArray(bucket.full));
+  normalized.updated_at = {
+    list: Number(bucket?.updated_at?.list || 0),
+    full: Number(bucket?.updated_at?.full || 0)
+  };
+
+  normalized.categories = {};
+
+  if (bucket.categories && typeof bucket.categories === "object") {
+    Object.entries(bucket.categories).forEach(([category, value]) => {
+      const cleanCategory = cleanLower(category);
+      if (!cleanCategory) return;
+
+      normalized.categories[cleanCategory] = {
+        list: dedupeAndSort(safeArray(value?.list)),
+        full: dedupeAndSort(safeArray(value?.full)),
+        updated_at: {
+          list: Number(value?.updated_at?.list || 0),
+          full: Number(value?.updated_at?.full || 0)
+        }
+      };
+    });
+  }
+
+  if (!Object.keys(normalized.categories).length && (normalized.list.length || normalized.full.length)) {
+    normalized.categories = normalizeCategoriesFromItems(normalized.list, normalized.full);
+  }
+
+  return normalized;
 }
 
-function migrateLegacyCacheIfNeeded() {
-  const current = readRawCache();
-  if (Object.keys(current).length) {
-    cleanupLegacyCacheKeys();
-    return;
+function normalizeCategoriesFromItems(listItems = [], fullItems = []) {
+  const categories = {};
+
+  function pushItems(mode, items) {
+    safeArray(items).forEach((item) => {
+      const category = resolveItemCategory(item);
+      if (!category) return;
+
+      if (!categories[category]) {
+        categories[category] = emptyCategoryBucket();
+      }
+
+      categories[category][mode].push(item);
+    });
   }
 
-  const legacy = readLegacyCache();
-  if (!legacy || !Object.keys(legacy).length) {
-    cleanupLegacyCacheKeys();
-    return;
-  }
+  pushItems("list", listItems);
+  pushItems("full", fullItems);
 
-  const migrated = {};
-
-  Object.entries(legacy).forEach(([userId, bucket]) => {
-    const cleanUserId = clean(userId);
-    if (!cleanUserId) return;
-    migrated[cleanUserId] = normalizeBucket(bucket);
+  Object.keys(categories).forEach((category) => {
+    categories[category].list = dedupeAndSort(categories[category].list);
+    categories[category].full = dedupeAndSort(categories[category].full);
   });
 
-  if (Object.keys(migrated).length) {
-    writeRawCache(migrated);
-  }
-
-  cleanupLegacyCacheKeys();
+  return categories;
 }
-
-migrateLegacyCacheIfNeeded();
 
 function getUserBucket(cache, userId) {
   const cleanUserId = clean(userId);
   if (!cleanUserId) return null;
 
-  if (!cache[cleanUserId]) {
-    cache[cleanUserId] = normalizeBucket({});
-  }
-
-  cache[cleanUserId] = normalizeBucket(cache[cleanUserId]);
+  cache[cleanUserId] = normalizeBucket(cache[cleanUserId] || {});
   return cache[cleanUserId];
 }
 
-function ensureCategoryBucket(bucket, category = "") {
+function getCategoryBucket(bucket, category) {
   const cleanCategory = cleanLower(category);
   if (!cleanCategory) return null;
 
   if (!bucket.categories[cleanCategory]) {
-    bucket.categories[cleanCategory] = normalizeCategoryBucket({});
+    bucket.categories[cleanCategory] = emptyCategoryBucket();
   }
 
-  bucket.categories[cleanCategory] = normalizeCategoryBucket(bucket.categories[cleanCategory]);
+  bucket.categories[cleanCategory] = {
+    ...emptyCategoryBucket(),
+    ...bucket.categories[cleanCategory],
+    list: dedupeAndSort(safeArray(bucket.categories[cleanCategory].list)),
+    full: dedupeAndSort(safeArray(bucket.categories[cleanCategory].full)),
+    updated_at: {
+      list: Number(bucket.categories[cleanCategory]?.updated_at?.list || 0),
+      full: Number(bucket.categories[cleanCategory]?.updated_at?.full || 0)
+    }
+  };
+
   return bucket.categories[cleanCategory];
 }
 
 function isExpired(updatedAt = 0) {
-  return !updatedAt || now() - Number(updatedAt || 0) > CACHE_TTL;
-}
-
-function isTimeoutError(error) {
-  return /превышено время ожидания/i.test(String(error?.message || ""));
+  return !updatedAt || now() - Number(updatedAt || 0) > CACHE_TTL_MS;
 }
 
 function resolveItemCategory(item = {}) {
@@ -195,14 +241,14 @@ function resolveItemCategory(item = {}) {
 }
 
 function itemDedupeKey(item = {}) {
-  const canonical = cleanLower(item?.media_entities?.canonical_key || "");
-  if (canonical) return `canonical:${canonical}`;
+  const userMediaId = Number(item?.id || 0);
+  if (userMediaId) return `user_media:${userMediaId}`;
 
   const entityId = Number(item?.entity_id || item?.media_entities?.id || 0);
   if (entityId) return `entity:${entityId}`;
 
-  const userMediaId = Number(item?.id || 0);
-  if (userMediaId) return `user_media:${userMediaId}`;
+  const canonical = cleanLower(item?.media_entities?.canonical_key || "");
+  if (canonical) return `canonical:${canonical}`;
 
   return "";
 }
@@ -221,139 +267,80 @@ function mergeLibraryItems(previous = {}, incoming = {}) {
 function dedupeAndSort(items = []) {
   const map = new Map();
 
-  for (const item of items) {
-    if (!item || typeof item !== "object") continue;
+  safeArray(items).forEach((item) => {
+    if (!item || typeof item !== "object") return;
 
     const key = itemDedupeKey(item);
-    if (!key) continue;
+    if (!key) return;
 
     if (!map.has(key)) {
       map.set(key, item);
-      continue;
+      return;
     }
 
     map.set(key, mergeLibraryItems(map.get(key), item));
-  }
+  });
 
-  return [...map.values()].sort((a, b) => {
-    const at = new Date(a?.created_at || 0).getTime();
-    const bt = new Date(b?.created_at || 0).getTime();
-    return bt - at;
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = new Date(a?.created_at || 0).getTime();
+    const bTime = new Date(b?.created_at || 0).getTime();
+    return bTime - aTime;
   });
 }
 
-function hasValidItems(items) {
-  return Array.isArray(items) && items.every((item) => item && typeof item === "object");
+function getMode(mode = "list") {
+  return mode === "full" ? "full" : "list";
 }
 
-function updateCategoryBucketsFromItems(bucket, mode, items = []) {
-  const categories = {};
-
-  for (const item of items) {
-    const category = resolveItemCategory(item);
-    if (!category) continue;
-
-    if (!categories[category]) {
-      categories[category] = [];
-    }
-
-    categories[category].push(item);
-  }
-
-  Object.entries(categories).forEach(([category, categoryItems]) => {
-    const categoryBucket = ensureCategoryBucket(bucket, category);
-    categoryBucket[mode] = dedupeAndSort(categoryItems);
-    categoryBucket.updated_at[mode] = bucket.updated_at[mode] || now();
-  });
-}
-
-function assignBucketItems(bucket, mode, items = [], { category = "" } = {}) {
-  const cleanMode = mode === "full" ? "full" : "list";
-  const cleanCategory = cleanLower(category);
-  const normalized = dedupeAndSort(items);
-
-  if (cleanCategory) {
-    const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
-    categoryBucket[cleanMode] = normalized;
-    categoryBucket.updated_at[cleanMode] = now();
-
-    const otherItems = bucket[cleanMode].filter(
-      (item) => resolveItemCategory(item) !== cleanCategory
-    );
-
-    bucket[cleanMode] = dedupeAndSort([...normalized, ...otherItems]);
-  } else {
-    bucket[cleanMode] = normalized;
-    bucket.updated_at[cleanMode] = now();
-    updateCategoryBucketsFromItems(bucket, cleanMode, normalized);
-  }
-}
-
-function getBucketUpdatedAt(bucket, { mode = "list", category = "" } = {}) {
-  const cleanMode = mode === "full" ? "full" : "list";
+function getUpdatedAt(bucket, { mode = "list", category = "" } = {}) {
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
 
   if (!cleanCategory) {
     return Number(bucket?.updated_at?.[cleanMode] || 0);
   }
 
-  const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
+  const categoryBucket = getCategoryBucket(bucket, cleanCategory);
   return Number(categoryBucket?.updated_at?.[cleanMode] || 0);
 }
 
-function getBucketItems(bucket, { mode = "list", category = "" } = {}) {
-  const cleanMode = mode === "full" ? "full" : "list";
+function getItems(bucket, { mode = "list", category = "" } = {}) {
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
 
   if (!cleanCategory) {
-    return Array.isArray(bucket[cleanMode]) ? bucket[cleanMode] : [];
+    return safeArray(bucket?.[cleanMode]);
   }
 
-  const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
-  return Array.isArray(categoryBucket?.[cleanMode]) ? categoryBucket[cleanMode] : [];
+  const categoryBucket = getCategoryBucket(bucket, cleanCategory);
+  return safeArray(categoryBucket?.[cleanMode]);
 }
 
-function readUserBucket(userId) {
-  const cleanUserId = clean(userId);
-  if (!cleanUserId) return null;
+function assignItems(bucket, items = [], { mode = "list", category = "" } = {}) {
+  const cleanMode = getMode(mode);
+  const cleanCategory = cleanLower(category);
+  const normalized = dedupeAndSort(items);
 
-  const cache = readRawCache();
-  const bucket = normalizeBucket(cache[cleanUserId]);
+  if (cleanCategory) {
+    const categoryBucket = getCategoryBucket(bucket, cleanCategory);
 
-  if (isBrokenBucket(bucket)) return null;
-  return bucket;
-}
+    categoryBucket[cleanMode] = normalized;
+    categoryBucket.updated_at[cleanMode] = now();
 
-function getLocalLibrarySnapshot(userId, { mode = "list", category = "" } = {}) {
-  const bucket = readUserBucket(userId);
-  if (!bucket) return [];
-  return getBucketItems(bucket, { mode, category });
-}
+    const otherItems = safeArray(bucket[cleanMode]).filter(
+      (item) => resolveItemCategory(item) !== cleanCategory
+    );
 
-function scheduleRetry(userId) {
-  const cleanUserId = clean(userId);
-  if (!cleanUserId || retryTimersByUserId.has(cleanUserId)) return;
+    bucket[cleanMode] = dedupeAndSort([...normalized, ...otherItems]);
+    bucket.updated_at[cleanMode] = now();
 
-  const attempts = Number(retryAttemptsByUserId.get(cleanUserId) || 0);
-  if (attempts >= MAX_DEFERRED_RETRIES) return;
+    return;
+  }
 
-  const timerId = setTimeout(() => {
-    retryTimersByUserId.delete(cleanUserId);
-    retryAttemptsByUserId.set(cleanUserId, attempts + 1);
+  bucket[cleanMode] = normalized;
+  bucket.updated_at[cleanMode] = now();
 
-    refreshUserLibrary(cleanUserId, {
-      mode: "list",
-      category: "",
-      force: true
-    }).catch((error) => {
-      console.warn("library-cache: deferred DB retry skipped", error);
-      if (isTimeoutError(error)) {
-        scheduleRetry(cleanUserId);
-      }
-    });
-  }, RETRY_AFTER_TIMEOUT_MS);
-
-  retryTimersByUserId.set(cleanUserId, timerId);
+  bucket.categories = normalizeCategoriesFromItems(bucket.list, bucket.full);
 }
 
 function buildSelect(mode = "list") {
@@ -417,7 +404,7 @@ async function fetchUserLibraryFromDb(userId, { mode = "list", category = "" } =
   const cleanUserId = clean(userId);
   if (!cleanUserId) return [];
 
-  const cleanMode = mode === "full" ? "full" : "list";
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
   const supabase = getSupabaseClient();
 
@@ -441,30 +428,44 @@ async function fetchUserLibraryFromDb(userId, { mode = "list", category = "" } =
 
   if (error) throw error;
 
-  return dedupeAndSort(Array.isArray(data) ? data : []);
+  return dedupeAndSort(data || []);
 }
 
-function shouldBackgroundRefresh(userId, { mode = "list", category = "" } = {}) {
-  const bucket = readUserBucket(userId);
-  if (!bucket) return true;
+function makeKey(userId, { mode = "list", category = "", suffix = "" } = {}) {
+  return [
+    clean(userId),
+    getMode(mode),
+    cleanLower(category),
+    clean(suffix)
+  ].join("::");
+}
 
-  const updatedAt = getBucketUpdatedAt(bucket, { mode, category });
+function shouldRefresh(userId, { mode = "list", category = "" } = {}) {
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return false;
+
+  const cache = readCache();
+  const bucket = getUserBucket(cache, cleanUserId);
+  const updatedAt = getUpdatedAt(bucket, { mode, category });
+
   return isExpired(updatedAt);
 }
 
-function refreshKey(userId, { mode = "list", category = "" } = {}) {
-  return `${clean(userId)}::${mode === "full" ? "full" : "list"}::${cleanLower(category)}`;
-}
+migrateLegacyCache();
 
 export function clearLibraryCache(userId = null) {
   if (!userId) {
-    localStorage.removeItem(CACHE_KEY);
+    try {
+      localStorage.removeItem(CACHE_KEY);
+    } catch (error) {
+      console.warn("library-cache: clear skipped", error);
+    }
     return;
   }
 
-  const cache = readRawCache();
+  const cache = readCache();
   delete cache[clean(userId)];
-  writeRawCache(cache);
+  writeCache(cache);
 }
 
 export function getCachedLibrary(
@@ -475,16 +476,20 @@ export function getCachedLibrary(
     allowExpired = false
   } = {}
 ) {
-  const bucket = readUserBucket(userId);
+  const cleanUserId = clean(userId);
+  if (!cleanUserId) return [];
+
+  const cache = readCache();
+  const bucket = getUserBucket(cache, cleanUserId);
   if (!bucket) return [];
 
-  const updatedAt = getBucketUpdatedAt(bucket, { mode, category });
+  const updatedAt = getUpdatedAt(bucket, { mode, category });
 
   if (!allowExpired && isExpired(updatedAt)) {
     return [];
   }
 
-  return getBucketItems(bucket, { mode, category });
+  return getItems(bucket, { mode, category });
 }
 
 export function getCachedLibraryItem(
@@ -499,82 +504,70 @@ export function getCachedLibraryItem(
   const key = cleanLower(canonicalKey);
   if (!key) return null;
 
-  const list = getCachedLibrary(userId, {
+  return getCachedLibrary(userId, {
     mode,
     category,
     allowExpired
-  });
-
-  return list.find((item) => cleanLower(item?.media_entities?.canonical_key) === key) || null;
+  }).find((item) => cleanLower(item?.media_entities?.canonical_key) === key) || null;
 }
 
 export function updateCachedLibraryItem(userId, item, { category = "" } = {}) {
   const cleanUserId = clean(userId);
   if (!cleanUserId || !item) return;
 
-  const cache = readRawCache();
+  const cache = readCache();
   const bucket = getUserBucket(cache, cleanUserId);
   const itemCategory = cleanLower(category || resolveItemCategory(item));
 
   ["list", "full"].forEach((mode) => {
-    const source = Array.isArray(bucket[mode]) ? bucket[mode] : [];
-    const next = dedupeAndSort([item, ...source]);
-    bucket[mode] = next;
+    const existing = getItems(bucket, { mode });
+    bucket[mode] = dedupeAndSort([item, ...existing]);
     bucket.updated_at[mode] = now();
 
     if (itemCategory) {
-      const categoryBucket = ensureCategoryBucket(bucket, itemCategory);
-      categoryBucket[mode] = dedupeAndSort([item, ...(categoryBucket[mode] || [])]);
+      const categoryBucket = getCategoryBucket(bucket, itemCategory);
+      categoryBucket[mode] = dedupeAndSort([item, ...categoryBucket[mode]]);
       categoryBucket.updated_at[mode] = now();
     }
   });
 
   cache[cleanUserId] = bucket;
-  writeRawCache(cache);
+  writeCache(cache);
 }
 
 export function removeCachedLibraryItem(userId, userMediaId, { category = "" } = {}) {
   const cleanUserId = clean(userId);
   const cleanId = Number(userMediaId || 0);
+
   if (!cleanUserId || !cleanId) return;
 
-  const cache = readRawCache();
-  const bucket = cache[cleanUserId] ? normalizeBucket(cache[cleanUserId]) : null;
-  if (!bucket) return;
+  const cache = readCache();
+  const bucket = getUserBucket(cache, cleanUserId);
 
   ["list", "full"].forEach((mode) => {
     bucket[mode] = dedupeAndSort(
-      (bucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
+      safeArray(bucket[mode]).filter((item) => Number(item?.id || 0) !== cleanId)
     );
     bucket.updated_at[mode] = now();
   });
 
-  const cleanCategory = cleanLower(category);
+  const categories = category
+    ? [cleanLower(category)]
+    : Object.keys(bucket.categories || {});
 
-  if (cleanCategory) {
-    const categoryBucket = ensureCategoryBucket(bucket, cleanCategory);
+  categories.forEach((categoryName) => {
+    const categoryBucket = getCategoryBucket(bucket, categoryName);
 
     ["list", "full"].forEach((mode) => {
       categoryBucket[mode] = dedupeAndSort(
-        (categoryBucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
+        safeArray(categoryBucket[mode]).filter((item) => Number(item?.id || 0) !== cleanId)
       );
       categoryBucket.updated_at[mode] = now();
     });
-  } else {
-    Object.keys(bucket.categories || {}).forEach((bucketCategory) => {
-      const categoryBucket = ensureCategoryBucket(bucket, bucketCategory);
-
-      ["list", "full"].forEach((mode) => {
-        categoryBucket[mode] = dedupeAndSort(
-          (categoryBucket[mode] || []).filter((item) => Number(item?.id || 0) !== cleanId)
-        );
-        categoryBucket.updated_at[mode] = now();
-      });
-    });
-  }
+  });
 
   cache[cleanUserId] = bucket;
-  writeRawCache(cache);
+  writeCache(cache);
 }
 
 export async function refreshUserLibrary(
@@ -588,45 +581,45 @@ export async function refreshUserLibrary(
   const cleanUserId = clean(userId);
   if (!cleanUserId) return [];
 
-  const cleanMode = mode === "full" ? "full" : "list";
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
-  const key = refreshKey(cleanUserId, { mode: cleanMode, category: cleanCategory });
+  const key = makeKey(cleanUserId, {
+    mode: cleanMode,
+    category: cleanCategory,
+    suffix: "refresh"
+  });
 
-  if (!force && refreshPromisesByKey.has(key)) {
-    return refreshPromisesByKey.get(key);
+  if (!force && refreshPromises.has(key)) {
+    return refreshPromises.get(key);
   }
 
-  const refreshPromise = (async () => {
-    const fresh = await fetchUserLibraryFromDb(cleanUserId, {
+  const promise = (async () => {
+    const freshItems = await fetchUserLibraryFromDb(cleanUserId, {
       mode: cleanMode,
       category: cleanCategory
     });
 
-    if (!hasValidItems(fresh)) {
-      throw new Error("library-cache: invalid DB payload");
-    }
-
-    const cache = readRawCache();
+    const cache = readCache();
     const bucket = getUserBucket(cache, cleanUserId);
 
-    assignBucketItems(bucket, cleanMode, fresh, {
+    assignItems(bucket, freshItems, {
+      mode: cleanMode,
       category: cleanCategory
     });
 
     cache[cleanUserId] = bucket;
-    writeRawCache(cache);
-    retryAttemptsByUserId.set(cleanUserId, 0);
+    writeCache(cache);
 
-    return getBucketItems(bucket, {
+    return getItems(bucket, {
       mode: cleanMode,
       category: cleanCategory
     });
   })().finally(() => {
-    refreshPromisesByKey.delete(key);
+    refreshPromises.delete(key);
   });
 
-  refreshPromisesByKey.set(key, refreshPromise);
-  return refreshPromise;
+  refreshPromises.set(key, promise);
+  return promise;
 }
 
 export function refreshUserLibraryInBackground(
@@ -640,10 +633,10 @@ export function refreshUserLibraryInBackground(
   const cleanUserId = clean(userId);
   if (!cleanUserId) return;
 
-  const cleanMode = mode === "full" ? "full" : "list";
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
 
-  if (!force && !shouldBackgroundRefresh(cleanUserId, { mode: cleanMode, category: cleanCategory })) {
+  if (!force && !shouldRefresh(cleanUserId, { mode: cleanMode, category: cleanCategory })) {
     return;
   }
 
@@ -652,12 +645,6 @@ export function refreshUserLibraryInBackground(
     category: cleanCategory,
     force
   }).catch((error) => {
-    if (isTimeoutError(error)) {
-      console.warn("library-cache: background refresh timed out", error);
-      scheduleRetry(cleanUserId);
-      return;
-    }
-
     console.warn("library-cache: background refresh skipped", error);
   });
 }
@@ -675,12 +662,17 @@ export async function loadUserLibrary(
   const cleanUserId = clean(userId);
   if (!cleanUserId) return [];
 
-  const cleanMode = mode === "full" ? "full" : "list";
+  const cleanMode = getMode(mode);
   const cleanCategory = cleanLower(category);
-  const loadKey = `${cleanUserId}::${cleanMode}::${cleanCategory}::${allowStale ? "stale" : "fresh"}::${forceRefresh ? "force" : "normal"}`;
 
-  if (loadPromisesByKey.has(loadKey)) {
-    return loadPromisesByKey.get(loadKey);
+  const key = makeKey(cleanUserId, {
+    mode: cleanMode,
+    category: cleanCategory,
+    suffix: `${allowStale ? "stale" : "fresh"}:${forceRefresh ? "force" : "normal"}`
+  });
+
+  if (loadPromises.has(key)) {
+    return loadPromises.get(key);
   }
 
   const freshCache = getCachedLibrary(cleanUserId, {
@@ -700,12 +692,13 @@ export async function loadUserLibrary(
     return freshCache;
   }
 
-  const staleSnapshot = getLocalLibrarySnapshot(cleanUserId, {
+  const staleCache = getCachedLibrary(cleanUserId, {
     mode: cleanMode,
-    category: cleanCategory
+    category: cleanCategory,
+    allowExpired: true
   });
 
-  if (allowStale && staleSnapshot.length && !forceRefresh) {
+  if (allowStale && staleCache.length && !forceRefresh) {
     if (backgroundRefresh) {
       refreshUserLibraryInBackground(cleanUserId, {
         mode: cleanMode,
@@ -713,30 +706,22 @@ export async function loadUserLibrary(
       });
     }
 
-    return staleSnapshot;
+    return staleCache;
   }
 
-  const loadPromise = (async () => {
-    try {
-      return await refreshUserLibrary(cleanUserId, {
-        mode: cleanMode,
-        category: cleanCategory,
-        force: forceRefresh
-      });
-    } catch (error) {
-      if (isTimeoutError(error)) {
-        console.warn("library-cache: DB load timed out, showing local data", error);
-        scheduleRetry(cleanUserId);
-      } else {
-        console.warn("library-cache: DB load failed, using fallback cache", error);
-      }
+  const promise = refreshUserLibrary(cleanUserId, {
+    mode: cleanMode,
+    category: cleanCategory,
+    force: forceRefresh
+  })
+    .catch((error) => {
+      console.warn("library-cache: DB load failed, using cache fallback", error);
+      return staleCache;
+    })
+    .finally(() => {
+      loadPromises.delete(key);
+    });
 
-      return staleSnapshot;
-    } finally {
-      loadPromisesByKey.delete(loadKey);
-    }
-  })();
-
-  loadPromisesByKey.set(loadKey, loadPromise);
-  return loadPromise;
+  loadPromises.set(key, promise);
+  return promise;
 }
