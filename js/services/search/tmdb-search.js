@@ -18,6 +18,10 @@ function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
   });
 }
 
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
 function normalizeCategory(category = "") {
   return category === "series" ? "series" : "movies";
 }
@@ -27,7 +31,7 @@ function getTmdbType(category = "") {
 }
 
 function getYearFromDate(value = "") {
-  const raw = String(value || "").trim();
+  const raw = clean(value);
   if (!raw) return null;
 
   const year = Number(raw.slice(0, 4));
@@ -35,20 +39,20 @@ function getYearFromDate(value = "") {
 }
 
 function buildTmdbCover(path = "") {
-  const clean = String(path || "").trim();
-  return clean ? `${TMDB_IMAGE_BASE_URL}${clean}` : "";
+  const value = clean(path);
+  return value ? `${TMDB_IMAGE_BASE_URL}${value}` : "";
 }
 
 function pickTitle(item = {}, category = "movies", language = "ru") {
   const normalizedCategory = normalizeCategory(category);
 
   const localizedTitle = normalizedCategory === "series"
-    ? String(item?.name || "").trim()
-    : String(item?.title || "").trim();
+    ? clean(item?.name)
+    : clean(item?.title);
 
   const originalTitle = normalizedCategory === "series"
-    ? String(item?.original_name || "").trim()
-    : String(item?.original_title || "").trim();
+    ? clean(item?.original_name)
+    : clean(item?.original_title);
 
   if (language === "en") {
     return originalTitle || localizedTitle;
@@ -61,8 +65,8 @@ function pickOriginalTitle(item = {}, category = "movies") {
   const normalizedCategory = normalizeCategory(category);
 
   return normalizedCategory === "series"
-    ? String(item?.original_name || item?.name || "").trim()
-    : String(item?.original_title || item?.title || "").trim();
+    ? clean(item?.original_name || item?.name)
+    : clean(item?.original_title || item?.title);
 }
 
 function getReleaseYear(item = {}, category = "movies") {
@@ -71,6 +75,13 @@ function getReleaseYear(item = {}, category = "movies") {
   return normalizedCategory === "series"
     ? getYearFromDate(item?.first_air_date)
     : getYearFromDate(item?.release_date);
+}
+
+function getLocalizedDescription(item = {}, language = "ru") {
+  const overview = clean(item?.overview);
+  return language === "en"
+    ? { description_ru: "", description_en: overview }
+    : { description_ru: overview, description_en: "" };
 }
 
 function mapTmdbItem(item = {}, category = "movies", language = "ru") {
@@ -90,27 +101,37 @@ function mapTmdbItem(item = {}, category = "movies", language = "ru") {
     item?.name,
     item?.original_title,
     item?.original_name
-  ].map((value) => String(value || "").trim()).filter(Boolean));
+  ].map(clean).filter(Boolean));
+
+  const descriptions = getLocalizedDescription(item, language);
 
   return {
     canonical_key: `${normalizedCategory}:tmdb:${tmdbType}:${id}`,
     category: normalizedCategory,
+
     title: title || originalTitle,
+    title_primary: title || originalTitle,
     title_ru: language === "ru" ? title : "",
     title_en: language === "en" ? title : "",
     original_title: originalTitle || title,
+
     year: getReleaseYear(item, normalizedCategory),
     cover_url: buildTmdbCover(item?.poster_path),
-    description_ru: language === "ru" ? String(item?.overview || "").trim() : "",
-    description_en: language === "en" ? String(item?.overview || "").trim() : "",
+
+    description_ru: descriptions.description_ru,
+    description_en: descriptions.description_en,
+
     aliases,
+
     external_ids: {
       tmdb: id,
       imdb: null,
       wikidata: null
     },
+
     primary_source: "tmdb",
     score: Number(item?.popularity || item?.vote_average || 0),
+
     meta: {
       source: "tmdb",
       tmdb_type: tmdbType,
@@ -120,13 +141,17 @@ function mapTmdbItem(item = {}, category = "movies", language = "ru") {
       vote_count: item?.vote_count || null,
       popularity: item?.popularity || null,
       backdrop_path: item?.backdrop_path || "",
-      genre_ids: safeArray(item?.genre_ids)
+      genre_ids: safeArray(item?.genre_ids),
+      metadata_status:
+        item?.poster_path && item?.overview
+          ? "partial"
+          : "needs_enrichment"
     }
   };
 }
 
 async function fetchTmdbSearch(query = "", category = "movies", language = "ru") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = clean(query);
   if (!cleanQuery || !TMDB_API_KEY) return [];
 
   const normalizedCategory = normalizeCategory(category);
@@ -157,20 +182,84 @@ async function fetchTmdbSearch(query = "", category = "movies", language = "ru")
     .filter(Boolean);
 }
 
+async function fetchTmdbDetailsById(item = {}, language = "ru") {
+  const tmdbId = clean(item?.external_ids?.tmdb);
+  const tmdbType = item?.meta?.tmdb_type || getTmdbType(item.category);
+
+  if (!tmdbId || !TMDB_API_KEY) return item;
+
+  const url = new URL(`${TMDB_BASE_URL}/${tmdbType}/${tmdbId}`);
+  url.searchParams.set("api_key", TMDB_API_KEY);
+  url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
+  url.searchParams.set("append_to_response", "external_ids");
+
+  const response = await fetchWithTimeout(url.toString(), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) return item;
+
+  const payload = await response.json();
+
+  const mapped = mapTmdbItem(payload, item.category, language);
+  if (!mapped) return item;
+
+  return mergeTmdbResults([item], [{
+    ...mapped,
+    external_ids: {
+      ...mapped.external_ids,
+      imdb: clean(payload?.external_ids?.imdb_id)
+    },
+    meta: {
+      ...mapped.meta,
+      details_loaded: true,
+      homepage: clean(payload.homepage),
+      status: clean(payload.status),
+      runtime: payload.runtime || null,
+      number_of_seasons: payload.number_of_seasons || null,
+      number_of_episodes: payload.number_of_episodes || null
+    }
+  }])[0] || item;
+}
+
+async function enrichTmdbResultsWithDetails(items = [], language = "ru") {
+  const base = safeArray(items).slice(0, TMDB_LIMIT);
+
+  const results = await Promise.allSettled(
+    base.map((item) => fetchTmdbDetailsById(item, language))
+  );
+
+  return results.map((result, index) =>
+    result.status === "fulfilled" ? result.value : base[index]
+  );
+}
+
 async function fetchTmdbSearchFallbackLanguage(query = "", category = "movies", language = "ru") {
   const primary = await fetchTmdbSearch(query, category, language);
 
-  if (primary.length || language === "en") {
-    return primary;
+  let merged = primary;
+
+  if (language !== "en") {
+    try {
+      const fallback = await fetchTmdbSearch(query, category, "en");
+      merged = mergeTmdbResults(primary, fallback);
+    } catch (error) {
+      console.warn(`TMDB ${category} fallback language failed:`, error);
+    }
   }
 
-  try {
-    const fallback = await fetchTmdbSearch(query, category, "en");
-    return mergeTmdbResults(primary, fallback);
-  } catch (error) {
-    console.warn(`TMDB ${category} fallback language failed:`, error);
-    return primary;
-  }
+  const detailsRu = language === "en"
+    ? []
+    : await enrichTmdbResultsWithDetails(merged, "ru").catch(() => []);
+
+  const detailsEn = await enrichTmdbResultsWithDetails(merged, "en").catch(() => []);
+
+  return mergeTmdbResults(
+    mergeTmdbResults(merged, detailsRu),
+    detailsEn
+  );
 }
 
 function mergeTmdbResults(primaryItems = [], fallbackItems = []) {
@@ -193,27 +282,42 @@ function mergeTmdbResults(primaryItems = [], fallbackItems = []) {
     map.set(key, {
       ...existing,
       ...item,
+
       canonical_key: existing.canonical_key || item.canonical_key,
+      category: existing.category || item.category,
+
       title: existing.title || item.title,
+      title_primary: existing.title_primary || item.title_primary || item.title,
       title_ru: existing.title_ru || item.title_ru,
       title_en: existing.title_en || item.title_en,
       original_title: existing.original_title || item.original_title,
+
       year: existing.year || item.year || null,
       cover_url: existing.cover_url || item.cover_url,
+
       description_ru: existing.description_ru || item.description_ru,
       description_en: existing.description_en || item.description_en,
+
       aliases: uniqueArray([
         ...safeArray(existing.aliases),
         ...safeArray(item.aliases)
       ]),
+
       external_ids: {
         ...(existing.external_ids || {}),
         ...(item.external_ids || {})
       },
+
       meta: {
         ...(existing.meta || {}),
-        ...(item.meta || {})
+        ...(item.meta || {}),
+        metadata_status:
+          (existing.cover_url || item.cover_url) &&
+          (existing.description_ru || item.description_ru || existing.description_en || item.description_en)
+            ? "partial"
+            : "needs_enrichment"
       },
+
       score: Math.max(existing.score || 0, item.score || 0)
     });
   });
