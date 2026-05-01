@@ -1,5 +1,5 @@
 import { escapeHtml, clampText, safeArray } from "../utils.js";
-import { getCategoryLabel, STATUS_LABELS } from "../config.js";
+import { getCategoryLabel, STATUS_LABELS, ROUTES } from "../config.js";
 import { navigate } from "../router.js";
 import {
   state,
@@ -36,20 +36,9 @@ import {
   shouldEnrichEntity
 } from "../services/metadata-enrichment.js";
 
-const CARD_TIMEOUT_MS = 8000;
-const MUTATION_TIMEOUT_MS = 8000;
+const CARD_TIMEOUT_MS = 9000;
+const MUTATION_TIMEOUT_MS = 9000;
 const EMPTY_FOLDERS_KEY = "plamut_empty_folders_by_category_v1";
-
-const USER_MEDIA_SELECT = `
-  id,
-  user_id,
-  entity_id,
-  category,
-  status,
-  folder_name,
-  created_at,
-  updated_at
-`;
 
 const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
@@ -87,25 +76,17 @@ const I18N = {
     cardNotFound: "Карточка не найдена.",
     unavailableTitle: "Карточка временно недоступна",
     unavailableDescription: "Не удалось быстро загрузить данные из базы. Если карточка была открыта из библиотеки, данные появятся после фоновой загрузки.",
-    menu: "Меню карточки",
     actions: "Действия",
     addToLibrary: "Добавить в библиотеку",
-    addedToLibrary: "Добавлено в библиотеку",
     alreadyInLibrary: "Уже есть в библиотеке",
     cardNotReady: "Карточка ещё не загружена. Попробуй через несколько секунд.",
     status: "Статус",
     folder: "Папка",
-    folders: "Папки",
     createFolder: "Создать папку",
     newFolderName: "Название новой папки",
     removeFolder: "Убрать из папки",
-    delete: "Удалить",
     deleteFromLibrary: "Удалить из библиотеки",
-    confirmDeleteTitle: "Удалить карточку?",
     confirmDeleteText: "Карточка будет удалена из твоей библиотеки.",
-    cancel: "Отмена",
-    yes: "Да",
-    close: "Закрыть",
     description: "Описание",
     noDescription: "Описание пока уточняется",
     metadataUpdating: "Данные обновляются…",
@@ -114,10 +95,6 @@ const I18N = {
     universe: "Вселенная",
     continuity: "Линия",
     branch: "Ветка",
-    series: "Серия",
-    previous: "Предыдущая часть",
-    next: "Следующая часть",
-    adaptations: "Экранизации",
     planned: "Запланировано",
     in_progress: "В процессе",
     done: "Завершено",
@@ -125,32 +102,25 @@ const I18N = {
     saved: "Сохранено",
     deleted: "Удалено из библиотеки",
     folderUpdated: "Папка обновлена",
-    statusUpdated: "Статус обновлён"
+    statusUpdated: "Статус обновлён",
+    signIn: "Войти"
   },
   en: {
     loadingCard: "Loading card…",
     cardNotFound: "Card not found.",
     unavailableTitle: "Card is temporarily unavailable",
     unavailableDescription: "Could not quickly load data from the database. If this card was opened from your library, the data will appear after background loading.",
-    menu: "Card menu",
     actions: "Actions",
     addToLibrary: "Add to library",
-    addedToLibrary: "Added to library",
     alreadyInLibrary: "Already in library",
     cardNotReady: "The card is not loaded yet. Try again in a few seconds.",
     status: "Status",
     folder: "Folder",
-    folders: "Folders",
     createFolder: "Create folder",
     newFolderName: "New folder name",
     removeFolder: "Remove from folder",
-    delete: "Delete",
     deleteFromLibrary: "Delete from library",
-    confirmDeleteTitle: "Delete card?",
     confirmDeleteText: "This card will be removed from your library.",
-    cancel: "Cancel",
-    yes: "Yes",
-    close: "Close",
     description: "Description",
     noDescription: "Description is being updated",
     metadataUpdating: "Updating metadata…",
@@ -159,10 +129,6 @@ const I18N = {
     universe: "Universe",
     continuity: "Continuity",
     branch: "Branch",
-    series: "Series",
-    previous: "Previous part",
-    next: "Next part",
-    adaptations: "Adaptations",
     planned: "Planned",
     in_progress: "In progress",
     done: "Done",
@@ -170,7 +136,8 @@ const I18N = {
     saved: "Saved",
     deleted: "Removed from library",
     folderUpdated: "Folder updated",
-    statusUpdated: "Status updated"
+    statusUpdated: "Status updated",
+    signIn: "Sign in"
   }
 };
 
@@ -291,25 +258,9 @@ function resolveTitle(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
 
   if ((entity.category || "") === "books") {
-    if (lang === "en") {
-      return (
-        entity.title_en ||
-        entity.title_primary ||
-        entity.title_ru ||
-        entity.original_title ||
-        entity.title ||
-        t("unavailableTitle")
-      );
-    }
-
-    return (
-      entity.title_ru ||
-      entity.title_primary ||
-      entity.title_en ||
-      entity.original_title ||
-      entity.title ||
-      t("unavailableTitle")
-    );
+    return lang === "en"
+      ? entity.title_en || entity.title_primary || entity.title_ru || entity.original_title || entity.title || t("unavailableTitle")
+      : entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || entity.title || t("unavailableTitle");
   }
 
   return (
@@ -429,7 +380,9 @@ function loadFastEntity(params = {}) {
   const stored = normalizeStoredEntity(getStoredCardItemByKey(key));
 
   const candidates = [cachedEntity, temp, stored].filter(Boolean);
-  const matching = candidates.find((item) => item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key));
+  const matching = candidates.find((item) =>
+    item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key)
+  );
 
   return matching || null;
 }
@@ -472,7 +425,7 @@ async function loadUserMedia(userId, entityId) {
   const { data, error } = await withTimeout(
     supabase
       .from("user_media")
-      .select(USER_MEDIA_SELECT)
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .eq("user_id", userId)
       .eq("entity_id", entityId)
       .maybeSingle(),
@@ -564,35 +517,6 @@ function renderCover(entity = {}) {
   return `<div class="card-cover__fallback">?</div>`;
 }
 
-function renderStatusBadge(userMedia) {
-  if (!userMedia?.status) return "";
-  return `<span class="card-badge" data-user-status>${escapeHtml(getStatusLabel(userMedia.status))}</span>`;
-}
-
-function renderFolderBadge(userMedia) {
-  if (!userMedia?.folder_name) return "";
-  return `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`;
-}
-
-function renderRelatedFallbackFromMeta(entity = {}) {
-  const relations = entity?.meta?.wikidata_relations || {};
-
-  const lines = [
-    { key: "series", label: t("series") },
-    { key: "previous", label: t("previous") },
-    { key: "next", label: t("next") },
-    { key: "adaptations", label: t("adaptations") }
-  ]
-    .map(({ key, label }) => {
-      const values = safeArray(relations?.[key]).filter(Boolean);
-      if (!values.length) return "";
-      return `<div class="related-card__meta"><b>${escapeHtml(label)}:</b> ${escapeHtml(values.slice(0, 4).join(", "))}</div>`;
-    })
-    .filter(Boolean);
-
-  return lines.join("");
-}
-
 function renderRelatedItem(item = {}) {
   const entity = item.media_entities || item;
   const title = resolveTitle(entity);
@@ -641,7 +565,6 @@ function groupUniverseLinks(links = []) {
       universe.continuities.set(continuityKey, {
         continuity_key: continuityKey,
         continuity_title: link.continuity_title || t("continuity"),
-        continuity_type: link.continuity_type || "",
         branches: new Map()
       });
     }
@@ -651,13 +574,9 @@ function groupUniverseLinks(links = []) {
     if (!continuity.branches.has(branchKey)) {
       continuity.branches.set(branchKey, {
         branch_key: branchKey,
-        branch_title: link.branch_title || t("branch"),
-        branch_type: link.branch_type || "",
-        links: []
+        branch_title: link.branch_title || t("branch")
       });
     }
-
-    continuity.branches.get(branchKey).links.push(link);
   });
 
   return Array.from(grouped.values()).map((universe) => ({
@@ -682,13 +601,9 @@ function renderUniverseLinks(links = []) {
           <button class="universe-link" type="button" data-universe-key="${escapeHtml(universe.universe_key)}">
             <div class="universe-link__title">${escapeHtml(universe.universe_title)}</div>
             ${universe.continuities.map((continuity) => `
-              <div class="universe-link__continuity">
-                ${escapeHtml(continuity.continuity_title)}
-              </div>
+              <div class="universe-link__continuity">${escapeHtml(continuity.continuity_title)}</div>
               <div class="universe-link__branches">
-                ${continuity.branches.map((branch) => `
-                  <span>${escapeHtml(branch.branch_title)}</span>
-                `).join("")}
+                ${continuity.branches.map((branch) => `<span>${escapeHtml(branch.branch_title)}</span>`).join("")}
               </div>
             `).join("")}
           </button>
@@ -757,9 +672,7 @@ function renderActionModal({ userMedia = null, folders = [] } = {}) {
 
         <section class="card-action-modal__group">
           <div class="card-action-modal__group-title">${escapeHtml(t("status"))}</div>
-          <div class="card-action-modal__options">
-            ${statusButtons}
-          </div>
+          <div class="card-action-modal__options">${statusButtons}</div>
         </section>
 
         <section class="card-action-modal__group">
@@ -800,265 +713,113 @@ function renderActionModal({ userMedia = null, folders = [] } = {}) {
 function renderStyles() {
   return `
     <style>
-      .card-page { display:flex; flex-direction:column; gap:18px; }
-      .card-shell { position:relative; display:grid; grid-template-columns:132px 1fr; gap:16px; padding:16px; border-radius:22px; border:1px solid var(--border-soft); background:var(--bg-elevated); }
-      .card-cover { width:132px; aspect-ratio:2/3; overflow:hidden; border-radius:16px; border:1px solid var(--border-soft); background:var(--surface); }
-      .card-cover img { width:100%; height:100%; object-fit:cover; }
-      .card-cover.is-empty { display:grid; place-items:center; }
-      .card-cover.is-empty::after { content:"?"; color:var(--text-soft); font-weight:850; font-size:28px; }
-      .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:850; }
-
-      .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; padding-right:44px; }
-      .card-title { font-size:24px; line-height:1.15; font-weight:850; color:var(--text); }
-      .card-subtitle { color:var(--text-soft); font-size:14px; line-height:1.4; }
-      .card-badges { display:flex; gap:8px; flex-wrap:wrap; }
-      .card-badge { display:inline-flex; align-items:center; min-height:26px; padding:5px 9px; border-radius:999px; background:var(--accent-soft); color:var(--text); font-size:12px; }
-      .card-badge.folder { background:var(--bg-soft); }
-      .card-badge.muted { background:var(--surface); color:var(--text-soft); border:1px solid var(--border-soft); }
-
-      .card-menu-wrap { position:absolute; top:14px; right:14px; z-index:10; }
-      .card-menu-btn { width:38px; height:38px; display:grid; place-items:center; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-size:22px; line-height:1; }
-
-      .card-status { min-height:20px; font-size:13px; color:var(--text-soft); }
-      .card-section { padding:16px; border-radius:18px; border:1px solid var(--border-soft); background:var(--surface); }
-      .card-section[hidden] { display:none; }
-      .card-section__title { font-size:17px; font-weight:850; color:var(--text); margin-bottom:10px; }
-      .card-description { color:var(--text-soft); font-size:15px; line-height:1.55; white-space:pre-line; }
-
-      .universe-links { display:grid; gap:10px; }
-      .universe-link { width:100%; display:flex; flex-direction:column; gap:7px; padding:12px; border-radius:15px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
-      .universe-link__title { font-weight:850; line-height:1.25; }
-      .universe-link__continuity { color:var(--text-soft); font-size:13px; }
-      .universe-link__branches { display:flex; flex-wrap:wrap; gap:6px; }
-      .universe-link__branches span { font-size:12px; color:var(--text-soft); background:var(--bg-soft); padding:4px 8px; border-radius:999px; }
-
-      .related-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; }
-      .related-card { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:center; padding:8px; border-radius:14px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
-      .related-card__cover { width:54px; height:76px; border-radius:10px; overflow:hidden; background:var(--surface); }
-      .related-card__cover img { width:100%; height:100%; object-fit:cover; }
-      .related-card__cover.is-empty { display:grid; place-items:center; }
-      .related-card__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); }
-      .related-card__body { min-width:0; }
-      .related-card__title { font-size:14px; font-weight:750; line-height:1.3; }
-      .related-card__meta { margin-top:4px; font-size:12px; color:var(--text-soft); }
-
-      .card-empty { padding:20px; border-radius:18px; background:var(--surface); border:1px solid var(--border-soft); color:var(--text-soft); }
-
-      .card-action-backdrop {
-        position:fixed;
-        inset:0;
-        z-index:120;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:rgba(5,10,20,.58);
-      }
-
-      .card-action-modal {
-        width:min(100%, 440px);
-        max-height:min(86vh, 720px);
-        overflow:auto;
-        border-radius:24px;
-        border:1px solid var(--border);
-        background:var(--bg-elevated);
-        box-shadow:var(--shadow);
-        padding:18px;
-        color:var(--text);
-      }
-
-      .card-action-modal__header {
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:14px;
-        margin-bottom:16px;
-      }
-
-      .card-action-modal__title {
-        font-size:18px;
-        font-weight:850;
-        line-height:1.35;
-      }
-
-      .card-action-modal__close {
-        width:34px;
-        height:34px;
-        border-radius:999px;
-        border:1px solid var(--border);
-        background:var(--surface);
-        color:var(--text);
-        font-size:22px;
-        line-height:1;
-      }
-
-      .card-action-modal__group {
-        display:flex;
-        flex-direction:column;
-        gap:10px;
-        padding:14px 0;
-        border-top:1px solid var(--border-soft);
-      }
-
-      .card-action-modal__group-title {
-        font-size:13px;
-        font-weight:850;
-        color:var(--text-soft);
-        text-transform:uppercase;
-        letter-spacing:.04em;
-      }
-
-      .card-action-modal__options {
-        display:flex;
-        flex-wrap:wrap;
-        gap:8px;
-      }
-
-      .card-action-modal__option {
-        padding:10px 12px;
-        border-radius:999px;
-        border:1px solid var(--border);
-        background:var(--surface);
-        color:var(--text);
-        font-weight:700;
-      }
-
-      .card-action-modal__option.active {
-        background:var(--accent);
-        border-color:transparent;
-        color:#fff;
-      }
-
-      .card-action-modal__option.muted {
-        color:var(--text-soft);
-      }
-
-      .card-action-modal__folder-form {
-        display:flex;
-        gap:8px;
-      }
-
-      .card-action-modal__input {
-        flex:1;
-        min-width:0;
-        min-height:42px;
-        border-radius:14px;
-        border:1px solid var(--border);
-        background:var(--surface);
-        color:var(--text);
-        padding:0 12px;
-      }
-
-      .card-action-modal__small-btn,
-      .card-action-modal__primary {
-        min-height:42px;
-        border-radius:14px;
-        background:var(--accent);
-        color:#fff;
-        padding:0 14px;
-        font-weight:800;
-      }
-
-      .card-action-modal__delete {
-        min-height:42px;
-        border-radius:14px;
-        border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-        background:transparent;
-        color:var(--danger);
-        font-weight:850;
-      }
-
-      .confirm-box {
-        display:flex;
-        flex-direction:column;
-        gap:12px;
-      }
-
-      .confirm-actions {
-        display:flex;
-        gap:10px;
-        justify-content:flex-end;
-      }
-
-      .confirm-actions button {
-        min-height:40px;
-        padding:0 14px;
-        border-radius:12px;
-        border:1px solid var(--border);
-        background:var(--surface);
-        color:var(--text);
-        font-weight:750;
-      }
-
-      .confirm-actions .danger {
-        background:var(--danger);
-        border-color:transparent;
-        color:#fff;
-      }
-
-      @media (max-width: 640px) {
-        .card-shell {
-          grid-template-columns:96px 1fr;
-          gap:12px;
-          padding:12px;
-          border-radius:20px;
-        }
-
-        .card-cover {
-          width:96px;
-          border-radius:14px;
-        }
-
-        .card-main {
-          padding-right:38px;
-          gap:9px;
-        }
-
-        .card-title {
-          font-size:20px;
-        }
-
-        .card-action-modal__folder-form {
-          flex-direction:column;
-        }
+      .card-page{display:flex;flex-direction:column;gap:18px}
+      .card-shell{position:relative;display:grid;grid-template-columns:132px 1fr;gap:16px;padding:16px;border-radius:22px;border:1px solid var(--border-soft);background:var(--bg-elevated)}
+      .card-cover{width:132px;aspect-ratio:2/3;overflow:hidden;border-radius:16px;border:1px solid var(--border-soft);background:var(--surface)}
+      .card-cover img{width:100%;height:100%;object-fit:cover}
+      .card-cover.is-empty{display:grid;place-items:center}
+      .card-cover.is-empty::after{content:"?";color:var(--text-soft);font-weight:850;font-size:28px}
+      .card-cover__fallback{width:100%;height:100%;display:grid;place-items:center;color:var(--text-soft);font-size:28px;font-weight:850}
+      .card-main{min-width:0;display:flex;flex-direction:column;gap:12px;padding-right:44px}
+      .card-title{font-size:24px;line-height:1.15;font-weight:850;color:var(--text)}
+      .card-subtitle{color:var(--text-soft);font-size:14px;line-height:1.4}
+      .card-badges{display:flex;gap:8px;flex-wrap:wrap}
+      .card-badge{display:inline-flex;align-items:center;min-height:26px;padding:5px 9px;border-radius:999px;background:var(--accent-soft);color:var(--text);font-size:12px}
+      .card-badge.folder{background:var(--bg-soft)}
+      .card-badge.muted{background:var(--surface);color:var(--text-soft);border:1px solid var(--border-soft)}
+      .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:10}
+      .card-menu-btn{width:38px;height:38px;display:grid;place-items:center;border-radius:999px;border:1px solid var(--border);background:var(--surface-strong);color:var(--text);font-size:22px;line-height:1}
+      .card-status{min-height:20px;font-size:13px;color:var(--text-soft)}
+      .card-section{padding:16px;border-radius:18px;border:1px solid var(--border-soft);background:var(--surface)}
+      .card-section__title{font-size:17px;font-weight:850;color:var(--text);margin-bottom:10px}
+      .card-description{color:var(--text-soft);font-size:15px;line-height:1.55;white-space:pre-line}
+      .related-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+      .related-card{display:grid;grid-template-columns:54px 1fr;gap:10px;align-items:center;padding:8px;border-radius:14px;border:1px solid var(--border-soft);background:var(--bg-elevated);color:var(--text);text-align:left}
+      .related-card__cover{width:54px;height:76px;border-radius:10px;overflow:hidden;background:var(--surface);border:1px solid var(--border-soft)}
+      .related-card__cover img{width:100%;height:100%;object-fit:cover}
+      .related-card__fallback{width:100%;height:100%;display:grid;place-items:center;color:var(--text-soft)}
+      .related-card__title{font-size:14px;font-weight:800;line-height:1.25}
+      .related-card__meta{font-size:12px;color:var(--text-soft);margin-top:5px}
+      .universe-links{display:grid;gap:10px}
+      .universe-link{width:100%;display:flex;flex-direction:column;gap:7px;padding:12px;border-radius:15px;border:1px solid var(--border-soft);background:var(--bg-elevated);color:var(--text);text-align:left}
+      .universe-link__title{font-weight:850;line-height:1.25}
+      .universe-link__continuity{color:var(--text-soft);font-size:13px}
+      .universe-link__branches{display:flex;flex-wrap:wrap;gap:6px}
+      .universe-link__branches span{font-size:12px;color:var(--text-soft);background:var(--bg-soft);padding:4px 8px;border-radius:999px}
+      .card-action-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.48)}
+      .card-action-modal{width:min(100%,440px);max-height:min(86vh,720px);overflow:auto;border-radius:24px;border:1px solid var(--border);background:var(--bg-elevated);box-shadow:var(--shadow);padding:18px;color:var(--text)}
+      .card-action-modal__header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
+      .card-action-modal__title{font-size:18px;font-weight:850}
+      .card-action-modal__close{width:34px;height:34px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:22px;line-height:1}
+      .card-action-modal__group{display:flex;flex-direction:column;gap:10px;padding:14px 0;border-top:1px solid var(--border-soft)}
+      .card-action-modal__group-title{font-size:13px;font-weight:850;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em}
+      .card-action-modal__options{display:flex;flex-wrap:wrap;gap:8px}
+      .card-action-modal__option{padding:10px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:650}
+      .card-action-modal__option.active{background:var(--accent);border-color:transparent;color:#fff}
+      .card-action-modal__option.muted{color:var(--text-soft)}
+      .card-action-modal__folder-form{display:flex;gap:8px}
+      .card-action-modal__input{flex:1;min-width:0;min-height:42px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px}
+      .card-action-modal__small-btn,.card-action-modal__primary{min-height:42px;border-radius:14px;background:var(--accent-soft);color:var(--text);padding:0 12px;font-weight:750}
+      .card-action-modal__primary{width:100%;background:var(--accent);color:#fff}
+      .card-action-modal__delete{width:100%;min-height:44px;border-radius:14px;background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);font-weight:800}
+      @media(max-width:640px){
+        .card-shell{grid-template-columns:96px 1fr;padding:12px;border-radius:18px}
+        .card-cover{width:96px;border-radius:13px}
+        .card-title{font-size:20px}
+        .card-main{padding-right:40px}
+        .related-grid{grid-template-columns:1fr}
+        .card-action-modal__folder-form{flex-direction:column}
       }
     </style>
   `;
 }
 
-function renderCardShell(entity = {}, userMedia = null) {
+function renderPage({ entity, userMedia = null, relatedItems = [], universeLinks = [], statusText = "" } = {}) {
   const title = resolveTitle(entity);
   const description = resolveDescription(entity);
-  const isUpdating = isIncompleteEntity(entity) && !isFallbackEntity(entity);
-  const originalTitle = entity.original_title && entity.original_title !== title
-    ? entity.original_title
+  const categoryLabel = getCategoryLabel(state.language, entity.category || "");
+  const originalTitle = entity.original_title && entity.original_title !== title ? entity.original_title : "";
+
+  const statusBadge = userMedia?.status
+    ? `<span class="card-badge" data-user-status>${escapeHtml(getStatusLabel(userMedia.status))}</span>`
+    : "";
+
+  const folderBadge = userMedia?.folder_name
+    ? `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`
+    : "";
+
+  const metadataBadge = isIncompleteEntity(entity)
+    ? `<span class="card-badge muted">${escapeHtml(t("metadataUpdating"))}</span>`
     : "";
 
   return `
-    <section class="card-page" data-card-key="${escapeHtml(entity.canonical_key || "")}">
+    ${renderStyles()}
+
+    <section class="card-page">
       <article class="card-shell">
-        <div class="card-cover ${getCover(entity) ? "" : "is-empty"}">
+        <div class="card-cover">
           ${renderCover(entity)}
         </div>
 
         <div class="card-main">
           <div class="card-badges">
-            ${entity.category ? `<span class="card-badge">${escapeHtml(getCategoryLabel(state.language, entity.category))}</span>` : ""}
-            ${entity.year ? `<span class="card-badge">${escapeHtml(String(entity.year))}</span>` : ""}
-            ${renderStatusBadge(userMedia)}
-            ${renderFolderBadge(userMedia)}
-            ${isUpdating ? `<span class="card-badge muted">${escapeHtml(t("metadataUpdating"))}</span>` : ""}
+            <span class="card-badge muted">${escapeHtml(categoryLabel)}</span>
+            ${entity.year ? `<span class="card-badge muted">${escapeHtml(String(entity.year))}</span>` : ""}
+            ${statusBadge}
+            ${folderBadge}
+            ${metadataBadge}
           </div>
 
-          <div class="card-title">${escapeHtml(title)}</div>
-          ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
+          <div>
+            <div class="card-title">${escapeHtml(title)}</div>
+            ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
+          </div>
 
-          <div class="card-status" data-card-status></div>
+          <div class="card-status" data-card-status-text>${escapeHtml(statusText || "")}</div>
         </div>
 
         <div class="card-menu-wrap">
-          <button class="card-menu-btn" type="button" aria-label="${escapeHtml(t("menu"))}" data-action="open-action-modal">
-            ⋯
-          </button>
+          <button class="card-menu-btn" type="button" data-action="open-action-modal">⋯</button>
         </div>
       </article>
 
@@ -1069,435 +830,389 @@ function renderCardShell(entity = {}, userMedia = null) {
         </div>
       </section>
 
-      <div data-universe-root></div>
+      ${renderUniverseLinks(universeLinks)}
 
-      <section class="card-section" data-related-section hidden>
-        <div class="card-section__title">${escapeHtml(t("related"))}</div>
-        <div class="related-grid" data-related-grid></div>
-      </section>
+      ${
+        relatedItems.length
+          ? `
+            <section class="card-section">
+              <div class="card-section__title">${escapeHtml(t("related"))}</div>
+              <div class="related-grid">
+                ${relatedItems.map(renderRelatedItem).join("")}
+              </div>
+            </section>
+          `
+          : ""
+      }
 
-      <div data-action-modal-root></div>
+      <div data-card-action-modal-root></div>
     </section>
   `;
 }
 
-function renderLoading(root) {
-  root.innerHTML = `
-    ${renderStyles()}
-    <div class="card-empty">${escapeHtml(t("loadingCard"))}</div>
-  `;
-}
-
-function renderNotFound(root) {
-  root.innerHTML = `
-    ${renderStyles()}
-    <div class="card-empty">${escapeHtml(t("cardNotFound"))}</div>
-  `;
-}
-
-function updateStatus(root, text = "") {
-  const status = root.querySelector("[data-card-status]");
-  if (status) status.textContent = text;
-}
-
-function getRouteKey(params = {}) {
-  return normalizeKey(
-    params.key ||
-    params.canonical_key ||
-    params.canonicalKey ||
-    params.id ||
-    ""
-  );
-}
-
-async function loadRelatedData(root, entity = {}) {
-  if (!entity?.id) return;
-
-  const [relatedResult, universeResult] = await Promise.allSettled([
-    getRelatedItemsForEntityFromDb(entity.id),
-    getEntityUniverseLinksFromDb(entity.id)
-  ]);
-
-  const relatedItems = relatedResult.status === "fulfilled"
-    ? safeArray(relatedResult.value)
-    : [];
-
-  const universeLinks = universeResult.status === "fulfilled"
-    ? safeArray(universeResult.value)
-    : [];
-
-  const universeRoot = root.querySelector("[data-universe-root]");
-  if (universeRoot && universeLinks.length) {
-    universeRoot.innerHTML = renderUniverseLinks(universeLinks);
-  }
-
-  const fallbackRelated = renderRelatedFallbackFromMeta(entity);
-  const relatedSection = root.querySelector("[data-related-section]");
-  const relatedGrid = root.querySelector("[data-related-grid]");
-
-  if (!relatedSection || !relatedGrid) return;
-
-  if (relatedItems.length) {
-    relatedGrid.innerHTML = relatedItems.map(renderRelatedItem).join("");
-    relatedSection.hidden = false;
-    return;
-  }
-
-  if (fallbackRelated) {
-    relatedGrid.innerHTML = `<div class="related-card__body">${fallbackRelated}</div>`;
-    relatedSection.hidden = false;
-  }
-}
-
-function openActionModal(root, userMedia, folders) {
-  const modalRoot = root.querySelector("[data-action-modal-root]");
-  if (!modalRoot) return;
-
-  modalRoot.innerHTML = renderActionModal({
-    userMedia,
-    folders
-  });
-}
-
-function closeActionModal(root) {
-  const modalRoot = root.querySelector("[data-action-modal-root]");
-  if (modalRoot) modalRoot.innerHTML = "";
-}
-
-function renderConfirmDelete(root) {
-  const modalRoot = root.querySelector("[data-action-modal-root]");
-  if (!modalRoot) return;
-
-  modalRoot.innerHTML = `
-    <div class="card-action-backdrop" data-action="close-action-modal">
-      <div class="card-action-modal" role="dialog" aria-modal="true">
-        <div class="confirm-box">
-          <div class="card-action-modal__title">${escapeHtml(t("confirmDeleteTitle"))}</div>
-          <div class="card-description">${escapeHtml(t("confirmDeleteText"))}</div>
-          <div class="confirm-actions">
-            <button type="button" data-action="close-action-modal">${escapeHtml(t("cancel"))}</button>
-            <button type="button" class="danger" data-action="confirm-delete">${escapeHtml(t("yes"))}</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function cacheCardForUser(userId, entity, userMedia) {
-  if (!userId || !entity?.canonical_key || !userMedia?.id) return;
-
-  updateCachedLibraryItem(userId, {
-    ...userMedia,
-    media_entities: entity
-  }, {
-    category: userMedia.category || entity.category
-  });
-}
-
 export async function renderCardPage(root, params = {}) {
-  const key = getRouteKey(params);
+  const key = normalizeKey(params.key || "");
+  const category = clean(params.category || "");
   const userId = state.user?.id || "";
-  let entity = loadFastEntity({ key });
+
+  let isDestroyed = false;
+  let entity = loadFastEntity(params) || buildFallbackEntity({ key, category });
   let userMedia = entity ? getCachedUserMedia(userId, entity) : null;
   let folders = [];
-  let destroyed = false;
+  let relatedItems = [];
+  let universeLinks = [];
+  let statusText = entity ? "" : t("loadingCard");
 
-  if (!entity) {
-    renderLoading(root);
-  } else {
-    root.innerHTML = `${renderStyles()}${renderCardShell(entity, userMedia)}`;
+  function scheduleEnrichmentIfNeeded(currentEntity) {
+    if (!currentEntity?.id || isFallbackEntity(currentEntity)) return;
+
+    if (shouldEnrichEntity(currentEntity)) {
+      enrichMediaEntityInBackground(currentEntity);
+    }
   }
 
-  async function rerender(nextEntity = entity, nextUserMedia = userMedia) {
-    if (destroyed) return;
+  function setStatusText(text = "") {
+    statusText = text;
+    const node = root.querySelector("[data-card-status-text]");
+    if (node) node.textContent = text;
+  }
 
-    entity = mergeEntityStable(entity || {}, nextEntity || {});
-    userMedia = nextUserMedia || userMedia;
+  function rerender() {
+    if (isDestroyed) return;
 
-    root.innerHTML = `${renderStyles()}${renderCardShell(entity, userMedia)}`;
-    bindEvents();
-
-    if (entity?.category) {
-      folders = await loadCategoryFolders(userId, entity.category).catch(() => folders);
-    }
-
-    loadRelatedData(root, entity).catch((error) => {
-      console.warn("card related data skipped:", error);
+    root.innerHTML = renderPage({
+      entity,
+      userMedia,
+      relatedItems,
+      universeLinks,
+      statusText
     });
   }
 
-  async function loadFullData() {
-    const fullEntity = await loadEntityFromDb(key || entity?.canonical_key).catch((error) => {
-      console.warn("card DB load skipped:", error);
+  function closeActionModal() {
+    root.querySelector("[data-card-action-modal-root]")?.replaceChildren();
+  }
+
+  async function openActionModal() {
+    if (!entity) return;
+
+    folders = await loadCategoryFolders(userId, entity.category || category).catch(() => getEmptyFolders(entity.category || category));
+
+    const modalRoot = root.querySelector("[data-card-action-modal-root]");
+    if (!modalRoot) return;
+
+    modalRoot.innerHTML = renderActionModal({
+      userMedia,
+      folders
+    });
+  }
+
+  async function refreshUserMedia() {
+    if (!userId || !entity?.id) {
+      userMedia = null;
+      return;
+    }
+
+    const row = await loadUserMedia(userId, entity.id).catch(() => null);
+
+    if (row?.id) {
+      userMedia = {
+        id: row.id,
+        user_id: row.user_id,
+        entity_id: row.entity_id,
+        category: row.category,
+        status: row.status,
+        folder_name: row.folder_name,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      };
+
+      if (row.media_entities) {
+        entity = mergeEntityStable(entity, row.media_entities);
+        updateCachedLibraryItem(userId, row, { category: row.category || entity.category });
+      }
+    } else {
+      userMedia = null;
+    }
+  }
+
+  async function refreshEntityFromDb() {
+    if (!key) return;
+
+    const freshEntity = await loadEntityFromDb(key).catch((error) => {
+      console.warn("Card DB load skipped:", error);
       return null;
     });
 
-    if (fullEntity?.canonical_key) {
-      entity = mergeEntityStable(entity || {}, fullEntity);
-      setTemporaryCardItem(entity);
+    if (!freshEntity?.canonical_key) return;
 
-      if (userId && entity.id) {
-        userMedia =
-          await loadUserMedia(userId, entity.id).catch(() => userMedia) ||
-          getCachedUserMedia(userId, entity);
+    entity = mergeEntityStable(entity, freshEntity);
+    setTemporaryCardItem(entity);
+    scheduleEnrichmentIfNeeded(entity);
 
-        if (userMedia?.id) {
-          cacheCardForUser(userId, entity, userMedia);
-        }
-      }
-
-      await rerender(entity, userMedia);
-
-      if (shouldEnrichEntity(entity)) {
-        enrichMediaEntityInBackground(entity);
-      }
-
-      return;
-    }
-
-    if (!entity) {
-      const fallback = buildFallbackEntity({
-        key,
-        category: params.category || ""
-      });
-
-      if (fallback) {
-        await rerender(fallback, null);
-      } else {
-        renderNotFound(root);
-      }
-    }
+    await refreshUserMedia();
   }
 
-  async function handleAdd() {
-    if (!isPersistableEntity(entity)) {
-      updateStatus(root, t("cardNotReady"));
-      return;
-    }
+  async function refreshRelated() {
+    if (!entity?.id) return;
 
-    if (!userId) {
+    const [nextRelatedItems, nextUniverseLinks] = await Promise.all([
+      getRelatedItemsForEntityFromDb(entity.id).catch(() => []),
+      getEntityUniverseLinksFromDb(entity.id).catch(() => [])
+    ]);
+
+    relatedItems = safeArray(nextRelatedItems);
+    universeLinks = safeArray(nextUniverseLinks);
+  }
+
+  async function handleAddToLibrary() {
+    if (!state.user?.id) {
       openAuthModal("login");
       return;
     }
 
-    updateStatus(root, t("loadingCard"));
-
-    const result = await addToUserLibrary({
-      userId,
-      entity
-    });
-
-    userMedia = result.userMedia || userMedia;
-
-    if (result.entity) {
-      entity = mergeEntityStable(entity, result.entity);
+    if (!isPersistableEntity(entity)) {
+      setStatusText(t("cardNotReady"));
+      return;
     }
 
-    cacheCardForUser(userId, entity, userMedia);
+    try {
+      const result = await addToUserLibrary({
+        userId: state.user.id,
+        entity,
+        status: "planned"
+      });
 
-    updateStatus(root, result.alreadyExists ? t("alreadyInLibrary") : t("addedToLibrary"));
-    await rerender(entity, userMedia);
-  }
+      userMedia = result.userMedia || null;
 
-  async function handleStatusChange(status) {
-    if (!userMedia?.id || !status) return;
-
-    const updated = await updateUserMedia(userMedia.id, { status });
-    if (updated?.id) {
-      userMedia = {
-        id: updated.id,
-        user_id: updated.user_id,
-        entity_id: updated.entity_id,
-        category: updated.category,
-        status: updated.status,
-        folder_name: updated.folder_name,
-        created_at: updated.created_at,
-        updated_at: updated.updated_at
-      };
-
-      if (updated.media_entities) {
-        entity = mergeEntityStable(entity, updated.media_entities);
+      if (result.entity) {
+        entity = mergeEntityStable(entity, result.entity);
       }
 
-      cacheCardForUser(userId, entity, userMedia);
-      updateStatus(root, t("statusUpdated"));
-      closeActionModal(root);
-      await rerender(entity, userMedia);
+      if (result.userMedia) {
+        updateCachedLibraryItem(state.user.id, result.userMedia, {
+          category: result.userMedia.category || entity.category
+        });
+      }
+
+      setStatusText(result.alreadyExists ? t("alreadyInLibrary") : t("saved"));
+      closeActionModal();
+      rerender();
+    } catch (error) {
+      console.warn("Add to library skipped:", error);
+      setStatusText(String(error?.message || t("cardNotReady")));
     }
   }
 
-  async function handleFolderChange(folderName) {
+  async function handleStatusChange(nextStatus) {
     if (!userMedia?.id) return;
 
-    const cleanFolder = normalizeFolderName(folderName);
-    const updated = await updateUserMedia(userMedia.id, {
-      folder_name: cleanFolder || null
-    });
+    try {
+      const updated = await updateUserMedia(userMedia.id, {
+        status: clean(nextStatus) || "planned"
+      });
 
-    if (updated?.id) {
-      userMedia = {
-        id: updated.id,
-        user_id: updated.user_id,
-        entity_id: updated.entity_id,
-        category: updated.category,
-        status: updated.status,
-        folder_name: updated.folder_name,
-        created_at: updated.created_at,
-        updated_at: updated.updated_at
-      };
+      if (updated?.id) {
+        userMedia = {
+          id: updated.id,
+          user_id: updated.user_id,
+          entity_id: updated.entity_id,
+          category: updated.category,
+          status: updated.status,
+          folder_name: updated.folder_name,
+          created_at: updated.created_at,
+          updated_at: updated.updated_at
+        };
 
-      if (updated.media_entities) {
-        entity = mergeEntityStable(entity, updated.media_entities);
+        if (updated.media_entities) {
+          entity = mergeEntityStable(entity, updated.media_entities);
+        }
+
+        updateCachedLibraryItem(userId, updated, { category: updated.category || entity.category });
       }
 
-      cacheCardForUser(userId, entity, userMedia);
-      updateStatus(root, t("folderUpdated"));
-      closeActionModal(root);
-      await rerender(entity, userMedia);
+      setStatusText(t("statusUpdated"));
+      closeActionModal();
+      rerender();
+    } catch (error) {
+      console.warn("Status update skipped:", error);
+      setStatusText(String(error?.message || ""));
+    }
+  }
+
+  async function handleFolderChange(nextFolder) {
+    if (!userMedia?.id) return;
+
+    const folderName = normalizeFolderName(nextFolder);
+
+    try {
+      if (folderName) {
+        addEmptyFolder(entity.category || category, folderName);
+      }
+
+      const updated = await updateUserMedia(userMedia.id, {
+        folder_name: folderName || null
+      });
+
+      if (updated?.id) {
+        userMedia = {
+          id: updated.id,
+          user_id: updated.user_id,
+          entity_id: updated.entity_id,
+          category: updated.category,
+          status: updated.status,
+          folder_name: updated.folder_name,
+          created_at: updated.created_at,
+          updated_at: updated.updated_at
+        };
+
+        if (updated.media_entities) {
+          entity = mergeEntityStable(entity, updated.media_entities);
+        }
+
+        updateCachedLibraryItem(userId, updated, { category: updated.category || entity.category });
+      }
+
+      setStatusText(t("folderUpdated"));
+      closeActionModal();
+      rerender();
+    } catch (error) {
+      console.warn("Folder update skipped:", error);
+      setStatusText(String(error?.message || ""));
     }
   }
 
   async function handleDelete() {
     if (!userMedia?.id) return;
+    if (!window.confirm(t("confirmDeleteText"))) return;
 
-    await deleteUserMedia(userMedia.id);
-    removeCachedLibraryItem(userId, userMedia.id, {
-      category: userMedia.category || entity.category
-    });
+    try {
+      const removedId = userMedia.id;
+      const removedCategory = userMedia.category || entity.category || category;
 
-    updateStatus(root, t("deleted"));
-    closeActionModal(root);
-    navigate("/category", {
-      category: userMedia.category || entity.category
-    });
+      await deleteUserMedia(removedId);
+      removeCachedLibraryItem(userId, removedId, { category: removedCategory });
+
+      userMedia = null;
+      setStatusText(t("deleted"));
+      closeActionModal();
+      rerender();
+    } catch (error) {
+      console.warn("Delete skipped:", error);
+      setStatusText(String(error?.message || ""));
+    }
   }
 
-  function bindEvents() {
-    root.querySelector("[data-action='open-action-modal']")?.addEventListener("click", () => {
-      openActionModal(root, userMedia, folders);
-    });
+  function handleClick(event) {
+    const actionTarget = event.target.closest("[data-action]");
+    const relatedTarget = event.target.closest("[data-related]");
+    const universeTarget = event.target.closest("[data-universe-key]");
 
-    root.querySelectorAll("[data-related]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const relatedKey = button.dataset.related || "";
-        if (relatedKey) {
-          navigate("/card", {
-            key: relatedKey
-          });
-        }
-      });
-    });
-
-    root.querySelectorAll("[data-universe-key]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const universeKey = button.dataset.universeKey || "";
-        if (universeKey) {
-          navigate("/universe", {
-            key: universeKey
-          });
-        }
-      });
-    });
-
-    root.querySelector("[data-action-modal-root]")?.addEventListener("click", async (event) => {
-      const target = event.target.closest("[data-action]");
-      if (!target) return;
-
-      const action = target.dataset.action;
-
-      if (action === "close-action-modal" && target === event.target) {
-        closeActionModal(root);
-        return;
+    if (relatedTarget) {
+      const relatedKey = relatedTarget.getAttribute("data-related") || "";
+      if (relatedKey) {
+        navigate(ROUTES.CARD, { key: relatedKey });
       }
+      return;
+    }
 
-      if (action === "close-action-modal") {
-        closeActionModal(root);
-        return;
+    if (universeTarget) {
+      const universeKey = universeTarget.getAttribute("data-universe-key") || "";
+      if (universeKey) {
+        navigate(ROUTES.UNIVERSE_DETAILS, { key: universeKey });
       }
+      return;
+    }
 
-      if (action === "modal-add") {
-        await handleAdd().catch((error) => {
-          console.warn("card add skipped:", error);
-          updateStatus(root, error?.message || t("cardNotReady"));
-        });
-        return;
+    if (!actionTarget) return;
+
+    const action = actionTarget.getAttribute("data-action");
+
+    if (action === "open-action-modal") {
+      openActionModal();
+      return;
+    }
+
+    if (action === "close-action-modal") {
+      if (event.target === actionTarget || actionTarget.classList.contains("card-action-modal__close")) {
+        closeActionModal();
       }
+      return;
+    }
 
-      if (action === "modal-set-status") {
-        await handleStatusChange(target.dataset.value || "").catch((error) => {
-          console.warn("card status update skipped:", error);
-          updateStatus(root, error?.message || t("cardNotReady"));
-        });
-        return;
-      }
+    if (action === "modal-add") {
+      handleAddToLibrary();
+      return;
+    }
 
-      if (action === "modal-set-folder") {
-        await handleFolderChange(target.dataset.value || "").catch((error) => {
-          console.warn("card folder update skipped:", error);
-          updateStatus(root, error?.message || t("cardNotReady"));
-        });
-        return;
-      }
+    if (action === "modal-set-status") {
+      handleStatusChange(actionTarget.getAttribute("data-value"));
+      return;
+    }
 
-      if (action === "modal-remove-folder") {
-        await handleFolderChange("").catch((error) => {
-          console.warn("card folder remove skipped:", error);
-          updateStatus(root, error?.message || t("cardNotReady"));
-        });
-        return;
-      }
+    if (action === "modal-set-folder") {
+      handleFolderChange(actionTarget.getAttribute("data-value"));
+      return;
+    }
 
-      if (action === "modal-create-folder") {
-        event.preventDefault();
-        const input = target.querySelector("[data-folder-input]");
-        const folderName = normalizeFolderName(input?.value || "");
+    if (action === "modal-remove-folder") {
+      handleFolderChange("");
+      return;
+    }
 
-        if (!folderName || !entity?.category) return;
-
-        folders = addEmptyFolder(entity.category, folderName);
-
-        if (userMedia?.id) {
-          await handleFolderChange(folderName).catch((error) => {
-            console.warn("card folder create skipped:", error);
-            updateStatus(root, error?.message || t("cardNotReady"));
-          });
-        } else {
-          openActionModal(root, userMedia, folders);
-        }
-
-        return;
-      }
-
-      if (action === "modal-delete") {
-        renderConfirmDelete(root);
-        return;
-      }
-
-      if (action === "confirm-delete") {
-        await handleDelete().catch((error) => {
-          console.warn("card delete skipped:", error);
-          updateStatus(root, error?.message || t("cardNotReady"));
-        });
-      }
-    });
+    if (action === "modal-delete") {
+      handleDelete();
+    }
   }
 
-  bindEvents();
+  function handleSubmit(event) {
+    const form = event.target.closest('[data-action="modal-create-folder"]');
+    if (!form) return;
 
-  if (entity?.category) {
-    folders = await loadCategoryFolders(userId, entity.category).catch(() => []);
+    event.preventDefault();
+
+    const input = form.querySelector("[data-folder-input]");
+    const folderName = normalizeFolderName(input?.value || "");
+
+    if (!folderName) return;
+
+    addEmptyFolder(entity.category || category, folderName);
+    handleFolderChange(folderName);
   }
 
-  if (entity) {
-    loadRelatedData(root, entity).catch((error) => {
-      console.warn("card related data skipped:", error);
+  root.addEventListener("click", handleClick);
+  root.addEventListener("submit", handleSubmit);
+
+  if (!entity) {
+    root.innerHTML = `
+      ${renderStyles()}
+      <section class="card-page">
+        <div class="card-section">
+          <div class="card-section__title">${escapeHtml(t("cardNotFound"))}</div>
+        </div>
+      </section>
+    `;
+  } else {
+    rerender();
+  }
+
+  refreshEntityFromDb()
+    .then(refreshRelated)
+    .then(() => {
+      if (!isDestroyed) rerender();
+    })
+    .catch((error) => {
+      console.warn("Card refresh skipped:", error);
+
+      if (!isDestroyed && entity) {
+        scheduleEnrichmentIfNeeded(entity);
+        rerender();
+      }
     });
-  }
-
-  await loadFullData();
 
   return () => {
-    destroyed = true;
+    isDestroyed = true;
+    root.removeEventListener("click", handleClick);
+    root.removeEventListener("submit", handleSubmit);
   };
 }
