@@ -40,6 +40,41 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+function isUsefulValue(value) {
+  const text = clean(value);
+  return Boolean(text && text !== "undefined" && text !== "null");
+}
+
+function pickStableValue(previousValue, incomingValue) {
+  return isUsefulValue(incomingValue) ? incomingValue : previousValue;
+}
+
+function pickStableNumber(previousValue, incomingValue) {
+  const incomingNumber = Number(incomingValue);
+  if (Number.isFinite(incomingNumber) && incomingNumber > 0) {
+    return incomingValue;
+  }
+
+  return previousValue;
+}
+
+function pickStableJson(previousValue, incomingValue) {
+  const previousObject =
+    previousValue && typeof previousValue === "object" && !Array.isArray(previousValue)
+      ? previousValue
+      : {};
+
+  const incomingObject =
+    incomingValue && typeof incomingValue === "object" && !Array.isArray(incomingValue)
+      ? incomingValue
+      : {};
+
+  return {
+    ...previousObject,
+    ...incomingObject
+  };
+}
+
 function readCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
@@ -253,14 +288,63 @@ function itemDedupeKey(item = {}) {
   return "";
 }
 
-function mergeLibraryItems(previous = {}, incoming = {}) {
+function mergeMediaEntities(previousEntity = {}, incomingEntity = {}) {
+  const previous = previousEntity && typeof previousEntity === "object" ? previousEntity : {};
+  const incoming = incomingEntity && typeof incomingEntity === "object" ? incomingEntity : {};
+
   return {
     ...previous,
     ...incoming,
-    media_entities: {
-      ...(previous.media_entities || {}),
-      ...(incoming.media_entities || {})
-    }
+
+    id: incoming.id || previous.id || null,
+    canonical_key: pickStableValue(previous.canonical_key, incoming.canonical_key),
+    category: pickStableValue(previous.category, incoming.category),
+    primary_source: pickStableValue(previous.primary_source, incoming.primary_source),
+
+    title_primary: pickStableValue(previous.title_primary, incoming.title_primary),
+    title_ru: pickStableValue(previous.title_ru, incoming.title_ru),
+    title_en: pickStableValue(previous.title_en, incoming.title_en),
+    original_title: pickStableValue(previous.original_title, incoming.original_title),
+
+    year: pickStableNumber(previous.year, incoming.year),
+
+    cover_url: pickStableValue(previous.cover_url, incoming.cover_url),
+    description_ru: pickStableValue(previous.description_ru, incoming.description_ru),
+    description_en: pickStableValue(previous.description_en, incoming.description_en),
+
+    external_ids: pickStableJson(previous.external_ids, incoming.external_ids),
+    meta: pickStableJson(previous.meta, incoming.meta),
+
+    universe_key: pickStableValue(previous.universe_key, incoming.universe_key),
+    relations_built_at: pickStableValue(previous.relations_built_at, incoming.relations_built_at),
+    relations_status: pickStableValue(previous.relations_status, incoming.relations_status)
+  };
+}
+
+function mergeLibraryItems(previous = {}, incoming = {}) {
+  const previousItem = previous && typeof previous === "object" ? previous : {};
+  const incomingItem = incoming && typeof incoming === "object" ? incoming : {};
+
+  return {
+    ...previousItem,
+    ...incomingItem,
+
+    id: incomingItem.id || previousItem.id || null,
+    user_id: pickStableValue(previousItem.user_id, incomingItem.user_id),
+    entity_id: incomingItem.entity_id || previousItem.entity_id || null,
+    category: pickStableValue(previousItem.category, incomingItem.category),
+    status: pickStableValue(previousItem.status, incomingItem.status),
+    folder_name:
+      incomingItem.folder_name === null
+        ? null
+        : pickStableValue(previousItem.folder_name, incomingItem.folder_name),
+    created_at: pickStableValue(previousItem.created_at, incomingItem.created_at),
+    updated_at: pickStableValue(previousItem.updated_at, incomingItem.updated_at),
+
+    media_entities: mergeMediaEntities(
+      previousItem.media_entities || {},
+      incomingItem.media_entities || {}
+    )
   };
 }
 
@@ -395,6 +479,8 @@ function buildSelect(mode = "list") {
       original_title,
       year,
       cover_url,
+      description_ru,
+      description_en,
       universe_key
     )
   `;
