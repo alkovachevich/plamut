@@ -8,7 +8,7 @@ const READ_TIMEOUT_MS = 9000;
 const WRITE_TIMEOUT_MS = 12000;
 const SEARCH_TIMEOUT_MS = 9000;
 
-const TMDB_BASE_URL = "https://api.themoviedb.org/t/p/w500".replace("/t/p/w500", "/3");
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
 const OPEN_LIBRARY_BASE_URL = "https://openlibrary.org";
 const OPEN_LIBRARY_COVER_BASE_URL = "https://covers.openlibrary.org/b/id";
@@ -18,6 +18,16 @@ const WIKIPEDIA_EN_API_URL = "https://en.wikipedia.org/w/api.php";
 
 const pendingEnrichmentByEntityId = new Map();
 const pendingRepairKey = "repair";
+
+const COVER_CONFIDENCE = {
+  tmdb_details: 1,
+  tmdb_find_imdb: 0.98,
+  tmdb_search_original_year: 0.9,
+  wikidata: 0.7,
+  openlibrary: 0.65,
+  wikipedia: 0.55,
+  unknown: 0.2
+};
 
 function cleanText(value = "") {
   return String(value || "").trim();
@@ -58,6 +68,31 @@ function hasUsefulCover(value = "") {
   return /^https?:\/\//i.test(cover) || cover.startsWith("/");
 }
 
+function getCurrentCoverConfidence(entity = {}) {
+  const meta = normalizeJson(entity.meta, {});
+  const value = Number(meta.cover_confidence);
+  if (Number.isFinite(value)) return value;
+  return hasUsefulCover(entity.cover_url) ? COVER_CONFIDENCE.unknown : 0;
+}
+
+function getPatchCoverConfidence(patch = {}) {
+  const meta = normalizeJson(patch.meta, {});
+  const explicit = Number(meta.cover_confidence);
+
+  if (Number.isFinite(explicit)) return explicit;
+
+  const source = cleanText(patch.__cover_source || patch.__source);
+
+  if (source.startsWith("tmdb_details")) return COVER_CONFIDENCE.tmdb_details;
+  if (source.startsWith("tmdb_find_imdb")) return COVER_CONFIDENCE.tmdb_find_imdb;
+  if (source.startsWith("tmdb_search")) return COVER_CONFIDENCE.tmdb_search_original_year;
+  if (source.startsWith("wikidata")) return COVER_CONFIDENCE.wikidata;
+  if (source.startsWith("openlibrary")) return COVER_CONFIDENCE.openlibrary;
+  if (source.startsWith("wikipedia")) return COVER_CONFIDENCE.wikipedia;
+
+  return COVER_CONFIDENCE.unknown;
+}
+
 function getMissingFields(entity = {}) {
   const missing = [];
 
@@ -78,11 +113,14 @@ function getMetadataStatus(entity = {}) {
 
 function buildQuality(entity = {}, sources = [], extra = {}) {
   const missing = getMissingFields(entity);
+  const meta = normalizeJson(entity.meta, {});
 
   return {
     has_cover: hasUsefulCover(entity.cover_url),
     has_description_ru: hasUsefulText(entity.description_ru),
     has_description_en: hasUsefulText(entity.description_en),
+    cover_source: cleanText(meta.cover_source || ""),
+    cover_confidence: Number(meta.cover_confidence || 0),
     missing_fields: missing,
     sources: uniqueArray(sources.map(cleanText).filter(Boolean)),
     updated_at: new Date().toISOString(),
@@ -100,14 +138,17 @@ function pickBetterText(current = "", incoming = "") {
   return right.length > left.length ? right : left;
 }
 
-function pickBetterCover(current = "", incoming = "") {
-  const left = cleanText(current);
-  const right = cleanText(incoming);
+function pickBetterCover(entity = {}, patch = {}) {
+  const currentCover = cleanText(entity.cover_url);
+  const incomingCover = cleanText(patch.cover_url);
 
-  if (!hasUsefulCover(left)) return right;
-  if (!hasUsefulCover(right)) return left;
+  if (!hasUsefulCover(incomingCover)) return currentCover;
+  if (!hasUsefulCover(currentCover)) return incomingCover;
 
-  return left;
+  const currentConfidence = getCurrentCoverConfidence(entity);
+  const incomingConfidence = getPatchCoverConfidence(patch);
+
+  return incomingConfidence >= currentConfidence ? incomingCover : currentCover;
 }
 
 function mergeExternalIds(current = {}, incoming = {}) {
@@ -124,9 +165,30 @@ function mergeMeta(current = {}, incoming = {}) {
   };
 }
 
+function buildCoverMeta(entity = {}, patch = {}) {
+  const currentCover = cleanText(entity.cover_url);
+  const incomingCover = cleanText(patch.cover_url);
+  const currentConfidence = getCurrentCoverConfidence(entity);
+  const incomingConfidence = getPatchCoverConfidence(patch);
+
+  if (hasUsefulCover(incomingCover) && (!hasUsefulCover(currentCover) || incomingConfidence >= currentConfidence)) {
+    return {
+      cover_source: cleanText(patch.__cover_source || patch.__source || "unknown"),
+      cover_confidence: incomingConfidence,
+      cover_updated_at: new Date().toISOString()
+    };
+  }
+
+  return {};
+}
+
 function mergeEntityMetadata(entity = {}, patch = {}) {
+  const coverMeta = buildCoverMeta(entity, patch);
   const externalIds = mergeExternalIds(entity.external_ids, patch.external_ids);
-  const meta = mergeMeta(entity.meta, patch.meta);
+  const meta = mergeMeta(
+    mergeMeta(entity.meta, patch.meta),
+    coverMeta
+  );
 
   return {
     ...entity,
@@ -138,7 +200,7 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
 
     year: normalizeYear(entity.year) || normalizeYear(patch.year),
 
-    cover_url: pickBetterCover(entity.cover_url, patch.cover_url),
+    cover_url: pickBetterCover(entity, patch),
 
     description_ru: pickBetterText(entity.description_ru, patch.description_ru),
     description_en: pickBetterText(entity.description_en, patch.description_en),
@@ -153,9 +215,7 @@ function isValidMediaEntity(entity = {}) {
 
   if (!category) return false;
 
-  if (category !== "movies" && category !== "series") {
-    return true;
-  }
+  if (category !== "movies" && category !== "series") return true;
 
   const title =
     cleanText(entity.title_primary) ||
@@ -201,15 +261,28 @@ function isValidMediaEntity(entity = {}) {
     "человек"
   ];
 
-  if (blockedHints.some((hint) => typeHints.includes(hint))) {
-    return false;
-  }
+  if (blockedHints.some((hint) => typeHints.includes(hint))) return false;
 
-  if (!hasTmdb && !hasImdb && !hasYear) {
-    return false;
-  }
+  if (!hasTmdb && !hasImdb && !hasYear) return false;
 
   return true;
+}
+
+function needsAuthoritativeMovieCoverRepair(entity = {}) {
+  const category = normalizeCategory(entity.category);
+  if (category !== "movies" && category !== "series") return false;
+
+  const ids = normalizeJson(entity.external_ids, {});
+  const hasTmdb = Boolean(cleanText(ids.tmdb));
+  if (!hasTmdb) return false;
+
+  const meta = normalizeJson(entity.meta, {});
+  const coverSource = cleanText(meta.cover_source);
+  const coverConfidence = Number(meta.cover_confidence || 0);
+
+  return !hasUsefulCover(entity.cover_url) ||
+    coverSource !== "tmdb_details" ||
+    coverConfidence < COVER_CONFIDENCE.tmdb_details;
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
@@ -397,17 +470,12 @@ function pickBestTmdbCandidate(results = [], entity = {}, type = "movie", option
       return itemYear && Math.abs(itemYear - entityYear) <= 1;
     });
 
-    if (yearMatches.length) {
-      candidates = yearMatches;
-    }
+    if (yearMatches.length) candidates = yearMatches;
   }
 
   if (originalCandidates.length) {
     const originalMatches = candidates.filter((item) => hasStrongTitleMatch(item, entity, type));
-
-    if (originalMatches.length) {
-      candidates = originalMatches;
-    }
+    if (originalMatches.length) candidates = originalMatches;
   }
 
   if (!candidates.length && allowLocalizedMatch) {
@@ -447,20 +515,17 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
     }
   });
 
-  const title =
-    type === "tv"
-      ? cleanText(payload.name)
-      : cleanText(payload.title);
+  const title = type === "tv"
+    ? cleanText(payload.name)
+    : cleanText(payload.title);
 
-  const originalTitle =
-    type === "tv"
-      ? cleanText(payload.original_name)
-      : cleanText(payload.original_title);
+  const originalTitle = type === "tv"
+    ? cleanText(payload.original_name)
+    : cleanText(payload.original_title);
 
-  const year =
-    type === "tv"
-      ? getYearFromDate(payload.first_air_date)
-      : getYearFromDate(payload.release_date);
+  const year = type === "tv"
+    ? getYearFromDate(payload.first_air_date)
+    : getYearFromDate(payload.release_date);
 
   const fallbackPoster =
     safeArray(payload?.images?.posters).find((poster) => poster?.file_path)?.file_path ||
@@ -488,9 +553,12 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
       tmdb_popularity: payload.popularity || null,
       tmdb_homepage: payload.homepage || "",
       tmdb_status: payload.status || "",
-      tmdb_original_language: payload.original_language || ""
+      tmdb_original_language: payload.original_language || "",
+      cover_source: "tmdb_details",
+      cover_confidence: COVER_CONFIDENCE.tmdb_details
     },
-    __source: `tmdb_${language}`
+    __source: `tmdb_details_${language}`,
+    __cover_source: "tmdb_details"
   };
 }
 
@@ -518,7 +586,7 @@ async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
 
   if (!result?.id) return null;
 
-  return fetchTmdbDetails(
+  const patch = await fetchTmdbDetails(
     {
       ...entity,
       external_ids: {
@@ -528,6 +596,19 @@ async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
     },
     language
   );
+
+  if (!patch) return null;
+
+  return {
+    ...patch,
+    meta: {
+      ...normalizeJson(patch.meta, {}),
+      cover_source: "tmdb_find_imdb",
+      cover_confidence: COVER_CONFIDENCE.tmdb_find_imdb
+    },
+    __source: `tmdb_find_imdb_${language}`,
+    __cover_source: "tmdb_find_imdb"
+  };
 }
 
 async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru", options = {}) {
@@ -554,7 +635,7 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
   const result = pickBestTmdbCandidate(payload.results, entity, type, options);
   if (!result?.id) return null;
 
-  return fetchTmdbDetails(
+  const patch = await fetchTmdbDetails(
     {
       ...entity,
       external_ids: {
@@ -564,6 +645,19 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
     },
     language
   );
+
+  if (!patch) return null;
+
+  return {
+    ...patch,
+    meta: {
+      ...normalizeJson(patch.meta, {}),
+      cover_source: "tmdb_search_original_year",
+      cover_confidence: COVER_CONFIDENCE.tmdb_search_original_year
+    },
+    __source: `tmdb_search_${language}`,
+    __cover_source: "tmdb_search_original_year"
+  };
 }
 
 async function fetchTmdbBySearch(entity = {}, language = "ru") {
@@ -571,9 +665,7 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
 
   const ids = getCanonicalExternalIds(entity);
 
-  if (ids.tmdb) {
-    return fetchTmdbDetails(entity, language);
-  }
+  if (ids.tmdb) return fetchTmdbDetails(entity, language);
 
   if (ids.imdb) {
     const byImdb = await fetchTmdbFindByImdb(entity, language).catch((error) => {
@@ -581,9 +673,7 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
       return null;
     });
 
-    if (byImdb?.cover_url || byImdb?.description_ru || byImdb?.description_en) {
-      return byImdb;
-    }
+    if (byImdb?.cover_url || byImdb?.description_ru || byImdb?.description_en) return byImdb;
   }
 
   const strongQueries = getOriginalTitleCandidates(entity);
@@ -595,9 +685,7 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
         allowLocalizedMatch: false
       });
 
-      if (patch?.cover_url || patch?.description_ru || patch?.description_en) {
-        return patch;
-      }
+      if (patch?.cover_url || patch?.description_ru || patch?.description_en) return patch;
     } catch (error) {
       console.warn(`TMDB strong search skipped for "${query}":`, error);
     }
@@ -610,9 +698,7 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
           allowLocalizedMatch: true
         });
 
-        if (patch?.cover_url || patch?.description_ru || patch?.description_en) {
-          return patch;
-        }
+        if (patch?.cover_url || patch?.description_ru || patch?.description_en) return patch;
       } catch (error) {
         console.warn(`TMDB weak localized search skipped for "${query}":`, error);
       }
@@ -769,9 +855,12 @@ async function fetchWikidataPatch(entity = {}) {
         next: nextIds,
         series: seriesIds,
         based_on: basedOnIds
-      }
+      },
+      cover_source: "wikidata",
+      cover_confidence: COVER_CONFIDENCE.wikidata
     },
-    __source: "wikidata"
+    __source: "wikidata",
+    __cover_source: "wikidata"
   };
 }
 
@@ -830,9 +919,12 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
         description_en: language === "en" ? extract : "",
         meta: {
           [`wikipedia_${language}_title`]: pageTitle,
-          [`wikipedia_${language}_loaded`]: true
+          [`wikipedia_${language}_loaded`]: true,
+          cover_source: `wikipedia_${language}`,
+          cover_confidence: COVER_CONFIDENCE.wikipedia
         },
-        __source: `wikipedia_${language}`
+        __source: `wikipedia_${language}`,
+        __cover_source: `wikipedia_${language}`
       };
     } catch (error) {
       console.warn(`Wikipedia ${language} summary skipped:`, error);
@@ -876,9 +968,12 @@ async function fetchOpenLibraryWork(entity = {}) {
         year: normalizeYear(doc.first_publish_year),
         external_ids: {},
         meta: {
-          openlibrary_search_loaded: true
+          openlibrary_search_loaded: true,
+          cover_source: "openlibrary_search",
+          cover_confidence: COVER_CONFIDENCE.openlibrary
         },
-        __source: "openlibrary_search"
+        __source: "openlibrary_search",
+        __cover_source: "openlibrary_search"
       };
     }
   }
@@ -910,9 +1005,12 @@ async function fetchOpenLibraryWork(entity = {}) {
     },
     meta: {
       openlibrary_work: workId,
-      openlibrary_loaded: true
+      openlibrary_loaded: true,
+      cover_source: "openlibrary",
+      cover_confidence: COVER_CONFIDENCE.openlibrary
     },
-    __source: "openlibrary"
+    __source: "openlibrary",
+    __cover_source: "openlibrary"
   };
 }
 
@@ -1027,9 +1125,12 @@ async function fetchAniListDetails(entity = {}) {
       anilist_synonyms: safeArray(media.synonyms),
       anilist_site_url: media.siteUrl || "",
       anilist_average_score: media.averageScore || null,
-      anilist_popularity: media.popularity || null
+      anilist_popularity: media.popularity || null,
+      cover_source: "anilist",
+      cover_confidence: 0.95
     },
-    __source: "anilist"
+    __source: "anilist",
+    __cover_source: "anilist"
   };
 }
 
@@ -1077,9 +1178,12 @@ async function fetchJikanDetails(entity = {}) {
       jikan_url: cleanText(item.url),
       jikan_type: cleanText(item.type),
       jikan_status: cleanText(item.status),
-      jikan_genres: safeArray(item.genres).map((genre) => genre?.name).filter(Boolean)
+      jikan_genres: safeArray(item.genres).map((genre) => genre?.name).filter(Boolean),
+      cover_source: "jikan",
+      cover_confidence: 0.9
     },
-    __source: "jikan"
+    __source: "jikan",
+    __cover_source: "jikan"
   };
 }
 
@@ -1266,6 +1370,8 @@ export function shouldEnrichEntity(entity = {}) {
   if (!entity || typeof entity !== "object") return false;
   if (!isValidMediaEntity(entity)) return false;
 
+  if (needsAuthoritativeMovieCoverRepair(entity)) return true;
+
   const missing = getMissingFields(entity);
   if (missing.length) return true;
 
@@ -1313,9 +1419,7 @@ export function enrichMediaEntityInBackground(inputEntityOrId) {
 
   if (!entityId) return;
 
-  if (pendingEnrichmentByEntityId.has(entityId)) {
-    return;
-  }
+  if (pendingEnrichmentByEntityId.has(entityId)) return;
 
   const promise = enrichMediaEntity(inputEntityOrId)
     .catch((error) => {
@@ -1350,15 +1454,14 @@ export async function repairMissingMetadata({ limit = 25, category = "" } = {}) 
           "description_en.is.null",
           "description_en.eq.",
           "metadata_status.eq.needs_enrichment",
-          "metadata_status.eq.partial"
+          "metadata_status.eq.partial",
+          "metadata_status.eq.repair_cover"
         ].join(",")
       )
       .order("updated_at", { ascending: true })
       .limit(Math.max(1, Math.min(Number(limit) || 25, 50)));
 
-    if (cleanCategory) {
-      query = query.eq("category", cleanCategory);
-    }
+    if (cleanCategory) query = query.eq("category", cleanCategory);
 
     const { data, error } = await withTimeout(
       query,
@@ -1390,9 +1493,7 @@ export async function repairMissingMetadata({ limit = 25, category = "" } = {}) 
 }
 
 export function repairMissingMetadataInBackground(options = {}) {
-  if (pendingEnrichmentByEntityId.has(pendingRepairKey)) {
-    return;
-  }
+  if (pendingEnrichmentByEntityId.has(pendingRepairKey)) return;
 
   repairMissingMetadata(options).catch((error) => {
     console.warn("repairMissingMetadata skipped:", error);
