@@ -28,11 +28,7 @@ import { renderGuestPage } from "./pages/guest.js";
 
 import {
   getSupabaseClient,
-  getCurrentAuthState,
-  fetchUserProfileResultSafe,
-  upsertUserProfileSafe,
-  setCachedSession,
-  clearCachedSession
+  getCurrentSession
 } from "./lib/supabase-client.js";
 
 const headerRoot = document.getElementById("app-header");
@@ -47,17 +43,23 @@ let initialized = false;
 let authSubscription = null;
 let routeCleanup = null;
 let routeRenderToken = 0;
-let authHydrationPromise = null;
-let userApplyPromiseById = new Map();
 
-let lastHeaderSignature = null;
-let lastSidebarSignature = null;
-let lastSearchModalSignature = null;
-let lastAuthModalSignature = null;
-let lastRouteSignature = null;
+let lastHeaderSignature = "";
+let lastSidebarSignature = "";
+let lastSearchModalSignature = "";
+let lastAuthModalSignature = "";
+let lastRouteSignature = "";
 
 function hasRequiredRoots() {
   return Boolean(headerRoot && mainRoot && sidebarRoot && searchModalRoot && authModalRoot);
+}
+
+function normalizeTheme(value = "") {
+  return value === "light" || value === "dark" ? value : "dark";
+}
+
+function normalizeLanguage(value = "") {
+  return value === "en" || value === "ru" ? value : "ru";
 }
 
 function renderFatalAppError(message) {
@@ -71,18 +73,6 @@ function renderFatalAppError(message) {
       </div>
     </div>
   `;
-}
-
-function normalizeTheme(value = "") {
-  return value === "light" || value === "dark" ? value : "dark";
-}
-
-function normalizeLanguage(value = "") {
-  return value === "en" || value === "ru" ? value : "ru";
-}
-
-function isTimeoutError(error) {
-  return /превышено время ожидания/i.test(String(error?.message || ""));
 }
 
 function applyTheme() {
@@ -133,6 +123,53 @@ function clearCachedUser() {
   }
 }
 
+function buildUsername(user) {
+  const source =
+    user?.user_metadata?.username ||
+    user?.user_metadata?.preferred_username ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "user";
+
+  return (
+    String(source)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32) || "user"
+  );
+}
+
+function buildDisplayName(user) {
+  return (
+    user?.user_metadata?.display_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "User"
+  );
+}
+
+function buildAvatarUrl(user) {
+  return user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+}
+
+function normalizeAuthUser(user) {
+  if (!user?.id) return null;
+
+  return {
+    id: user.id,
+    email: user.email || null,
+    username: buildUsername(user),
+    display_name: buildDisplayName(user),
+    avatar_url: buildAvatarUrl(user),
+    preferred_theme: normalizeTheme(state.theme),
+    preferred_language: normalizeLanguage(state.language)
+  };
+}
+
 function usersEqual(a = {}, b = {}) {
   return JSON.stringify({
     id: a?.id || null,
@@ -154,53 +191,16 @@ function usersEqual(a = {}, b = {}) {
 }
 
 function setUserIfChanged(user) {
+  if (!user?.id) return;
+
   if (!usersEqual(state.user, user)) {
     setUser(user);
   }
 }
 
-function buildUsername(user) {
-  const source =
-    user?.user_metadata?.username ||
-    user?.user_metadata?.preferred_username ||
-    user?.user_metadata?.full_name ||
-    user?.user_metadata?.name ||
-    user?.email?.split("@")[0] ||
-    "user";
-
-  return (
-    String(source)
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 32) || "user"
-  );
-}
-
-function buildDisplayName(user, profile = null) {
-  return (
-    profile?.display_name ||
-    user?.user_metadata?.display_name ||
-    user?.user_metadata?.full_name ||
-    user?.user_metadata?.name ||
-    user?.email?.split("@")[0] ||
-    "User"
-  );
-}
-
-function buildAvatarUrl(user, profile = null) {
-  return (
-    profile?.avatar_url ||
-    user?.user_metadata?.avatar_url ||
-    user?.user_metadata?.picture ||
-    null
-  );
-}
-
-function applyProfilePreferences(profile = null) {
-  const nextTheme = normalizeTheme(profile?.preferred_theme || state.theme);
-  const nextLanguage = normalizeLanguage(profile?.preferred_language || state.language);
+function applyUserPreferences(user) {
+  const nextTheme = normalizeTheme(user?.preferred_theme || state.theme);
+  const nextLanguage = normalizeLanguage(user?.preferred_language || state.language);
 
   if (nextTheme !== state.theme) {
     setTheme(nextTheme);
@@ -211,153 +211,49 @@ function applyProfilePreferences(profile = null) {
   }
 }
 
-async function ensureUserProfile(user, fastUser) {
-  if (!user?.id) return { ...fastUser };
+function applyAuthenticatedUser(user) {
+  const normalizedUser = normalizeAuthUser(user);
 
-  const result = await fetchUserProfileResultSafe(user.id);
-
-  const fallbackProfile = {
-    id: user.id,
-    username: result?.profile?.username || fastUser.username,
-    display_name: result?.profile?.display_name || fastUser.display_name,
-    avatar_url: result?.profile?.avatar_url || fastUser.avatar_url,
-    preferred_theme: normalizeTheme(result?.profile?.preferred_theme || fastUser.preferred_theme),
-    preferred_language: normalizeLanguage(
-      result?.profile?.preferred_language || fastUser.preferred_language
-    )
-  };
-
-  if (result?.status === "found") {
-    return fallbackProfile;
+  if (!normalizedUser?.id) {
+    return;
   }
 
-  if (result?.status === "not_found") {
-    const savedProfile = await upsertUserProfileSafe(fallbackProfile);
-    return savedProfile || fallbackProfile;
-  }
-
-  if (result?.status === "timeout" || result?.status === "error") {
-    console.info("ensureUserProfile: use fast user while profile API is unstable");
-    return fallbackProfile;
-  }
-
-  return fallbackProfile;
+  setUserIfChanged(normalizedUser);
+  setAuthStatus("authenticated");
+  writeCachedUser(normalizedUser);
+  applyUserPreferences(normalizedUser);
 }
 
-async function applyAuthenticatedUser(user) {
-  if (!user?.id) return;
+async function hydrateAuthState() {
+  try {
+    const session = await getCurrentSession();
 
-  const existing = userApplyPromiseById.get(user.id);
-  if (existing) {
-    return existing;
-  }
-
-  const applyPromise = (async () => {
-    const fastUser = {
-      id: user.id,
-      email: user.email || null,
-      username: buildUsername(user),
-      display_name: buildDisplayName(user),
-      avatar_url: buildAvatarUrl(user),
-      preferred_theme: normalizeTheme(state.theme),
-      preferred_language: normalizeLanguage(state.language)
-    };
-
-    setUserIfChanged(fastUser);
-    setAuthStatus("authenticated");
-    writeCachedUser(fastUser);
-
-    const profile = await ensureUserProfile(user, fastUser);
-
-    const normalizedUser = {
-      id: user.id,
-      email: user.email || null,
-      username: profile?.username || fastUser.username,
-      display_name: profile?.display_name || fastUser.display_name,
-      avatar_url: profile?.avatar_url || fastUser.avatar_url,
-      preferred_theme: normalizeTheme(profile?.preferred_theme || fastUser.preferred_theme),
-      preferred_language: normalizeLanguage(profile?.preferred_language || fastUser.preferred_language)
-    };
-
-    applyProfilePreferences(normalizedUser);
-    setUserIfChanged(normalizedUser);
-    setAuthStatus("authenticated");
-    writeCachedUser(normalizedUser);
-  })().finally(() => {
-    userApplyPromiseById.delete(user.id);
-  });
-
-  userApplyPromiseById.set(user.id, applyPromise);
-  return applyPromise;
-}
-
-async function hydrateAuthStateSafely() {
-  if (authHydrationPromise) {
-    return authHydrationPromise;
-  }
-
-  authHydrationPromise = (async () => {
-    try {
-      if (!state.user?.id) {
-        setAuthStatus("restoring");
-      }
-
-      const authState = await getCurrentAuthState();
-
-      if (authState?.status === "authenticated" && authState?.session?.user) {
-        setCachedSession(authState.session);
-        await applyAuthenticatedUser(authState.session.user);
-        return;
-      }
-
-      if (authState?.status === "guest") {
-        setAuthStatus("guest");
-        logoutUser();
-        clearCachedUser();
-        return;
-      }
-
-      if (authState?.status === "restoring") {
-        const cachedUser = readCachedUser();
-
-        if (cachedUser?.id) {
-          setUserIfChanged(cachedUser);
-          setAuthStatus("authenticated");
-          return;
-        }
-
-        setAuthStatus("restoring");
-        return;
-      }
-
-      if (!state.user?.id) {
-        const cachedUser = readCachedUser();
-        if (cachedUser?.id) {
-          setUserIfChanged(cachedUser);
-          setAuthStatus("authenticated");
-          return;
-        }
-      }
-
-      setAuthStatus(state.user?.id ? "authenticated" : "error");
-    } catch (error) {
-      console.warn("Auth hydration skipped:", error);
-
-      if (state.user?.id && isTimeoutError(error)) {
-        setAuthStatus("authenticated");
-        return;
-      }
-
-      setAuthStatus(isTimeoutError(error) ? "restoring" : "error");
-    } finally {
-      authHydrationPromise = null;
+    if (session?.user?.id) {
+      applyAuthenticatedUser(session.user);
+      return;
     }
-  })();
 
-  return authHydrationPromise;
+    if (state.user?.id) {
+      setAuthStatus("authenticated");
+      return;
+    }
+
+    setAuthStatus("guest");
+    logoutUser();
+    clearCachedUser();
+  } catch (error) {
+    console.warn("Auth hydration skipped:", error);
+
+    if (state.user?.id) {
+      setAuthStatus("authenticated");
+      return;
+    }
+
+    setAuthStatus("guest");
+  }
 }
 
-function bindAuthListenerSafely() {
+function bindAuthListener() {
   try {
     const supabase = getSupabaseClient();
 
@@ -366,37 +262,17 @@ function bindAuthListenerSafely() {
       authSubscription = null;
     }
 
-    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-      try {
-        setCachedSession(session || null);
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setAuthStatus("guest");
+        logoutUser();
+        clearCachedUser();
+        closeAuthModal();
+        return;
+      }
 
-        if (event === "SIGNED_OUT") {
-          setAuthStatus("guest");
-          logoutUser();
-          clearCachedUser();
-          clearCachedSession();
-          closeAuthModal();
-          return;
-        }
-
-        if (!session?.user) {
-          if (event === "INITIAL_SESSION") {
-            if (state.user?.id) {
-              setAuthStatus("authenticated");
-              hydrateAuthStateSafely().catch((error) => {
-                console.warn("Auth hydration after initial session skipped:", error);
-              });
-              return;
-            }
-
-            setAuthStatus("guest");
-          }
-
-          return;
-        }
-
-        setAuthStatus("authenticated");
-        await applyAuthenticatedUser(session.user);
+      if (session?.user?.id) {
+        applyAuthenticatedUser(session.user);
 
         if (
           event === "SIGNED_IN" ||
@@ -406,8 +282,12 @@ function bindAuthListenerSafely() {
         ) {
           closeAuthModal();
         }
-      } catch (error) {
-        console.warn("Auth state change skipped:", error);
+
+        return;
+      }
+
+      if (!state.user?.id) {
+        setAuthStatus("guest");
       }
     });
 
@@ -455,8 +335,8 @@ function getAuthModalSignature() {
 
 function getRouteAuthBucket() {
   if (state.user?.id) return "authenticated";
-  if (state.authStatus === "guest" || state.authStatus === "error") return "guest";
-  return "restoring";
+  if (state.authStatus === "restoring") return "restoring";
+  return "guest";
 }
 
 function getRouteSignature() {
@@ -470,12 +350,15 @@ function getRouteSignature() {
 }
 
 function cleanupCurrentRoute() {
-  if (typeof routeCleanup === "function") {
-    try {
-      routeCleanup();
-    } catch (error) {
-      console.warn("Route cleanup skipped:", error);
-    }
+  if (typeof routeCleanup !== "function") {
+    routeCleanup = null;
+    return;
+  }
+
+  try {
+    routeCleanup();
+  } catch (error) {
+    console.warn("Route cleanup skipped:", error);
   }
 
   routeCleanup = null;
@@ -485,22 +368,31 @@ async function resolveRouteRenderer(route, params) {
   switch (route) {
     case ROUTES.HOME:
       return renderHomePage(mainRoot);
+
     case ROUTES.CATEGORIES:
       return renderCategoriesPage(mainRoot);
+
     case ROUTES.CATEGORY_LIBRARY:
       return renderCategoryPage(mainRoot, params);
+
     case ROUTES.SEARCH:
       return renderSearchPage(mainRoot, params);
+
     case ROUTES.CARD:
       return renderCardPage(mainRoot, params);
+
     case ROUTES.UNIVERSES:
       return renderUniversesPage(mainRoot);
+
     case ROUTES.UNIVERSE_DETAILS:
       return renderUniversePage(mainRoot, params);
+
     case ROUTES.SETTINGS:
       return renderSettingsPage(mainRoot);
+
     case ROUTES.GUEST:
       return renderGuestPage(mainRoot, params);
+
     default:
       return renderHomePage(mainRoot);
   }
@@ -509,7 +401,7 @@ async function resolveRouteRenderer(route, params) {
 function renderBootShell() {
   mainRoot.innerHTML = `
     <section style="padding:16px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
-      Загрузка сессии…
+      Загрузка…
     </section>
   `;
 }
@@ -521,45 +413,33 @@ function renderRouteSafely() {
     return;
   }
 
-  const route = state.route;
-  const params = state.routeParams || {};
   const token = routeRenderToken + 1;
-
   routeRenderToken = token;
+
   cleanupCurrentRoute();
 
-  try {
-    const result = resolveRouteRenderer(route, params);
-
-    Promise.resolve(result)
-      .then((cleanup) => {
-        if (token !== routeRenderToken) {
-          if (typeof cleanup === "function") cleanup();
-          return;
+  Promise.resolve(resolveRouteRenderer(state.route, state.routeParams || {}))
+    .then((cleanup) => {
+      if (token !== routeRenderToken) {
+        if (typeof cleanup === "function") {
+          cleanup();
         }
+        return;
+      }
 
-        routeCleanup = typeof cleanup === "function" ? cleanup : null;
-      })
-      .catch((error) => {
-        if (token !== routeRenderToken) return;
+      routeCleanup = typeof cleanup === "function" ? cleanup : null;
+    })
+    .catch((error) => {
+      if (token !== routeRenderToken) return;
 
-        console.warn("Route render error:", error);
+      console.warn("Route render error:", error);
 
-        mainRoot.innerHTML = `
-          <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
-            Не удалось открыть страницу. Вернись на главную.
-          </div>
-        `;
-      });
-  } catch (error) {
-    console.warn("Route render error:", error);
-
-    mainRoot.innerHTML = `
-      <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
-        Не удалось открыть страницу. Вернись на главную.
-      </div>
-    `;
-  }
+      mainRoot.innerHTML = `
+        <div style="padding:24px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--text-soft);">
+          Не удалось открыть страницу. Вернись на главную.
+        </div>
+      `;
+    });
 }
 
 function renderApp() {
@@ -585,7 +465,9 @@ function renderApp() {
 
     const searchModalSignature = getSearchModalSignature();
     if (searchModalSignature !== lastSearchModalSignature) {
-      renderSearchModal(searchModalRoot, { category: state.searchContextCategory || null });
+      renderSearchModal(searchModalRoot, {
+        category: state.searchContextCategory || null
+      });
       lastSearchModalSignature = searchModalSignature;
     }
 
@@ -606,6 +488,19 @@ function renderApp() {
   }
 }
 
+function restoreCachedUserBeforeNetwork() {
+  const cachedUser = readCachedUser();
+
+  if (cachedUser?.id) {
+    setUserIfChanged(cachedUser);
+    setAuthStatus("authenticated");
+    return true;
+  }
+
+  setAuthStatus("restoring");
+  return false;
+}
+
 async function init() {
   if (initialized) return;
   initialized = true;
@@ -623,30 +518,20 @@ async function init() {
     console.warn("Router init error:", error);
   }
 
-  const cachedUser = readCachedUser();
-
-  if (cachedUser?.id) {
-    setUserIfChanged(cachedUser);
-    setAuthStatus("authenticated");
-  } else {
-    setAuthStatus("restoring");
-  }
-
+  restoreCachedUserBeforeNetwork();
   renderApp();
-  bindAuthListenerSafely();
+  bindAuthListener();
 
-  Promise.resolve()
-    .then(async () => {
-      await hydrateAuthStateSafely();
+  hydrateAuthState().catch((error) => {
+    console.warn("Deferred auth hydration skipped:", error);
 
-      if (state.authStatus === "restoring") {
-        setAuthStatus(state.user?.id ? "authenticated" : "guest");
-      }
-    })
-    .catch((error) => {
-      console.warn("Auth hydration deferred skipped:", error);
-      setAuthStatus(state.user?.id ? "authenticated" : "error");
-    });
+    if (state.user?.id) {
+      setAuthStatus("authenticated");
+      return;
+    }
+
+    setAuthStatus("guest");
+  });
 }
 
 init();
