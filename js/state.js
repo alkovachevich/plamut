@@ -1,3 +1,11 @@
+import {
+  DEFAULT_LANGUAGE,
+  DEFAULT_THEME,
+  normalizeLanguage,
+  normalizeTheme,
+  resolveAppliedTheme
+} from "./config.js";
+
 const listeners = new Set();
 
 const STORAGE_KEYS = {
@@ -12,8 +20,8 @@ export const state = {
   user: null,
   authStatus: "restoring",
 
-  language: "ru",
-  theme: "dark",
+  language: DEFAULT_LANGUAGE,
+  theme: DEFAULT_THEME,
 
   route: "/",
   routeParams: {},
@@ -29,6 +37,8 @@ export const state = {
 
   currentCategory: ""
 };
+
+let systemThemeListenerBound = false;
 
 function emit() {
   listeners.forEach((fn) => {
@@ -46,14 +56,6 @@ function safeParse(value, fallback) {
   } catch {
     return fallback;
   }
-}
-
-function normalizeTheme(value = "") {
-  return value === "light" || value === "dark" ? value : "dark";
-}
-
-function normalizeLanguage(value = "") {
-  return value === "en" || value === "ru" ? value : "ru";
 }
 
 function cleanText(value = "") {
@@ -74,6 +76,45 @@ function writeJsonStorage(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (error) {
     console.warn("state storage write skipped:", error);
+  }
+}
+
+function applyThemeToDocument(theme = state.theme) {
+  const appliedTheme = resolveAppliedTheme(theme);
+
+  document.documentElement.setAttribute("data-theme", appliedTheme);
+  document.documentElement.setAttribute("data-theme-mode", normalizeTheme(theme));
+}
+
+function applyLanguageToDocument(language = state.language) {
+  document.documentElement.lang = normalizeLanguage(language);
+}
+
+function bindSystemThemeListenerOnce() {
+  if (systemThemeListenerBound) return;
+  systemThemeListenerBound = true;
+
+  try {
+    const media = window.matchMedia?.("(prefers-color-scheme: light)");
+    if (!media) return;
+
+    const handler = () => {
+      if (state.theme === "system") {
+        applyThemeToDocument("system");
+        emit();
+      }
+    };
+
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", handler);
+      return;
+    }
+
+    if (typeof media.addListener === "function") {
+      media.addListener(handler);
+    }
+  } catch (error) {
+    console.warn("system theme listener skipped:", error);
   }
 }
 
@@ -114,12 +155,12 @@ export function setTheme(theme) {
   const next = normalizeTheme(theme);
 
   if (state.theme === next) {
-    document.documentElement.setAttribute("data-theme", next);
+    applyThemeToDocument(next);
     return;
   }
 
   state.theme = next;
-  document.documentElement.setAttribute("data-theme", next);
+  applyThemeToDocument(next);
 
   try {
     localStorage.setItem(STORAGE_KEYS.theme, next);
@@ -132,12 +173,12 @@ export function setLanguage(language) {
   const next = normalizeLanguage(language);
 
   if (state.language === next) {
-    document.documentElement.lang = next;
+    applyLanguageToDocument(next);
     return;
   }
 
   state.language = next;
-  document.documentElement.lang = next;
+  applyLanguageToDocument(next);
 
   try {
     localStorage.setItem(STORAGE_KEYS.language, next);
@@ -283,19 +324,20 @@ export function setCategoryViewState(category = "", viewState = {}) {
 }
 
 export function initState() {
-  let theme = "dark";
-  let language = "ru";
+  let theme = DEFAULT_THEME;
+  let language = DEFAULT_LANGUAGE;
 
   try {
-    theme = normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme) || "dark");
-    language = normalizeLanguage(localStorage.getItem(STORAGE_KEYS.language) || "ru");
+    theme = normalizeTheme(localStorage.getItem(STORAGE_KEYS.theme) || DEFAULT_THEME);
+    language = normalizeLanguage(localStorage.getItem(STORAGE_KEYS.language) || DEFAULT_LANGUAGE);
   } catch {}
 
   state.theme = theme;
   state.language = language;
 
-  document.documentElement.setAttribute("data-theme", theme);
-  document.documentElement.lang = language;
+  applyThemeToDocument(theme);
+  applyLanguageToDocument(language);
+  bindSystemThemeListenerOnce();
 
   emit();
 }
