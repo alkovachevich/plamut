@@ -20,6 +20,37 @@ const pendingUserMediaByKey = new Map();
 
 const CACHE_TTL_MS = 1000 * 60 * 5;
 
+const ALLOWED_PRIMARY_SOURCES = new Set([
+  "wikidata",
+  "openlibrary",
+  "tmdb",
+  "anilist",
+  "jikan",
+  "manual",
+  "system"
+]);
+
+const AUTHORITATIVE_CANONICAL_PREFIXES = [
+  "marvel:",
+  "mcu:",
+  "seed:",
+  "manual:"
+];
+
+const HARD_ID_KEYS = [
+  "tmdb_id",
+  "tmdb",
+  "wikidata_id",
+  "wikidata",
+  "imdb_id",
+  "imdb",
+  "anilist_id",
+  "anilist",
+  "mal_id",
+  "mal",
+  "openlibrary_work"
+];
+
 const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
   user_id,
@@ -78,8 +109,121 @@ function normalizeArray(value) {
   );
 }
 
+function normalizePrimarySource(value = "") {
+  const source = cleanLower(value);
+  return ALLOWED_PRIMARY_SOURCES.has(source) ? source : "manual";
+}
+
 function normalizeOpenLibraryWork(value = "") {
   return cleanText(value).replace("/works/", "");
+}
+
+function normalizeExternalIdValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return cleanLower(String(value).replace("/works/", ""));
+}
+
+function normalizeExternalIdsMap(value = {}) {
+  const ids = normalizeJson(value, {});
+  const normalized = { ...ids };
+
+  if (normalized.openlibrary_work) {
+    normalized.openlibrary_work = normalizeOpenLibraryWork(normalized.openlibrary_work);
+  }
+
+  return normalized;
+}
+
+function getHardIdentityIds(entity = {}) {
+  const ids = normalizeExternalIdsMap(entity.external_ids || {});
+  const result = {};
+
+  for (const key of HARD_ID_KEYS) {
+    const value = normalizeExternalIdValue(ids[key]);
+    if (value) result[key] = value;
+  }
+
+  return result;
+}
+
+function hasHardIdentity(entity = {}) {
+  return Object.keys(getHardIdentityIds(entity)).length > 0;
+}
+
+function hasExternalIdConflict(existing = {}, incoming = {}) {
+  const existingIds = getHardIdentityIds(existing);
+  const incomingIds = getHardIdentityIds(incoming);
+
+  for (const key of HARD_ID_KEYS) {
+    if (existingIds[key] && incomingIds[key] && existingIds[key] !== incomingIds[key]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasCategoryConflict(existing = {}, incoming = {}) {
+  const existingCategory = cleanLower(existing.category);
+  const incomingCategory = cleanLower(incoming.category);
+
+  if (!existingCategory || !incomingCategory) return false;
+  if (existingCategory === incomingCategory) return false;
+
+  const screenCategories = new Set(["movies", "series"]);
+  if (screenCategories.has(existingCategory) && screenCategories.has(incomingCategory)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isAuthoritativeEntity(entity = {}) {
+  const canonicalKey = cleanLower(entity.canonical_key);
+  const meta = normalizeJson(entity.meta, {});
+
+  return (
+    AUTHORITATIVE_CANONICAL_PREFIXES.some((prefix) => canonicalKey.startsWith(prefix)) ||
+    cleanLower(meta.franchise) === "marvel" ||
+    Boolean(meta.seed_version) ||
+    cleanLower(entity.primary_source) === "system"
+  );
+}
+
+function canMergeEntities(existing = {}, incoming = {}) {
+  if (!existing?.id && !existing?.canonical_key) return true;
+
+  const existingKey = cleanLower(existing.canonical_key);
+  const incomingKey = cleanLower(incoming.canonical_key);
+
+  if (existingKey && incomingKey && existingKey === incomingKey) {
+    return true;
+  }
+
+  if (hasCategoryConflict(existing, incoming)) {
+    return false;
+  }
+
+  if (hasExternalIdConflict(existing, incoming)) {
+    return false;
+  }
+
+  const existingHasHardId = hasHardIdentity(existing);
+  const incomingHasHardId = hasHardIdentity(incoming);
+
+  if (existingHasHardId && incomingHasHardId) {
+    const existingIds = getHardIdentityIds(existing);
+    const incomingIds = getHardIdentityIds(incoming);
+    const sharedKeys = HARD_ID_KEYS.filter((key) => existingIds[key] && incomingIds[key]);
+
+    return sharedKeys.length > 0;
+  }
+
+  if (isAuthoritativeEntity(existing) || isAuthoritativeEntity(incoming)) {
+    return false;
+  }
+
+  return true;
 }
 
 function makeEntityCacheRow(entity) {
@@ -146,7 +290,7 @@ function setCachedUserMedia(userId, entityId, value) {
 
 function extractPrimarySourceFromCanonicalKey(canonicalKey = "") {
   const parts = String(canonicalKey).split(":").filter(Boolean);
-  return parts[1] || "manual";
+  return normalizePrimarySource(parts[1] || "manual");
 }
 
 function buildTitlePrimary(entity = {}) {
@@ -171,14 +315,7 @@ function buildOriginalTitle(entity = {}) {
 }
 
 function buildExternalIds(entity = {}) {
-  const externalIds = normalizeJson(entity.external_ids, {});
-  const result = { ...externalIds };
-
-  if (result.openlibrary_work) {
-    result.openlibrary_work = normalizeOpenLibraryWork(result.openlibrary_work);
-  }
-
-  return result;
+  return normalizeExternalIdsMap(entity.external_ids);
 }
 
 function slugifyWorkIdentity(title = "", author = "") {
@@ -240,12 +377,16 @@ function buildCanonicalKey(entity = {}) {
 
   if (existing) return existing;
 
-  const source = cleanLower(entity.primary_source || entity.source || "");
+  const source = normalizePrimarySource(entity.primary_source || entity.source || "");
 
   if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
+  if (category && ids.tmdb_id) return `${category}:tmdb:${ids.tmdb_id}`.toLowerCase();
   if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
+  if (category && ids.imdb_id) return `${category}:imdb:${ids.imdb_id}`.toLowerCase();
   if (category && ids.imdb) return `${category}:imdb:${ids.imdb}`.toLowerCase();
+  if (category && ids.anilist_id) return `${category}:anilist:${ids.anilist_id}`.toLowerCase();
   if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
+  if (category && ids.mal_id) return `${category}:mal:${ids.mal_id}`.toLowerCase();
   if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
 
   if (category && ids.openlibrary_work) {
@@ -304,7 +445,7 @@ export function normalizeEntity(entity = {}) {
     canonical_key: canonicalKey,
     category,
     primary_source:
-      cleanText(entity.primary_source || entity.source) ||
+      normalizePrimarySource(entity.primary_source || entity.source) ||
       extractPrimarySourceFromCanonicalKey(canonicalKey),
 
     title_primary: titlePrimary,
@@ -329,7 +470,7 @@ function buildEntityPayload(entity) {
   return {
     canonical_key: entity.canonical_key,
     category: entity.category,
-    primary_source: entity.primary_source,
+    primary_source: normalizePrimarySource(entity.primary_source),
 
     title_primary: entity.title_primary,
     title_ru: entity.title_ru,
@@ -394,6 +535,20 @@ function pickBookDescription(a = "", b = "") {
 }
 
 function mergeEntityPayload(existing = {}, incoming = {}) {
+  if (!canMergeEntities(existing, incoming)) {
+    console.warn("mergeEntityPayload blocked unsafe merge", {
+      existing: existing?.canonical_key,
+      incoming: incoming?.canonical_key,
+      existingIds: existing?.external_ids,
+      incomingIds: incoming?.external_ids
+    });
+
+    return buildEntityPayload(existing);
+  }
+
+  const existingAuthoritative = isAuthoritativeEntity(existing);
+  const incomingAuthoritative = isAuthoritativeEntity(incoming);
+
   const existingCategory = cleanLower(existing.category);
   const incomingCategory = cleanLower(incoming.category);
   const isBookEntity = existingCategory === "books" || incomingCategory === "books";
@@ -433,30 +588,70 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
       })
     : existing.canonical_key || incoming.canonical_key;
 
-  const resolvedPrimarySource = isBookEntity
-    ? (resolvedExternalIds.wikidata ? "wikidata" : incoming.primary_source || existing.primary_source || "manual")
-    : incoming.primary_source || existing.primary_source || "manual";
+  const resolvedPrimarySource = normalizePrimarySource(
+    incoming.primary_source ||
+      existing.primary_source ||
+      (resolvedExternalIds.tmdb || resolvedExternalIds.tmdb_id ? "tmdb" : "") ||
+      (resolvedExternalIds.wikidata || resolvedExternalIds.wikidata_id ? "wikidata" : "") ||
+      "manual"
+  );
+
+  if (existingAuthoritative && !incomingAuthoritative) {
+    return {
+      canonical_key: resolvedCanonicalKey,
+      category: existing.category || resolvedCategory,
+      primary_source: existing.primary_source || resolvedPrimarySource,
+
+      title_primary: existing.title_primary || incoming.title_primary,
+      title_ru: existing.title_ru || incoming.title_ru,
+      title_en: existing.title_en || incoming.title_en,
+      original_title: existing.original_title || incoming.original_title,
+
+      year: existing.year ?? incoming.year ?? null,
+      cover_url: existing.cover_url || incoming.cover_url,
+
+      description_ru: existing.description_ru || incoming.description_ru,
+      description_en: existing.description_en || incoming.description_en,
+
+      external_ids: resolvedExternalIds,
+      meta: mergedMeta
+    };
+  }
 
   return {
     canonical_key: resolvedCanonicalKey,
     category: resolvedCategory,
     primary_source: resolvedPrimarySource,
 
-    title_primary: pickBetterText(existing.title_primary, incoming.title_primary),
-    title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
-    title_en: pickBetterText(existing.title_en, incoming.title_en),
-    original_title: pickBetterText(existing.original_title, incoming.original_title),
+    title_primary: incomingAuthoritative
+      ? incoming.title_primary || existing.title_primary
+      : pickBetterText(existing.title_primary, incoming.title_primary),
+    title_ru: incomingAuthoritative
+      ? incoming.title_ru || existing.title_ru
+      : pickBetterText(existing.title_ru, incoming.title_ru),
+    title_en: incomingAuthoritative
+      ? incoming.title_en || existing.title_en
+      : pickBetterText(existing.title_en, incoming.title_en),
+    original_title: incomingAuthoritative
+      ? incoming.original_title || existing.original_title
+      : pickBetterText(existing.original_title, incoming.original_title),
 
     year: incoming.year ?? existing.year ?? null,
-    cover_url: pickBetterCover(existing.cover_url, incoming.cover_url),
+    cover_url: incomingAuthoritative
+      ? incoming.cover_url || existing.cover_url
+      : pickBetterCover(existing.cover_url, incoming.cover_url),
 
     description_ru: isBookEntity
       ? pickBookDescription(existing.description_ru, incoming.description_ru)
-      : pickBetterText(existing.description_ru, incoming.description_ru),
+      : incomingAuthoritative
+        ? incoming.description_ru || existing.description_ru
+        : pickBetterText(existing.description_ru, incoming.description_ru),
 
     description_en: isBookEntity
       ? pickBookDescription(existing.description_en, incoming.description_en)
-      : pickBetterText(existing.description_en, incoming.description_en),
+      : incomingAuthoritative
+        ? incoming.description_en || existing.description_en
+        : pickBetterText(existing.description_en, incoming.description_en),
 
     external_ids: resolvedExternalIds,
     meta: mergedMeta
@@ -470,10 +665,15 @@ function possibleCanonicalKeys(entity = {}) {
   return uniqueArray(
     [
       entity.canonical_key,
+      ids.wikidata_id ? `${category}:wikidata:${ids.wikidata_id}` : "",
       ids.wikidata ? `${category}:wikidata:${ids.wikidata}` : "",
+      ids.tmdb_id ? `${category}:tmdb:${ids.tmdb_id}` : "",
       ids.tmdb ? `${category}:tmdb:${ids.tmdb}` : "",
+      ids.imdb_id ? `${category}:imdb:${ids.imdb_id}` : "",
       ids.imdb ? `${category}:imdb:${ids.imdb}` : "",
+      ids.anilist_id ? `${category}:anilist:${ids.anilist_id}` : "",
       ids.anilist ? `${category}:anilist:${ids.anilist}` : "",
+      ids.mal_id ? `${category}:mal:${ids.mal_id}` : "",
       ids.mal ? `${category}:mal:${ids.mal}` : "",
 
       category === "books" && ids.openlibrary_work
@@ -585,11 +785,31 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
 }
 
 async function findDuplicateEntity(entity = {}) {
-  const keys = possibleCanonicalKeys(entity);
+  const exactKey = cleanLower(entity.canonical_key);
+
+  if (exactKey) {
+    const exact = await getEntityByAnyCanonicalKey([exactKey]).catch(() => null);
+    if (exact?.id) return exact;
+  }
+
+  const keys = possibleCanonicalKeys(entity).filter((key) => key !== exactKey);
   if (!keys.length) return null;
 
   try {
-    return await getEntityByAnyCanonicalKey(keys);
+    const candidate = await getEntityByAnyCanonicalKey(keys);
+    if (!candidate?.id) return null;
+
+    if (!canMergeEntities(candidate, entity)) {
+      console.warn("findDuplicateEntity blocked unsafe duplicate match", {
+        candidate: candidate.canonical_key,
+        incoming: entity.canonical_key,
+        candidateIds: candidate.external_ids,
+        incomingIds: entity.external_ids
+      });
+      return null;
+    }
+
+    return candidate;
   } catch (error) {
     console.warn("findDuplicateEntity skipped:", error);
     return null;
@@ -650,6 +870,10 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
 function scheduleEntityEnrichment(entity = {}) {
   if (!entity?.id) return;
 
+  if (isAuthoritativeEntity(entity)) {
+    return;
+  }
+
   if (!shouldEnrichEntity(entity)) {
     return;
   }
@@ -674,14 +898,18 @@ export async function saveEntityIfMissing(inputEntity) {
   const promise = (async () => {
     const existing = await findDuplicateEntity(entity).catch(() => null);
 
-    const mergedPayload = existing
+    const canMerge = existing ? canMergeEntities(existing, entity) : false;
+
+    const mergedPayload = existing && canMerge
       ? mergeEntityPayload(existing, entity)
       : buildEntityPayload(entity);
 
     const payload = buildEntityPayload({
       ...entity,
       ...mergedPayload,
-      canonical_key: existing?.canonical_key || mergedPayload.canonical_key || entity.canonical_key
+      canonical_key: existing && canMerge
+        ? existing.canonical_key || mergedPayload.canonical_key || entity.canonical_key
+        : entity.canonical_key
     });
 
     const supabase = getSupabaseClient();
