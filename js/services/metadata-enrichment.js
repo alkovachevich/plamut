@@ -8,7 +8,7 @@ const READ_TIMEOUT_MS = 9000;
 const WRITE_TIMEOUT_MS = 12000;
 const SEARCH_TIMEOUT_MS = 9000;
 
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const TMDB_BASE_URL = "https://api.themoviedb.org/t/p/w500".replace("/t/p/w500", "/3");
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
 const OPEN_LIBRARY_BASE_URL = "https://openlibrary.org";
 const OPEN_LIBRARY_COVER_BASE_URL = "https://covers.openlibrary.org/b/id";
@@ -61,17 +61,9 @@ function hasUsefulCover(value = "") {
 function getMissingFields(entity = {}) {
   const missing = [];
 
-  if (!hasUsefulCover(entity.cover_url)) {
-    missing.push("cover_url");
-  }
-
-  if (!hasUsefulText(entity.description_ru)) {
-    missing.push("description_ru");
-  }
-
-  if (!hasUsefulText(entity.description_en)) {
-    missing.push("description_en");
-  }
+  if (!hasUsefulCover(entity.cover_url)) missing.push("cover_url");
+  if (!hasUsefulText(entity.description_ru)) missing.push("description_ru");
+  if (!hasUsefulText(entity.description_en)) missing.push("description_en");
 
   return missing;
 }
@@ -244,20 +236,35 @@ async function fetchJson(url, options = {}) {
 
 function getTitleCandidates(entity = {}) {
   return uniqueArray([
+    entity.original_title,
+    entity.title_en,
     entity.title_primary,
     entity.title_ru,
-    entity.title_en,
+    entity.title
+  ].map(cleanText).filter(Boolean));
+}
+
+function getOriginalTitleCandidates(entity = {}) {
+  return uniqueArray([
     entity.original_title,
+    entity.title_en
+  ].map(cleanText).filter(Boolean));
+}
+
+function getLocalizedTitleCandidates(entity = {}) {
+  return uniqueArray([
+    entity.title_primary,
+    entity.title_ru,
     entity.title
   ].map(cleanText).filter(Boolean));
 }
 
 function getBestTitle(entity = {}) {
   return (
+    cleanText(entity.original_title) ||
+    cleanText(entity.title_en) ||
     cleanText(entity.title_primary) ||
     cleanText(entity.title_ru) ||
-    cleanText(entity.title_en) ||
-    cleanText(entity.original_title) ||
     cleanText(entity.title) ||
     ""
   );
@@ -297,6 +304,7 @@ function getTmdbResultYear(item = {}, type = "movie") {
 function normalizeCompareTitle(value = "") {
   return cleanLower(value)
     .replace(/ё/g, "е")
+    .replace(/&/g, " and ")
     .replace(/[^a-z0-9а-яе]+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -314,55 +322,110 @@ function getTmdbResultOriginalTitle(item = {}, type = "movie") {
     : cleanText(item.original_title || item.title);
 }
 
-function scoreTmdbCandidate(item = {}, entity = {}, type = "movie") {
+function getCanonicalExternalIds(entity = {}) {
+  const ids = normalizeJson(entity.external_ids, {});
+  return {
+    tmdb: cleanText(ids.tmdb),
+    imdb: cleanText(ids.imdb),
+    wikidata: cleanText(ids.wikidata)
+  };
+}
+
+function hasStrongTitleMatch(item = {}, entity = {}, type = "movie") {
+  const originalCandidates = getOriginalTitleCandidates(entity)
+    .map(normalizeCompareTitle)
+    .filter(Boolean);
+
+  const itemOriginal = normalizeCompareTitle(getTmdbResultOriginalTitle(item, type));
+
+  if (!originalCandidates.length || !itemOriginal) return false;
+
+  return originalCandidates.some((title) => title === itemOriginal);
+}
+
+function hasWeakLocalizedTitleMatch(item = {}, entity = {}, type = "movie") {
+  const localizedCandidates = getLocalizedTitleCandidates(entity)
+    .map(normalizeCompareTitle)
+    .filter(Boolean);
+
+  const itemLocalized = normalizeCompareTitle(getTmdbResultTitle(item, type));
+
+  if (!localizedCandidates.length || !itemLocalized) return false;
+
+  return localizedCandidates.some((title) => title === itemLocalized);
+}
+
+function scoreTmdbCandidate(item = {}, entity = {}, type = "movie", { allowLocalizedMatch = false } = {}) {
   const entityYear = normalizeYear(entity.year);
   const itemYear = getTmdbResultYear(item, type);
-  const entityTitles = getTitleCandidates(entity).map(normalizeCompareTitle).filter(Boolean);
-  const itemTitles = [
-    getTmdbResultTitle(item, type),
-    getTmdbResultOriginalTitle(item, type)
-  ].map(normalizeCompareTitle).filter(Boolean);
+  const strongTitleMatch = hasStrongTitleMatch(item, entity, type);
+  const weakLocalizedMatch = allowLocalizedMatch
+    ? hasWeakLocalizedTitleMatch(item, entity, type)
+    : false;
 
   let score = 0;
 
-  if (item.poster_path) score += 40;
-  if (item.overview) score += 10;
+  if (item.poster_path) score += 35;
+  if (item.overview) score += 8;
 
   if (entityYear && itemYear) {
-    if (entityYear === itemYear) score += 40;
-    else if (Math.abs(entityYear - itemYear) <= 1) score += 20;
-    else score -= 20;
+    if (entityYear === itemYear) score += 60;
+    else if (Math.abs(entityYear - itemYear) <= 1) score += 25;
+    else score -= 80;
   }
 
-  if (entityTitles.length && itemTitles.length) {
-    const exact = itemTitles.some((itemTitle) => entityTitles.includes(itemTitle));
-    const partial = itemTitles.some((itemTitle) =>
-      entityTitles.some((entityTitle) =>
-        itemTitle.includes(entityTitle) || entityTitle.includes(itemTitle)
-      )
-    );
+  if (strongTitleMatch) score += 80;
+  if (weakLocalizedMatch) score += 12;
 
-    if (exact) score += 35;
-    else if (partial) score += 18;
-  }
-
-  score += Math.min(Number(item.popularity || 0), 100) / 10;
+  score += Math.min(Number(item.popularity || 0), 100) / 20;
 
   return score;
 }
 
-function pickBestTmdbCandidate(results = [], entity = {}, type = "movie") {
-  const candidates = safeArray(results)
+function pickBestTmdbCandidate(results = [], entity = {}, type = "movie", options = {}) {
+  const entityYear = normalizeYear(entity.year);
+  const originalCandidates = getOriginalTitleCandidates(entity);
+  const allowLocalizedMatch = Boolean(options.allowLocalizedMatch);
+
+  let candidates = safeArray(results)
     .filter((item) => item?.id)
-    .slice(0, 8)
+    .slice(0, 8);
+
+  if (entityYear) {
+    const yearMatches = candidates.filter((item) => {
+      const itemYear = getTmdbResultYear(item, type);
+      return itemYear && Math.abs(itemYear - entityYear) <= 1;
+    });
+
+    if (yearMatches.length) {
+      candidates = yearMatches;
+    }
+  }
+
+  if (originalCandidates.length) {
+    const originalMatches = candidates.filter((item) => hasStrongTitleMatch(item, entity, type));
+
+    if (originalMatches.length) {
+      candidates = originalMatches;
+    }
+  }
+
+  if (!candidates.length && allowLocalizedMatch) {
+    candidates = safeArray(results)
+      .filter((item) => item?.id)
+      .filter((item) => hasWeakLocalizedTitleMatch(item, entity, type))
+      .slice(0, 8);
+  }
+
+  const scored = candidates
     .map((item) => ({
       item,
-      score: scoreTmdbCandidate(item, entity, type)
+      score: scoreTmdbCandidate(item, entity, type, { allowLocalizedMatch })
     }))
     .sort((a, b) => b.score - a.score);
 
-  const withPoster = candidates.find((candidate) => candidate.item.poster_path);
-  return (withPoster || candidates[0])?.item || null;
+  const withPoster = scored.find((candidate) => candidate.item.poster_path);
+  return (withPoster || scored[0])?.item || null;
 }
 
 async function fetchTmdbDetails(entity = {}, language = "ru") {
@@ -399,8 +462,10 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
       ? getYearFromDate(payload.first_air_date)
       : getYearFromDate(payload.release_date);
 
-  const fallbackPoster = safeArray(payload?.images?.posters)
-    .find((poster) => poster?.file_path)?.file_path || "";
+  const fallbackPoster =
+    safeArray(payload?.images?.posters).find((poster) => poster?.file_path)?.file_path ||
+    safeArray(payload?.images?.backdrops).find((backdrop) => backdrop?.file_path)?.file_path ||
+    "";
 
   return {
     title_primary: title || originalTitle,
@@ -429,7 +494,43 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
   };
 }
 
-async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru") {
+async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
+  const ids = getCanonicalExternalIds(entity);
+
+  if (!ids.imdb || !TMDB_API_KEY) return null;
+
+  const url = new URL(`${TMDB_BASE_URL}/find/${encodeURIComponent(ids.imdb)}`);
+
+  url.searchParams.set("api_key", TMDB_API_KEY);
+  url.searchParams.set("external_source", "imdb_id");
+  url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
+
+  const payload = await fetchJson(url.toString(), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  const category = normalizeCategory(entity.category);
+  const result = category === "series"
+    ? safeArray(payload.tv_results)[0]
+    : safeArray(payload.movie_results)[0];
+
+  if (!result?.id) return null;
+
+  return fetchTmdbDetails(
+    {
+      ...entity,
+      external_ids: {
+        ...normalizeJson(entity.external_ids, {}),
+        tmdb: String(result.id)
+      }
+    },
+    language
+  );
+}
+
+async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru", options = {}) {
   if (!TMDB_API_KEY) return null;
 
   const cleanQuery = cleanText(query);
@@ -450,7 +551,7 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru")
     }
   });
 
-  const result = pickBestTmdbCandidate(payload.results, entity, type);
+  const result = pickBestTmdbCandidate(payload.results, entity, type, options);
   if (!result?.id) return null;
 
   return fetchTmdbDetails(
@@ -468,22 +569,53 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru")
 async function fetchTmdbBySearch(entity = {}, language = "ru") {
   if (!TMDB_API_KEY) return null;
 
-  const queries = uniqueArray([
-    entity.title_ru,
-    entity.title_en,
-    entity.original_title,
-    entity.title_primary,
-    entity.title
-  ].map(cleanText).filter(Boolean));
+  const ids = getCanonicalExternalIds(entity);
 
-  for (const query of queries) {
+  if (ids.tmdb) {
+    return fetchTmdbDetails(entity, language);
+  }
+
+  if (ids.imdb) {
+    const byImdb = await fetchTmdbFindByImdb(entity, language).catch((error) => {
+      console.warn("TMDB find by IMDb skipped:", error);
+      return null;
+    });
+
+    if (byImdb?.cover_url || byImdb?.description_ru || byImdb?.description_en) {
+      return byImdb;
+    }
+  }
+
+  const strongQueries = getOriginalTitleCandidates(entity);
+  const weakQueries = getLocalizedTitleCandidates(entity);
+
+  for (const query of strongQueries) {
     try {
-      const patch = await fetchTmdbBySingleSearch(entity, query, language);
+      const patch = await fetchTmdbBySingleSearch(entity, query, language, {
+        allowLocalizedMatch: false
+      });
+
       if (patch?.cover_url || patch?.description_ru || patch?.description_en) {
         return patch;
       }
     } catch (error) {
-      console.warn(`TMDB search skipped for "${query}":`, error);
+      console.warn(`TMDB strong search skipped for "${query}":`, error);
+    }
+  }
+
+  if (normalizeYear(entity.year)) {
+    for (const query of weakQueries) {
+      try {
+        const patch = await fetchTmdbBySingleSearch(entity, query, language, {
+          allowLocalizedMatch: true
+        });
+
+        if (patch?.cover_url || patch?.description_ru || patch?.description_en) {
+          return patch;
+        }
+      } catch (error) {
+        console.warn(`TMDB weak localized search skipped for "${query}":`, error);
+      }
     }
   }
 
@@ -967,6 +1099,8 @@ async function runPatchPipeline(entity = {}) {
   if (category === "movies" || category === "series") {
     await tryPatch(() => fetchTmdbDetails(entity, "ru"));
     await tryPatch(() => fetchTmdbDetails(entity, "en"));
+    await tryPatch(() => fetchTmdbFindByImdb(entity, "ru"));
+    await tryPatch(() => fetchTmdbFindByImdb(entity, "en"));
     await tryPatch(() => fetchTmdbBySearch(entity, "ru"));
     await tryPatch(() => fetchTmdbBySearch(entity, "en"));
     await tryPatch(() => fetchWikidataPatch(entity));
