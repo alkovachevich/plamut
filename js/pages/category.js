@@ -58,7 +58,7 @@ async function updateUserMedia(userMediaId, payload) {
   );
 
   if (error) throw error;
-  return data;
+  return data || null;
 }
 
 async function removeFromLibrary(userMediaId) {
@@ -90,7 +90,6 @@ function resolveTitle(entity = {}) {
 function resolveSubtitle(entity = {}) {
   const title = resolveTitle(entity);
   const original = entity.original_title || "";
-
   return original && original !== title ? original : "";
 }
 
@@ -136,7 +135,7 @@ function sortItems(items = [], sort = "recent") {
 }
 
 function filterItems(items = [], activeFolder = "all") {
-  if (activeFolder === "all") return items;
+  if (activeFolder === "all") return safeArray(items);
   return safeArray(items).filter((item) => (item.folder_name || "") === activeFolder);
 }
 
@@ -270,7 +269,7 @@ function renderErrorState(hasItems = false) {
   return `
     <div class="empty-state">
       <div class="empty-state__title">Ошибка загрузки</div>
-      <div class="empty-state__text">Не удалось загрузить библиотеку. Если данные есть в кэше, они появятся после обновления страницы.</div>
+      <div class="empty-state__text">Не удалось загрузить библиотеку. Если данные есть в кэше, они будут показаны автоматически.</div>
     </div>
   `;
 }
@@ -387,7 +386,7 @@ function renderStyles() {
         border: 1px solid var(--border-soft);
         border-radius: 22px;
         padding: 10px;
-        transition: transform .18s ease, border-color .18s ease, background .18s ease;
+        transition: transform .18s ease, border-color .18s ease, background .18s ease, opacity .18s ease;
       }
 
       .library-card:hover {
@@ -686,11 +685,13 @@ export async function renderCategoryPage(root, params = {}) {
   }
 
   const savedViewState = getCategoryViewState(category) || {};
+
   let items = [];
   let activeFolder = savedViewState.folder || "all";
   let activeSort = savedViewState.sort || "recent";
   let isDestroyed = false;
   let isRefreshing = false;
+  let lastListSignature = "";
 
   root.innerHTML = `
     ${renderStyles()}
@@ -746,13 +747,43 @@ export async function renderCategoryPage(root, params = {}) {
     }
   }
 
-  function renderList() {
+  function getVisibleItems() {
+    return sortItems(filterItems(items, activeFolder), activeSort);
+  }
+
+  function buildListSignature() {
+    const visibleItems = getVisibleItems();
+
+    return JSON.stringify({
+      folders: uniqueFolders(items),
+      activeFolder,
+      activeSort,
+      ids: visibleItems.map((item) => ({
+        id: item.id,
+        status: item.status,
+        folder: item.folder_name || "",
+        updated: item.updated_at || "",
+        title: item.media_entities?.title_primary || "",
+        cover: item.media_entities?.cover_url || ""
+      }))
+    });
+  }
+
+  function renderList({ force = false } = {}) {
     if (isDestroyed || !foldersRoot || !contentRoot) return;
 
     normalizeActiveFolder();
 
+    const nextSignature = buildListSignature();
+
+    if (!force && nextSignature === lastListSignature) {
+      return;
+    }
+
+    lastListSignature = nextSignature;
+
     const folders = uniqueFolders(items);
-    const visibleItems = sortItems(filterItems(items, activeFolder), activeSort);
+    const visibleItems = getVisibleItems();
 
     foldersRoot.innerHTML = renderFolderTabs(folders, activeFolder);
 
@@ -774,13 +805,25 @@ export async function renderCategoryPage(root, params = {}) {
 
     items = normalized;
     persistViewState();
-    renderList();
+    renderList({ force });
   }
 
   function setCardBusy(userMediaId, busy = true) {
     const card = contentRoot?.querySelector(`[data-user-media-id="${userMediaId}"]`);
     if (!card) return;
     card.classList.toggle("is-busy", Boolean(busy));
+  }
+
+  function updateItemInMemory(updated) {
+    if (!updated?.id) return;
+
+    items = items.map((item) =>
+      Number(item.id) === Number(updated.id) ? updated : item
+    );
+  }
+
+  function removeItemFromMemory(userMediaId) {
+    items = items.filter((item) => Number(item.id) !== Number(userMediaId));
   }
 
   async function refreshVisibleListInBackground() {
@@ -810,7 +853,7 @@ export async function renderCategoryPage(root, params = {}) {
   sortSelect?.addEventListener("change", () => {
     activeSort = sortSelect.value || "recent";
     persistViewState();
-    renderList();
+    renderList({ force: true });
   });
 
   foldersRoot?.addEventListener("click", (event) => {
@@ -819,7 +862,7 @@ export async function renderCategoryPage(root, params = {}) {
 
     activeFolder = button.dataset.folder || "all";
     persistViewState();
-    renderList();
+    renderList({ force: true });
   });
 
   contentRoot?.addEventListener("click", async (event) => {
@@ -870,15 +913,13 @@ export async function renderCategoryPage(root, params = {}) {
 
         if (!updated) return;
 
-        items = items.map((item) =>
-          Number(item.id) === userMediaId ? updated : item
-        );
+        updateItemInMemory(updated);
 
         updateCachedLibraryItem(userId, updated, {
           category: updated.category || category
         });
 
-        renderList();
+        renderList({ force: true });
       } catch (error) {
         console.warn("Update status error:", error);
         button.disabled = false;
@@ -914,9 +955,7 @@ export async function renderCategoryPage(root, params = {}) {
 
         if (!updated) return;
 
-        items = items.map((item) =>
-          Number(item.id) === userMediaId ? updated : item
-        );
+        updateItemInMemory(updated);
 
         updateCachedLibraryItem(userId, updated, {
           category: updated.category || category
@@ -926,7 +965,7 @@ export async function renderCategoryPage(root, params = {}) {
           activeFolder = "all";
         }
 
-        renderList();
+        renderList({ force: true });
       } catch (error) {
         console.warn("Update folder error:", error);
         button.disabled = false;
@@ -950,13 +989,13 @@ export async function renderCategoryPage(root, params = {}) {
 
         await removeFromLibrary(userMediaId);
 
-        items = items.filter((item) => Number(item.id) !== userMediaId);
+        removeItemFromMemory(userMediaId);
 
         removeCachedLibraryItem(userId, userMediaId, {
           category
         });
 
-        renderList();
+        renderList({ force: true });
       } catch (error) {
         console.warn("Remove from library error:", error);
         button.disabled = false;
@@ -1005,7 +1044,6 @@ export async function renderCategoryPage(root, params = {}) {
     if (isDestroyed) return;
 
     applyItems(cachedItems, { force: true });
-
     refreshVisibleListInBackground();
   } catch (error) {
     console.warn("Category library load error:", error);
