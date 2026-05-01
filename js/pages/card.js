@@ -31,6 +31,11 @@ import {
   loadUserLibrary
 } from "../services/library-cache.js";
 
+import {
+  enrichMediaEntityInBackground,
+  shouldEnrichEntity
+} from "../services/metadata-enrichment.js";
+
 const CARD_TIMEOUT_MS = 8000;
 const MUTATION_TIMEOUT_MS = 8000;
 const EMPTY_FOLDERS_KEY = "plamut_empty_folders_by_category_v1";
@@ -46,7 +51,7 @@ const USER_MEDIA_SELECT = `
   updated_at
 `;
 
-const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
+const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
   user_id,
   entity_id,
@@ -59,13 +64,20 @@ const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
     id,
     canonical_key,
     category,
+    primary_source,
     title_primary,
     title_ru,
     title_en,
     original_title,
     year,
     cover_url,
-    universe_key
+    description_ru,
+    description_en,
+    external_ids,
+    meta,
+    universe_key,
+    relations_built_at,
+    relations_status
   )
 `;
 
@@ -95,7 +107,8 @@ const I18N = {
     yes: "Да",
     close: "Закрыть",
     description: "Описание",
-    noDescription: "Описание отсутствует",
+    noDescription: "Описание пока уточняется",
+    metadataUpdating: "Данные обновляются…",
     related: "Связанные",
     universes: "Вселенные",
     universe: "Вселенная",
@@ -139,7 +152,8 @@ const I18N = {
     yes: "Yes",
     close: "Close",
     description: "Description",
-    noDescription: "No description",
+    noDescription: "Description is being updated",
+    metadataUpdating: "Updating metadata…",
     related: "Related",
     universes: "Universes",
     universe: "Universe",
@@ -226,6 +240,53 @@ function isPersistableEntity(entity = {}) {
   return Boolean(entity?.canonical_key && !isFallbackEntity(entity));
 }
 
+function hasUsefulDescription(entity = {}) {
+  return clean(entity.description_ru || entity.description_en || entity.description).length >= 40;
+}
+
+function hasUsefulCover(entity = {}) {
+  const cover = clean(entity.cover_url);
+  return Boolean(cover && cover !== "undefined" && cover !== "null" && !cover.includes("/placeholder"));
+}
+
+function isIncompleteEntity(entity = {}) {
+  if (!entity?.canonical_key || isFallbackEntity(entity)) return true;
+  return !hasUsefulCover(entity) || !hasUsefulDescription(entity);
+}
+
+function mergeEntityStable(current = {}, incoming = {}) {
+  const left = current && typeof current === "object" ? current : {};
+  const right = incoming && typeof incoming === "object" ? incoming : {};
+
+  return {
+    ...left,
+    ...right,
+    id: right.id || left.id || null,
+    canonical_key: clean(right.canonical_key) || clean(left.canonical_key),
+    category: clean(right.category) || clean(left.category),
+    primary_source: clean(right.primary_source) || clean(left.primary_source),
+    title_primary: clean(right.title_primary) || clean(left.title_primary),
+    title_ru: clean(right.title_ru) || clean(left.title_ru),
+    title_en: clean(right.title_en) || clean(left.title_en),
+    original_title: clean(right.original_title) || clean(left.original_title),
+    year: right.year || left.year || null,
+    cover_url: clean(right.cover_url) || clean(left.cover_url),
+    description_ru: clean(right.description_ru) || clean(left.description_ru) || clean(left.description),
+    description_en: clean(right.description_en) || clean(left.description_en),
+    external_ids: {
+      ...(left.external_ids && typeof left.external_ids === "object" ? left.external_ids : {}),
+      ...(right.external_ids && typeof right.external_ids === "object" ? right.external_ids : {})
+    },
+    meta: {
+      ...(left.meta && typeof left.meta === "object" ? left.meta : {}),
+      ...(right.meta && typeof right.meta === "object" ? right.meta : {})
+    },
+    universe_key: clean(right.universe_key) || clean(left.universe_key),
+    relations_built_at: right.relations_built_at || left.relations_built_at || null,
+    relations_status: clean(right.relations_status) || clean(left.relations_status)
+  };
+}
+
 function resolveTitle(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
 
@@ -274,7 +335,7 @@ function resolveDescription(entity = {}) {
 }
 
 function getCover(entity = {}) {
-  const cover = entity.cover_url || "";
+  const cover = clean(entity.cover_url);
   if (!cover || cover === "undefined" || cover === "null") return "";
   return cover;
 }
@@ -363,32 +424,44 @@ function loadFastEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
-  const cachedEntity = getCachedEntityByKey(userId, key);
-  if (cachedEntity?.canonical_key && !cachedEntity.__fallback) {
-    return normalizeStoredEntity(cachedEntity);
-  }
-
+  const cachedEntity = normalizeStoredEntity(getCachedEntityByKey(userId, key));
   const temp = normalizeStoredEntity(getTemporaryCardItem());
-  if (temp?.canonical_key && (!key || normalizeKey(temp.canonical_key) === key)) {
-    return temp;
-  }
-
   const stored = normalizeStoredEntity(getStoredCardItemByKey(key));
-  if (stored?.canonical_key) {
-    return stored;
-  }
 
-  return null;
+  const candidates = [cachedEntity, temp, stored].filter(Boolean);
+  const matching = candidates.find((item) => item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key));
+
+  return matching || null;
 }
 
 async function loadEntityFromDb(key) {
   if (!key) return null;
 
-  return withTimeout(
+  const entityFromService = await withTimeout(
     getEntityByCanonicalKey(key),
     "Загрузка карточки",
     CARD_TIMEOUT_MS
+  ).catch(() => null);
+
+  if (entityFromService && !isIncompleteEntity(entityFromService)) {
+    return entityFromService;
+  }
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from("media_entities")
+      .select("*")
+      .eq("canonical_key", key)
+      .maybeSingle(),
+    "Полная загрузка карточки",
+    CARD_TIMEOUT_MS
   );
+
+  if (error) throw error;
+
+  return data || entityFromService || null;
 }
 
 async function loadUserMedia(userId, entityId) {
@@ -420,7 +493,7 @@ async function updateUserMedia(userMediaId, payload) {
       .from("user_media")
       .update(payload)
       .eq("id", userMediaId)
-      .select(USER_MEDIA_WITH_ENTITY_LIGHT_SELECT)
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .maybeSingle(),
     "Обновление карточки",
     MUTATION_TIMEOUT_MS
@@ -531,7 +604,7 @@ function renderRelatedItem(item = {}) {
       <div class="related-card__cover">
         ${
           cover
-            ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(title)}" loading="lazy" decoding="async">`
+            ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(title)}" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentElement.classList.add('is-empty');">`
             : `<div class="related-card__fallback">?</div>`
         }
       </div>
@@ -732,7 +805,8 @@ function renderStyles() {
       .card-cover { width:132px; aspect-ratio:2/3; overflow:hidden; border-radius:16px; border:1px solid var(--border-soft); background:var(--surface); }
       .card-cover img { width:100%; height:100%; object-fit:cover; }
       .card-cover.is-empty { display:grid; place-items:center; }
-      .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:800; }
+      .card-cover.is-empty::after { content:"?"; color:var(--text-soft); font-weight:850; font-size:28px; }
+      .card-cover__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); font-size:28px; font-weight:850; }
 
       .card-main { min-width:0; display:flex; flex-direction:column; gap:12px; padding-right:44px; }
       .card-title { font-size:24px; line-height:1.15; font-weight:850; color:var(--text); }
@@ -740,6 +814,7 @@ function renderStyles() {
       .card-badges { display:flex; gap:8px; flex-wrap:wrap; }
       .card-badge { display:inline-flex; align-items:center; min-height:26px; padding:5px 9px; border-radius:999px; background:var(--accent-soft); color:var(--text); font-size:12px; }
       .card-badge.folder { background:var(--bg-soft); }
+      .card-badge.muted { background:var(--surface); color:var(--text-soft); border:1px solid var(--border-soft); }
 
       .card-menu-wrap { position:absolute; top:14px; right:14px; z-index:10; }
       .card-menu-btn { width:38px; height:38px; display:grid; place-items:center; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-size:22px; line-height:1; }
@@ -761,6 +836,7 @@ function renderStyles() {
       .related-card { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:center; padding:8px; border-radius:14px; border:1px solid var(--border-soft); background:var(--bg-elevated); color:var(--text); text-align:left; }
       .related-card__cover { width:54px; height:76px; border-radius:10px; overflow:hidden; background:var(--surface); }
       .related-card__cover img { width:100%; height:100%; object-fit:cover; }
+      .related-card__cover.is-empty { display:grid; place-items:center; }
       .related-card__fallback { width:100%; height:100%; display:grid; place-items:center; color:var(--text-soft); }
       .related-card__body { min-width:0; }
       .related-card__title { font-size:14px; font-weight:750; line-height:1.3; }
@@ -876,37 +952,132 @@ function renderStyles() {
       .card-action-modal__primary {
         min-height:42px;
         border-radius:14px;
-        background:var(--accent-soft);
-        color:var(--text);
-        padding:0 12px;
+        background:var(--accent);
+        color:#fff;
+        padding:0 14px;
         font-weight:800;
       }
 
-      .card-action-modal__primary {
-        width:100%;
-        background:var(--accent);
-        color:#fff;
-      }
-
       .card-action-modal__delete {
-        width:100%;
-        min-height:44px;
+        min-height:42px;
         border-radius:14px;
+        border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
         background:transparent;
         color:var(--danger);
-        border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
         font-weight:850;
       }
 
-      @media (max-width:640px) {
-        .card-shell { grid-template-columns:104px 1fr; gap:12px; padding:12px; border-radius:18px; }
-        .card-cover { width:104px; border-radius:14px; }
-        .card-main { padding-right:38px; }
-        .card-title { font-size:20px; }
-        .related-grid { grid-template-columns:1fr; }
-        .card-action-modal__folder-form { flex-direction:column; }
+      .confirm-box {
+        display:flex;
+        flex-direction:column;
+        gap:12px;
+      }
+
+      .confirm-actions {
+        display:flex;
+        gap:10px;
+        justify-content:flex-end;
+      }
+
+      .confirm-actions button {
+        min-height:40px;
+        padding:0 14px;
+        border-radius:12px;
+        border:1px solid var(--border);
+        background:var(--surface);
+        color:var(--text);
+        font-weight:750;
+      }
+
+      .confirm-actions .danger {
+        background:var(--danger);
+        border-color:transparent;
+        color:#fff;
+      }
+
+      @media (max-width: 640px) {
+        .card-shell {
+          grid-template-columns:96px 1fr;
+          gap:12px;
+          padding:12px;
+          border-radius:20px;
+        }
+
+        .card-cover {
+          width:96px;
+          border-radius:14px;
+        }
+
+        .card-main {
+          padding-right:38px;
+          gap:9px;
+        }
+
+        .card-title {
+          font-size:20px;
+        }
+
+        .card-action-modal__folder-form {
+          flex-direction:column;
+        }
       }
     </style>
+  `;
+}
+
+function renderCardShell(entity = {}, userMedia = null) {
+  const title = resolveTitle(entity);
+  const description = resolveDescription(entity);
+  const isUpdating = isIncompleteEntity(entity) && !isFallbackEntity(entity);
+  const originalTitle = entity.original_title && entity.original_title !== title
+    ? entity.original_title
+    : "";
+
+  return `
+    <section class="card-page" data-card-key="${escapeHtml(entity.canonical_key || "")}">
+      <article class="card-shell">
+        <div class="card-cover ${getCover(entity) ? "" : "is-empty"}">
+          ${renderCover(entity)}
+        </div>
+
+        <div class="card-main">
+          <div class="card-badges">
+            ${entity.category ? `<span class="card-badge">${escapeHtml(getCategoryLabel(state.language, entity.category))}</span>` : ""}
+            ${entity.year ? `<span class="card-badge">${escapeHtml(String(entity.year))}</span>` : ""}
+            ${renderStatusBadge(userMedia)}
+            ${renderFolderBadge(userMedia)}
+            ${isUpdating ? `<span class="card-badge muted">${escapeHtml(t("metadataUpdating"))}</span>` : ""}
+          </div>
+
+          <div class="card-title">${escapeHtml(title)}</div>
+          ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
+
+          <div class="card-status" data-card-status></div>
+        </div>
+
+        <div class="card-menu-wrap">
+          <button class="card-menu-btn" type="button" aria-label="${escapeHtml(t("menu"))}" data-action="open-action-modal">
+            ⋯
+          </button>
+        </div>
+      </article>
+
+      <section class="card-section">
+        <div class="card-section__title">${escapeHtml(t("description"))}</div>
+        <div class="card-description">
+          ${escapeHtml(description || t("noDescription"))}
+        </div>
+      </section>
+
+      <div data-universe-root></div>
+
+      <section class="card-section" data-related-section hidden>
+        <div class="card-section__title">${escapeHtml(t("related"))}</div>
+        <div class="related-grid" data-related-grid></div>
+      </section>
+
+      <div data-action-modal-root></div>
+    </section>
   `;
 }
 
@@ -924,120 +1095,63 @@ function renderNotFound(root) {
   `;
 }
 
-function renderMenu() {
-  return `
-    <div class="card-menu-wrap">
-      <button class="card-menu-btn" type="button" data-action="open-action-modal" aria-label="${escapeHtml(t("menu"))}">⋯</button>
-    </div>
-  `;
+function updateStatus(root, text = "") {
+  const status = root.querySelector("[data-card-status]");
+  if (status) status.textContent = text;
 }
 
-function renderCard(root, { entity, userMedia, relatedItems = [], universeLinks = [] }) {
-  const title = resolveTitle(entity);
-  const description = resolveDescription(entity);
-  const categoryLabel = getCategoryLabel(state.language, entity.category || "");
-  const originalTitle =
-    entity.original_title && entity.original_title !== title
-      ? entity.original_title
-      : "";
-
-  const relatedFallbackHtml = !relatedItems.length ? renderRelatedFallbackFromMeta(entity) : "";
-  const hasRelatedContent = relatedItems.length || relatedFallbackHtml;
-
-  root.innerHTML = `
-    ${renderStyles()}
-
-    <section class="card-page">
-      <div class="card-shell">
-        ${renderMenu()}
-
-        <div class="card-cover">
-          ${renderCover(entity)}
-        </div>
-
-        <div class="card-main">
-          <div>
-            <div class="card-title">${escapeHtml(title)}</div>
-            ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
-          </div>
-
-          <div class="card-badges" data-card-badges>
-            ${categoryLabel ? `<span class="card-badge">${escapeHtml(categoryLabel)}</span>` : ""}
-            ${entity.year ? `<span class="card-badge">${escapeHtml(String(entity.year))}</span>` : ""}
-            ${renderStatusBadge(userMedia)}
-            ${renderFolderBadge(userMedia)}
-          </div>
-
-          <div class="card-status" data-status></div>
-        </div>
-      </div>
-
-      <div class="card-section">
-        <div class="card-section__title">${escapeHtml(t("description"))}</div>
-        <div class="card-description" data-card-description>
-          ${description ? escapeHtml(description) : escapeHtml(t("noDescription"))}
-        </div>
-      </div>
-
-      <div data-universe-root>
-        ${renderUniverseLinks(universeLinks)}
-      </div>
-
-      <div class="card-section" data-related-section ${hasRelatedContent ? "" : "hidden"}>
-        <div class="card-section__title">${escapeHtml(t("related"))}</div>
-        <div class="related-grid" data-related-grid>
-          ${relatedItems.length ? relatedItems.map(renderRelatedItem).join("") : relatedFallbackHtml}
-        </div>
-      </div>
-
-      <div data-action-modal-root></div>
-    </section>
-  `;
+function getRouteKey(params = {}) {
+  return normalizeKey(
+    params.key ||
+    params.canonical_key ||
+    params.canonicalKey ||
+    params.id ||
+    ""
+  );
 }
 
-function updateUserMediaUI(root, userMedia) {
-  const badgesRoot = root.querySelector("[data-card-badges]");
+async function loadRelatedData(root, entity = {}) {
+  if (!entity?.id) return;
 
-  if (!badgesRoot) return;
+  const [relatedResult, universeResult] = await Promise.allSettled([
+    getRelatedItemsForEntityFromDb(entity.id),
+    getEntityUniverseLinksFromDb(entity.id)
+  ]);
 
-  badgesRoot.querySelector("[data-user-status]")?.remove();
-  badgesRoot.querySelector("[data-user-folder]")?.remove();
+  const relatedItems = relatedResult.status === "fulfilled"
+    ? safeArray(relatedResult.value)
+    : [];
 
-  if (!userMedia?.id) return;
+  const universeLinks = universeResult.status === "fulfilled"
+    ? safeArray(universeResult.value)
+    : [];
 
-  badgesRoot.insertAdjacentHTML("beforeend", renderStatusBadge(userMedia));
+  const universeRoot = root.querySelector("[data-universe-root]");
+  if (universeRoot && universeLinks.length) {
+    universeRoot.innerHTML = renderUniverseLinks(universeLinks);
+  }
 
-  if (userMedia.folder_name) {
-    badgesRoot.insertAdjacentHTML("beforeend", renderFolderBadge(userMedia));
+  const fallbackRelated = renderRelatedFallbackFromMeta(entity);
+  const relatedSection = root.querySelector("[data-related-section]");
+  const relatedGrid = root.querySelector("[data-related-grid]");
+
+  if (!relatedSection || !relatedGrid) return;
+
+  if (relatedItems.length) {
+    relatedGrid.innerHTML = relatedItems.map(renderRelatedItem).join("");
+    relatedSection.hidden = false;
+    return;
+  }
+
+  if (fallbackRelated) {
+    relatedGrid.innerHTML = `<div class="related-card__body">${fallbackRelated}</div>`;
+    relatedSection.hidden = false;
   }
 }
 
-function updateDescriptionUI(root, entity) {
-  const descriptionNode = root.querySelector("[data-card-description]");
-  if (!descriptionNode) return;
-
-  const description = resolveDescription(entity);
-  descriptionNode.textContent = description || t("noDescription");
-}
-
-function setStatus(root, message = "") {
-  const statusNode = root.querySelector("[data-status]");
-  if (statusNode) statusNode.textContent = message;
-}
-
-function closeActionModal(root) {
-  const modalRoot = root.querySelector("[data-action-modal-root]");
-  if (modalRoot) modalRoot.innerHTML = "";
-}
-
-async function openActionModal(root, userMedia, entity) {
+function openActionModal(root, userMedia, folders) {
   const modalRoot = root.querySelector("[data-action-modal-root]");
   if (!modalRoot) return;
-
-  const folders = await loadCategoryFolders(
-    state.user?.id || "",
-    entity?.category || userMedia?.category || ""
-  );
 
   modalRoot.innerHTML = renderActionModal({
     userMedia,
@@ -1045,276 +1159,153 @@ async function openActionModal(root, userMedia, entity) {
   });
 }
 
-async function openConfirmDialog() {
-  return window.confirm(`${t("confirmDeleteTitle")}\n${t("confirmDeleteText")}`);
+function closeActionModal(root) {
+  const modalRoot = root.querySelector("[data-action-modal-root]");
+  if (modalRoot) modalRoot.innerHTML = "";
 }
 
-function renderRelated(root, relatedItems = [], entity = {}) {
-  const section = root.querySelector("[data-related-section]");
-  const grid = root.querySelector("[data-related-grid]");
+function renderConfirmDelete(root) {
+  const modalRoot = root.querySelector("[data-action-modal-root]");
+  if (!modalRoot) return;
 
-  if (!section || !grid) return;
+  modalRoot.innerHTML = `
+    <div class="card-action-backdrop" data-action="close-action-modal">
+      <div class="card-action-modal" role="dialog" aria-modal="true">
+        <div class="confirm-box">
+          <div class="card-action-modal__title">${escapeHtml(t("confirmDeleteTitle"))}</div>
+          <div class="card-description">${escapeHtml(t("confirmDeleteText"))}</div>
+          <div class="confirm-actions">
+            <button type="button" data-action="close-action-modal">${escapeHtml(t("cancel"))}</button>
+            <button type="button" class="danger" data-action="confirm-delete">${escapeHtml(t("yes"))}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
-  if (!relatedItems.length) {
-    const fallbackHtml = renderRelatedFallbackFromMeta(entity);
+function cacheCardForUser(userId, entity, userMedia) {
+  if (!userId || !entity?.canonical_key || !userMedia?.id) return;
 
-    if (!fallbackHtml) {
-      section.hidden = true;
-      grid.innerHTML = "";
-      return;
-    }
+  updateCachedLibraryItem(userId, {
+    ...userMedia,
+    media_entities: entity
+  }, {
+    category: userMedia.category || entity.category
+  });
+}
 
-    section.hidden = false;
-    grid.innerHTML = fallbackHtml;
-    return;
+export async function renderCardPage(root, params = {}) {
+  const key = getRouteKey(params);
+  const userId = state.user?.id || "";
+  let entity = loadFastEntity({ key });
+  let userMedia = entity ? getCachedUserMedia(userId, entity) : null;
+  let folders = [];
+  let destroyed = false;
+
+  if (!entity) {
+    renderLoading(root);
+  } else {
+    root.innerHTML = `${renderStyles()}${renderCardShell(entity, userMedia)}`;
   }
 
-  section.hidden = false;
-  grid.innerHTML = relatedItems.map(renderRelatedItem).join("");
-}
+  async function rerender(nextEntity = entity, nextUserMedia = userMedia) {
+    if (destroyed) return;
 
-function renderUniverse(root, universeLinks = []) {
-  const universeRoot = root.querySelector("[data-universe-root]");
-  if (!universeRoot) return;
-  universeRoot.innerHTML = renderUniverseLinks(universeLinks);
-}
+    entity = mergeEntityStable(entity || {}, nextEntity || {});
+    userMedia = nextUserMedia || userMedia;
 
-function bindCardEvents(root, getContext, setContext) {
-  root.addEventListener("click", async (event) => {
-    const relatedButton = event.target.closest("[data-related]");
-    if (relatedButton) {
-      const key = relatedButton.dataset.related || "";
-      if (key) navigate("/card", { key });
-      return;
+    root.innerHTML = `${renderStyles()}${renderCardShell(entity, userMedia)}`;
+    bindEvents();
+
+    if (entity?.category) {
+      folders = await loadCategoryFolders(userId, entity.category).catch(() => folders);
     }
 
-    const universeButton = event.target.closest("[data-universe-key]");
-    if (universeButton) {
-      const key = universeButton.dataset.universeKey || "";
-      if (key) navigate("/universe", { id: key });
-      return;
-    }
+    loadRelatedData(root, entity).catch((error) => {
+      console.warn("card related data skipped:", error);
+    });
+  }
 
-    const actionButton = event.target.closest("[data-action]");
-    if (!actionButton) return;
+  async function loadFullData() {
+    const fullEntity = await loadEntityFromDb(key || entity?.canonical_key).catch((error) => {
+      console.warn("card DB load skipped:", error);
+      return null;
+    });
 
-    const action = actionButton.dataset.action || "";
-    const context = getContext();
-    let { entity, userMedia } = context;
+    if (fullEntity?.canonical_key) {
+      entity = mergeEntityStable(entity || {}, fullEntity);
+      setTemporaryCardItem(entity);
 
-    if (action === "open-action-modal") {
-      await openActionModal(root, userMedia, entity);
-      return;
-    }
-
-    if (action === "close-action-modal") {
-      if (event.target === actionButton || actionButton.classList.contains("card-action-modal__close")) {
-        closeActionModal(root);
-      }
-      return;
-    }
-
-    if (action === "modal-add") {
-      if (!state.user?.id) {
-        closeActionModal(root);
-        openAuthModal("login");
-        return;
-      }
-
-      if (!isPersistableEntity(entity)) {
-        setStatus(root, t("cardNotReady"));
-        return;
-      }
-
-      try {
-        actionButton.disabled = true;
-        setStatus(root, t("loadingCard"));
-
-        const result = await addToUserLibrary({
-          userId: state.user.id,
-          entity
-        });
-
-        userMedia = result.userMedia || null;
+      if (userId && entity.id) {
+        userMedia =
+          await loadUserMedia(userId, entity.id).catch(() => userMedia) ||
+          getCachedUserMedia(userId, entity);
 
         if (userMedia?.id) {
-          setContext({
-            entity: result.entity || entity,
-            userMedia
-          });
-
-          updateCachedLibraryItem(state.user.id, {
-            ...userMedia,
-            media_entities: result.entity || entity
-          }, {
-            category: userMedia.category || entity.category
-          });
-
-          updateUserMediaUI(root, userMedia);
+          cacheCardForUser(userId, entity, userMedia);
         }
+      }
 
-        closeActionModal(root);
-        setStatus(root, result.alreadyExists ? t("alreadyInLibrary") : t("addedToLibrary"));
-      } catch (error) {
-        console.warn("Add to library error:", error);
-        setStatus(root, error?.message || "Error");
+      await rerender(entity, userMedia);
+
+      if (shouldEnrichEntity(entity)) {
+        enrichMediaEntityInBackground(entity);
       }
 
       return;
     }
 
-    if (action === "modal-set-status") {
-      const newStatus = actionButton.dataset.value || "";
-
-      if (!userMedia?.id || !newStatus) return;
-
-      try {
-        actionButton.disabled = true;
-        setStatus(root, t("loadingCard"));
-
-        const updated = await updateUserMedia(userMedia.id, {
-          status: newStatus
-        });
-
-        if (!updated) return;
-
-        userMedia = {
-          id: updated.id,
-          user_id: updated.user_id,
-          entity_id: updated.entity_id,
-          category: updated.category,
-          status: updated.status,
-          folder_name: updated.folder_name,
-          created_at: updated.created_at,
-          updated_at: updated.updated_at
-        };
-
-        setContext({ entity, userMedia });
-
-        updateCachedLibraryItem(state.user.id, updated, {
-          category: updated.category || entity.category
-        });
-
-        updateUserMediaUI(root, userMedia);
-        closeActionModal(root);
-        setStatus(root, t("statusUpdated"));
-      } catch (error) {
-        console.warn("Update status error:", error);
-        setStatus(root, error?.message || "Error");
-      }
-
-      return;
-    }
-
-    if (action === "modal-set-folder" || action === "modal-remove-folder") {
-      const folderName = action === "modal-remove-folder"
-        ? ""
-        : normalizeFolderName(actionButton.dataset.value || "");
-
-      if (!userMedia?.id) return;
-
-      try {
-        actionButton.disabled = true;
-        setStatus(root, t("loadingCard"));
-
-        const updated = await updateUserMedia(userMedia.id, {
-          folder_name: folderName || null
-        });
-
-        if (!updated) return;
-
-        userMedia = {
-          id: updated.id,
-          user_id: updated.user_id,
-          entity_id: updated.entity_id,
-          category: updated.category,
-          status: updated.status,
-          folder_name: updated.folder_name,
-          created_at: updated.created_at,
-          updated_at: updated.updated_at
-        };
-
-        if (folderName) {
-          addEmptyFolder(updated.category || entity.category, folderName);
-        }
-
-        setContext({ entity, userMedia });
-
-        updateCachedLibraryItem(state.user.id, updated, {
-          category: updated.category || entity.category
-        });
-
-        updateUserMediaUI(root, userMedia);
-        closeActionModal(root);
-        setStatus(root, t("folderUpdated"));
-      } catch (error) {
-        console.warn("Update folder error:", error);
-        setStatus(root, error?.message || "Error");
-      }
-
-      return;
-    }
-
-    if (action === "modal-create-folder") {
-      return;
-    }
-
-    if (action === "modal-delete") {
-      if (!userMedia?.id) return;
-
-      const confirmed = await openConfirmDialog();
-      if (!confirmed) return;
-
-      try {
-        actionButton.disabled = true;
-        setStatus(root, t("loadingCard"));
-
-        await deleteUserMedia(userMedia.id);
-
-        removeCachedLibraryItem(state.user.id, userMedia.id, {
-          category: userMedia.category || entity.category
-        });
-
-        userMedia = null;
-        setContext({ entity, userMedia });
-
-        updateUserMediaUI(root, null);
-        closeActionModal(root);
-        setStatus(root, t("deleted"));
-      } catch (error) {
-        console.warn("Delete user media error:", error);
-        setStatus(root, error?.message || "Error");
-      }
-    }
-  });
-
-  root.addEventListener("submit", async (event) => {
-    const form = event.target.closest('[data-action="modal-create-folder"]');
-    if (!form) return;
-
-    event.preventDefault();
-
-    const context = getContext();
-    const { entity, userMedia } = context;
-    const input = form.querySelector("[data-folder-input]");
-    const folderName = normalizeFolderName(input?.value || "");
-
-    if (!folderName || !userMedia?.id) return;
-
-    const button = form.querySelector("button[type='submit']");
-
-    try {
-      if (button) button.disabled = true;
-
-      addEmptyFolder(userMedia.category || entity.category, folderName);
-
-      const updated = await updateUserMedia(userMedia.id, {
-        folder_name: folderName
+    if (!entity) {
+      const fallback = buildFallbackEntity({
+        key,
+        category: params.category || ""
       });
 
-      if (!updated) return;
+      if (fallback) {
+        await rerender(fallback, null);
+      } else {
+        renderNotFound(root);
+      }
+    }
+  }
 
-      const nextUserMedia = {
+  async function handleAdd() {
+    if (!isPersistableEntity(entity)) {
+      updateStatus(root, t("cardNotReady"));
+      return;
+    }
+
+    if (!userId) {
+      openAuthModal("login");
+      return;
+    }
+
+    updateStatus(root, t("loadingCard"));
+
+    const result = await addToUserLibrary({
+      userId,
+      entity
+    });
+
+    userMedia = result.userMedia || userMedia;
+
+    if (result.entity) {
+      entity = mergeEntityStable(entity, result.entity);
+    }
+
+    cacheCardForUser(userId, entity, userMedia);
+
+    updateStatus(root, result.alreadyExists ? t("alreadyInLibrary") : t("addedToLibrary"));
+    await rerender(entity, userMedia);
+  }
+
+  async function handleStatusChange(status) {
+    if (!userMedia?.id || !status) return;
+
+    const updated = await updateUserMedia(userMedia.id, { status });
+    if (updated?.id) {
+      userMedia = {
         id: updated.id,
         user_id: updated.user_id,
         entity_id: updated.entity_id,
@@ -1325,144 +1316,188 @@ function bindCardEvents(root, getContext, setContext) {
         updated_at: updated.updated_at
       };
 
-      setContext({
-        entity,
-        userMedia: nextUserMedia
-      });
-
-      updateCachedLibraryItem(state.user.id, updated, {
-        category: updated.category || entity.category
-      });
-
-      updateUserMediaUI(root, nextUserMedia);
-      closeActionModal(root);
-      setStatus(root, t("folderUpdated"));
-    } catch (error) {
-      console.warn("Create folder error:", error);
-      setStatus(root, error?.message || "Error");
-    } finally {
-      if (button) button.disabled = false;
-    }
-  });
-}
-
-export async function renderCardPage(root, params = {}) {
-  const key = normalizeKey(params.key || "");
-  const fastEntity = loadFastEntity(params) || buildFallbackEntity(params);
-
-  if (!key && !fastEntity) {
-    renderNotFound(root);
-    return () => {};
-  }
-
-  let context = {
-    entity: fastEntity,
-    userMedia: getCachedUserMedia(state.user?.id, fastEntity || {}) || null
-  };
-
-  if (context.entity) {
-    renderCard(root, {
-      entity: context.entity,
-      userMedia: context.userMedia,
-      relatedItems: [],
-      universeLinks: []
-    });
-  } else {
-    renderLoading(root);
-  }
-
-  let destroyed = false;
-
-  bindCardEvents(
-    root,
-    () => context,
-    (nextContext) => {
-      context = {
-        ...context,
-        ...nextContext
-      };
-    }
-  );
-
-  try {
-    const dbEntity = await loadEntityFromDb(key);
-
-    if (destroyed) return () => {};
-
-    if (!dbEntity && !context.entity) {
-      renderNotFound(root);
-      return () => {};
-    }
-
-    if (dbEntity?.canonical_key) {
-      context.entity = normalizeStoredEntity(dbEntity) || dbEntity;
-      setTemporaryCardItem(context.entity);
-
-      context.userMedia =
-        getCachedUserMedia(state.user?.id, context.entity) ||
-        context.userMedia;
-
-      renderCard(root, {
-        entity: context.entity,
-        userMedia: context.userMedia,
-        relatedItems: [],
-        universeLinks: []
-      });
-
-      bindCardEvents(
-        root,
-        () => context,
-        (nextContext) => {
-          context = {
-            ...context,
-            ...nextContext
-          };
-        }
-      );
-
-      updateDescriptionUI(root, context.entity);
-    }
-
-    if (state.user?.id && context.entity?.id) {
-      const freshUserMedia = await loadUserMedia(state.user.id, context.entity.id).catch((error) => {
-        console.warn("Card user media load skipped:", error);
-        return null;
-      });
-
-      if (destroyed) return () => {};
-
-      if (freshUserMedia?.id) {
-        context.userMedia = freshUserMedia;
-        updateUserMediaUI(root, context.userMedia);
+      if (updated.media_entities) {
+        entity = mergeEntityStable(entity, updated.media_entities);
       }
-    }
 
-    if (context.entity?.id) {
-      Promise.allSettled([
-        getRelatedItemsForEntityFromDb(context.entity.id),
-        getEntityUniverseLinksFromDb(context.entity.id)
-      ]).then((results) => {
-        if (destroyed) return;
-
-        const relatedItems = results[0]?.status === "fulfilled" ? safeArray(results[0].value) : [];
-        const universeLinks = results[1]?.status === "fulfilled" ? safeArray(results[1].value) : [];
-
-        renderRelated(root, relatedItems, context.entity);
-        renderUniverse(root, universeLinks);
-      });
-    }
-  } catch (error) {
-    console.warn("Card load error:", error);
-
-    if (!context.entity || isFallbackEntity(context.entity)) {
-      renderNotFound(root);
-    } else {
-      setStatus(root, error?.message || "Error");
+      cacheCardForUser(userId, entity, userMedia);
+      updateStatus(root, t("statusUpdated"));
+      closeActionModal(root);
+      await rerender(entity, userMedia);
     }
   }
+
+  async function handleFolderChange(folderName) {
+    if (!userMedia?.id) return;
+
+    const cleanFolder = normalizeFolderName(folderName);
+    const updated = await updateUserMedia(userMedia.id, {
+      folder_name: cleanFolder || null
+    });
+
+    if (updated?.id) {
+      userMedia = {
+        id: updated.id,
+        user_id: updated.user_id,
+        entity_id: updated.entity_id,
+        category: updated.category,
+        status: updated.status,
+        folder_name: updated.folder_name,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at
+      };
+
+      if (updated.media_entities) {
+        entity = mergeEntityStable(entity, updated.media_entities);
+      }
+
+      cacheCardForUser(userId, entity, userMedia);
+      updateStatus(root, t("folderUpdated"));
+      closeActionModal(root);
+      await rerender(entity, userMedia);
+    }
+  }
+
+  async function handleDelete() {
+    if (!userMedia?.id) return;
+
+    await deleteUserMedia(userMedia.id);
+    removeCachedLibraryItem(userId, userMedia.id, {
+      category: userMedia.category || entity.category
+    });
+
+    updateStatus(root, t("deleted"));
+    closeActionModal(root);
+    navigate("/category", {
+      category: userMedia.category || entity.category
+    });
+  }
+
+  function bindEvents() {
+    root.querySelector("[data-action='open-action-modal']")?.addEventListener("click", () => {
+      openActionModal(root, userMedia, folders);
+    });
+
+    root.querySelectorAll("[data-related]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const relatedKey = button.dataset.related || "";
+        if (relatedKey) {
+          navigate("/card", {
+            key: relatedKey
+          });
+        }
+      });
+    });
+
+    root.querySelectorAll("[data-universe-key]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const universeKey = button.dataset.universeKey || "";
+        if (universeKey) {
+          navigate("/universe", {
+            key: universeKey
+          });
+        }
+      });
+    });
+
+    root.querySelector("[data-action-modal-root]")?.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+
+      const action = target.dataset.action;
+
+      if (action === "close-action-modal" && target === event.target) {
+        closeActionModal(root);
+        return;
+      }
+
+      if (action === "close-action-modal") {
+        closeActionModal(root);
+        return;
+      }
+
+      if (action === "modal-add") {
+        await handleAdd().catch((error) => {
+          console.warn("card add skipped:", error);
+          updateStatus(root, error?.message || t("cardNotReady"));
+        });
+        return;
+      }
+
+      if (action === "modal-set-status") {
+        await handleStatusChange(target.dataset.value || "").catch((error) => {
+          console.warn("card status update skipped:", error);
+          updateStatus(root, error?.message || t("cardNotReady"));
+        });
+        return;
+      }
+
+      if (action === "modal-set-folder") {
+        await handleFolderChange(target.dataset.value || "").catch((error) => {
+          console.warn("card folder update skipped:", error);
+          updateStatus(root, error?.message || t("cardNotReady"));
+        });
+        return;
+      }
+
+      if (action === "modal-remove-folder") {
+        await handleFolderChange("").catch((error) => {
+          console.warn("card folder remove skipped:", error);
+          updateStatus(root, error?.message || t("cardNotReady"));
+        });
+        return;
+      }
+
+      if (action === "modal-create-folder") {
+        event.preventDefault();
+        const input = target.querySelector("[data-folder-input]");
+        const folderName = normalizeFolderName(input?.value || "");
+
+        if (!folderName || !entity?.category) return;
+
+        folders = addEmptyFolder(entity.category, folderName);
+
+        if (userMedia?.id) {
+          await handleFolderChange(folderName).catch((error) => {
+            console.warn("card folder create skipped:", error);
+            updateStatus(root, error?.message || t("cardNotReady"));
+          });
+        } else {
+          openActionModal(root, userMedia, folders);
+        }
+
+        return;
+      }
+
+      if (action === "modal-delete") {
+        renderConfirmDelete(root);
+        return;
+      }
+
+      if (action === "confirm-delete") {
+        await handleDelete().catch((error) => {
+          console.warn("card delete skipped:", error);
+          updateStatus(root, error?.message || t("cardNotReady"));
+        });
+      }
+    });
+  }
+
+  bindEvents();
+
+  if (entity?.category) {
+    folders = await loadCategoryFolders(userId, entity.category).catch(() => []);
+  }
+
+  if (entity) {
+    loadRelatedData(root, entity).catch((error) => {
+      console.warn("card related data skipped:", error);
+    });
+  }
+
+  await loadFullData();
 
   return () => {
     destroyed = true;
-    closeActionModal(root);
   };
 }
