@@ -84,7 +84,7 @@ function getMetadataStatus(entity = {}) {
   return "partial";
 }
 
-function buildQuality(entity = {}, sources = []) {
+function buildQuality(entity = {}, sources = [], extra = {}) {
   const missing = getMissingFields(entity);
 
   return {
@@ -93,7 +93,8 @@ function buildQuality(entity = {}, sources = []) {
     has_description_en: hasUsefulText(entity.description_en),
     missing_fields: missing,
     sources: uniqueArray(sources.map(cleanText).filter(Boolean)),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
+    ...extra
   };
 }
 
@@ -153,6 +154,70 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
     external_ids: externalIds,
     meta
   };
+}
+
+function isValidMediaEntity(entity = {}) {
+  const category = normalizeCategory(entity.category);
+
+  if (!category) return false;
+
+  if (category !== "movies" && category !== "series") {
+    return true;
+  }
+
+  const title =
+    cleanText(entity.title_primary) ||
+    cleanText(entity.title_ru) ||
+    cleanText(entity.title_en) ||
+    cleanText(entity.original_title);
+
+  if (!title) return false;
+
+  const ids = normalizeJson(entity.external_ids, {});
+  const hasTmdb = Boolean(cleanText(ids.tmdb));
+  const hasImdb = Boolean(cleanText(ids.imdb));
+  const hasYear = Boolean(normalizeYear(entity.year));
+  const canonicalKey = cleanLower(entity.canonical_key);
+
+  if (canonicalKey.includes(":character:")) return false;
+  if (canonicalKey.includes(":person:")) return false;
+  if (canonicalKey.includes(":actor:")) return false;
+  if (canonicalKey.includes(":creator:")) return false;
+
+  const meta = normalizeJson(entity.meta, {});
+  const typeHints = [
+    cleanText(meta.type),
+    cleanText(meta.entity_type),
+    cleanText(meta.wikidata_type),
+    cleanText(meta.instance_of),
+    cleanText(meta.description),
+    cleanText(entity.description_ru),
+    cleanText(entity.description_en)
+  ].join(" ").toLowerCase();
+
+  const blockedHints = [
+    "fictional character",
+    "персонаж",
+    "character",
+    "superhero",
+    "супергерой",
+    "actor",
+    "актер",
+    "актёр",
+    "person",
+    "human",
+    "человек"
+  ];
+
+  if (blockedHints.some((hint) => typeHints.includes(hint))) {
+    return false;
+  }
+
+  if (!hasTmdb && !hasImdb && !hasYear) {
+    return false;
+  }
+
+  return true;
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
@@ -989,13 +1054,13 @@ async function updateEntityMetadata(entityId, entity, sources = []) {
   return data || null;
 }
 
-async function markEntityMetadataStatus(entityId, entity = {}) {
+async function markEntityMetadataStatus(entityId, entity = {}, extraQuality = {}) {
   const id = Number(entityId || 0);
   if (!id) return null;
 
   const missing = getMissingFields(entity);
   const status = getMetadataStatus(entity);
-  const quality = buildQuality(entity, []);
+  const quality = buildQuality(entity, [], extraQuality);
 
   const supabase = getSupabaseClient();
 
@@ -1018,6 +1083,41 @@ async function markEntityMetadataStatus(entityId, entity = {}) {
   return data || null;
 }
 
+async function markInvalidMediaEntity(entity = {}) {
+  const id = Number(entity?.id || 0);
+  if (!id) return entity || null;
+
+  const supabase = getSupabaseClient();
+
+  const quality = buildQuality(entity, [], {
+    skipped: true,
+    skip_reason: "invalid_media_entity"
+  });
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .update({
+        metadata_status: "skipped",
+        metadata_quality: quality,
+        missing_fields: getMissingFields(entity),
+        last_enriched_at: new Date().toISOString()
+      })
+      .eq("id", id)
+      .select("*")
+      .maybeSingle(),
+    "Пропуск некорректной медиа-сущности",
+    WRITE_TIMEOUT_MS
+  );
+
+  if (error) {
+    console.warn("invalid media entity mark skipped:", error);
+    return entity;
+  }
+
+  return data || entity;
+}
+
 export function analyzeEntityMetadata(entity = {}) {
   const missing = getMissingFields(entity);
 
@@ -1030,6 +1130,7 @@ export function analyzeEntityMetadata(entity = {}) {
 
 export function shouldEnrichEntity(entity = {}) {
   if (!entity || typeof entity !== "object") return false;
+  if (!isValidMediaEntity(entity)) return false;
 
   const missing = getMissingFields(entity);
   if (missing.length) return true;
@@ -1048,6 +1149,10 @@ export async function enrichMediaEntity(inputEntityOrId) {
     : inputEntityOrId;
 
   if (!entity?.id) return null;
+
+  if (!isValidMediaEntity(entity)) {
+    return markInvalidMediaEntity(entity);
+  }
 
   if (!shouldEnrichEntity(entity)) {
     return markEntityMetadataStatus(entity.id, entity).catch(() => entity);
