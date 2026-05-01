@@ -16,6 +16,10 @@ function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
   });
 }
 
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
 function normalizeMediaType(category = "") {
   return category === "manga" ? "MANGA" : "ANIME";
 }
@@ -24,10 +28,18 @@ function normalizeCategory(category = "") {
   return category === "manga" ? "manga" : "anime";
 }
 
+function stripHtml(value = "") {
+  return clean(value)
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function pickTitle(title = {}, language = "ru") {
-  const romaji = String(title?.romaji || "").trim();
-  const english = String(title?.english || "").trim();
-  const native = String(title?.native || "").trim();
+  const romaji = clean(title?.romaji);
+  const english = clean(title?.english);
+  const native = clean(title?.native);
 
   if (language === "en") {
     return english || romaji || native;
@@ -38,14 +50,24 @@ function pickTitle(title = {}, language = "ru") {
 
 function pickOriginalTitle(title = {}) {
   return (
-    String(title?.romaji || "").trim() ||
-    String(title?.english || "").trim() ||
-    String(title?.native || "").trim()
+    clean(title?.romaji) ||
+    clean(title?.english) ||
+    clean(title?.native)
   );
 }
 
 function getYearFromAniList(media = {}) {
   const year = Number(media?.startDate?.year);
+  return Number.isFinite(year) ? year : null;
+}
+
+function getYearFromJikan(item = {}) {
+  const year =
+    Number(item?.year) ||
+    Number(item?.aired?.prop?.from?.year) ||
+    Number(item?.published?.prop?.from?.year) ||
+    null;
+
   return Number.isFinite(year) ? year : null;
 }
 
@@ -61,17 +83,14 @@ function mapAniListItem(media = {}, category = "anime", language = "ru") {
   if (!title && !originalTitle) return null;
 
   const cover =
-    String(media?.coverImage?.extraLarge || "").trim() ||
-    String(media?.coverImage?.large || "").trim() ||
-    String(media?.coverImage?.medium || "").trim();
+    clean(media?.coverImage?.extraLarge) ||
+    clean(media?.coverImage?.large) ||
+    clean(media?.coverImage?.medium);
 
-  const description = String(media?.description || "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const description = stripHtml(media?.description);
 
   const synonyms = safeArray(media?.synonyms)
-    .map((value) => String(value || "").trim())
+    .map(clean)
     .filter(Boolean);
 
   const titleValues = [
@@ -79,26 +98,34 @@ function mapAniListItem(media = {}, category = "anime", language = "ru") {
     media?.title?.english,
     media?.title?.native,
     ...synonyms
-  ].map((value) => String(value || "").trim()).filter(Boolean);
+  ].map(clean).filter(Boolean);
 
   return {
     canonical_key: `${normalizedCategory}:anilist:${id}`,
     category: normalizedCategory,
+
     title: title || originalTitle,
+    title_primary: title || originalTitle,
     title_ru: "",
-    title_en: String(media?.title?.english || media?.title?.romaji || "").trim(),
+    title_en: clean(media?.title?.english || media?.title?.romaji),
     original_title: originalTitle || title,
+
     year: getYearFromAniList(media),
     cover_url: cover,
+
     description_ru: "",
     description_en: description,
+
     aliases: uniqueArray(titleValues),
+
     external_ids: {
       anilist: id,
       mal: media?.idMal ? String(media.idMal) : null
     },
+
     primary_source: "anilist",
-    score: Number(media?.popularity || 0),
+    score: Number(media?.popularity || media?.averageScore || 0),
+
     meta: {
       source: "anilist",
       format: media?.format || "",
@@ -112,13 +139,17 @@ function mapAniListItem(media = {}, category = "anime", language = "ru") {
       popularity: media?.popularity || null,
       start_date: media?.startDate || null,
       end_date: media?.endDate || null,
-      site_url: media?.siteUrl || ""
+      site_url: media?.siteUrl || "",
+      metadata_status:
+        cover && description
+          ? "partial"
+          : "needs_enrichment"
     }
   };
 }
 
 async function fetchAniList(query = "", category = "anime", language = "ru") {
-  const cleanQuery = String(query || "").trim();
+  const cleanQuery = clean(query);
   if (!cleanQuery) return [];
 
   const mediaType = normalizeMediaType(category);
@@ -197,56 +228,60 @@ async function fetchAniList(query = "", category = "anime", language = "ru") {
     .filter(Boolean);
 }
 
-function mapJikanAnimeItem(item = {}, category = "anime", language = "ru") {
+function mapJikanItem(item = {}, category = "anime") {
   const normalizedCategory = normalizeCategory(category);
   const malId = item?.mal_id ? String(item.mal_id) : "";
 
   if (!malId) return null;
 
   const title =
-    String(item?.title || "").trim() ||
-    String(item?.title_english || "").trim() ||
-    String(item?.title_japanese || "").trim();
+    clean(item?.title) ||
+    clean(item?.title_english) ||
+    clean(item?.title_japanese);
 
   if (!title) return null;
 
   const cover =
-    String(item?.images?.jpg?.large_image_url || "").trim() ||
-    String(item?.images?.jpg?.image_url || "").trim() ||
-    String(item?.images?.webp?.large_image_url || "").trim() ||
-    String(item?.images?.webp?.image_url || "").trim();
+    clean(item?.images?.jpg?.large_image_url) ||
+    clean(item?.images?.jpg?.image_url) ||
+    clean(item?.images?.webp?.large_image_url) ||
+    clean(item?.images?.webp?.image_url);
 
   const aliases = uniqueArray([
     item?.title,
     item?.title_english,
     item?.title_japanese,
     ...safeArray(item?.titles).map((row) => row?.title)
-  ].map((value) => String(value || "").trim()).filter(Boolean));
+  ].map(clean).filter(Boolean));
 
-  const year =
-    Number(item?.year) ||
-    Number(item?.aired?.prop?.from?.year) ||
-    Number(item?.published?.prop?.from?.year) ||
-    null;
+  const synopsis = clean(item?.synopsis);
 
   return {
     canonical_key: `${normalizedCategory}:mal:${malId}`,
     category: normalizedCategory,
+
     title,
+    title_primary: title,
     title_ru: "",
-    title_en: String(item?.title_english || item?.title || "").trim(),
-    original_title: String(item?.title_japanese || item?.title || "").trim(),
-    year: Number.isFinite(year) ? year : null,
+    title_en: clean(item?.title_english || item?.title),
+    original_title: clean(item?.title_japanese || item?.title),
+
+    year: getYearFromJikan(item),
     cover_url: cover,
+
     description_ru: "",
-    description_en: String(item?.synopsis || "").trim(),
+    description_en: synopsis,
+
     aliases,
+
     external_ids: {
       anilist: null,
       mal: malId
     },
+
     primary_source: "jikan",
     score: Number(item?.score || item?.popularity || 0),
+
     meta: {
       source: "jikan",
       type: item?.type || "",
@@ -255,13 +290,17 @@ function mapJikanAnimeItem(item = {}, category = "anime", language = "ru") {
       chapters: item?.chapters || null,
       volumes: item?.volumes || null,
       genres: safeArray(item?.genres).map((genre) => genre?.name).filter(Boolean),
-      url: item?.url || ""
+      url: item?.url || "",
+      metadata_status:
+        cover && synopsis
+          ? "partial"
+          : "needs_enrichment"
     }
   };
 }
 
-async function fetchJikan(query = "", category = "anime", language = "ru") {
-  const cleanQuery = String(query || "").trim();
+async function fetchJikanFallback(query = "", category = "anime") {
+  const cleanQuery = clean(query);
   if (!cleanQuery) return [];
 
   const normalizedCategory = normalizeCategory(category);
@@ -286,8 +325,53 @@ async function fetchJikan(query = "", category = "anime", language = "ru") {
   const payload = await response.json();
 
   return safeArray(payload?.data)
-    .map((item) => mapJikanAnimeItem(item, normalizedCategory, language))
+    .map((item) => mapJikanItem(item, normalizedCategory))
     .filter(Boolean);
+}
+
+function mergeItems(existing = {}, incoming = {}) {
+  return {
+    ...existing,
+    ...incoming,
+
+    canonical_key: existing.canonical_key || incoming.canonical_key,
+    category: existing.category || incoming.category,
+
+    title: existing.title || incoming.title,
+    title_primary: existing.title_primary || incoming.title_primary || incoming.title,
+    title_ru: existing.title_ru || incoming.title_ru,
+    title_en: existing.title_en || incoming.title_en,
+    original_title: existing.original_title || incoming.original_title,
+
+    year: existing.year || incoming.year || null,
+    cover_url: existing.cover_url || incoming.cover_url,
+
+    description_ru: existing.description_ru || incoming.description_ru,
+    description_en: existing.description_en || incoming.description_en,
+
+    aliases: uniqueArray([
+      ...safeArray(existing.aliases),
+      ...safeArray(incoming.aliases)
+    ]),
+
+    external_ids: {
+      ...(existing.external_ids || {}),
+      ...(incoming.external_ids || {})
+    },
+
+    meta: {
+      ...(existing.meta || {}),
+      ...(incoming.meta || {}),
+      metadata_status:
+        (existing.cover_url || incoming.cover_url) &&
+        (existing.description_en || incoming.description_en || existing.description_ru || incoming.description_ru)
+          ? "partial"
+          : "needs_enrichment"
+    },
+
+    primary_source: existing.primary_source || incoming.primary_source,
+    score: Math.max(existing.score || 0, incoming.score || 0)
+  };
 }
 
 function dedupeAniListResults(items = []) {
@@ -309,29 +393,7 @@ function dedupeAniListResults(items = []) {
       return;
     }
 
-    const existing = map.get(key);
-
-    map.set(key, {
-      ...existing,
-      ...item,
-      title: existing.title || item.title,
-      original_title: existing.original_title || item.original_title,
-      cover_url: existing.cover_url || item.cover_url,
-      description_en: existing.description_en || item.description_en,
-      aliases: uniqueArray([
-        ...safeArray(existing.aliases),
-        ...safeArray(item.aliases)
-      ]),
-      external_ids: {
-        ...(existing.external_ids || {}),
-        ...(item.external_ids || {})
-      },
-      meta: {
-        ...(existing.meta || {}),
-        ...(item.meta || {})
-      },
-      score: Math.max(existing.score || 0, item.score || 0)
-    });
+    map.set(key, mergeItems(map.get(key), item));
   });
 
   return Array.from(map.values());
@@ -347,12 +409,14 @@ export async function runAniListCategorySearch(query = "", category = "anime", o
     if (anilistResults.length) {
       return dedupeAniListResults(anilistResults);
     }
+
+    console.warn(`AniList ${normalizedCategory} returned empty results, trying Jikan fallback.`);
   } catch (error) {
     console.warn(`AniList ${normalizedCategory} search failed, trying Jikan fallback:`, error);
   }
 
   try {
-    const jikanResults = await fetchJikan(query, normalizedCategory, language);
+    const jikanResults = await fetchJikanFallback(query, normalizedCategory);
     return dedupeAniListResults(jikanResults);
   } catch (error) {
     console.warn(`Jikan ${normalizedCategory} fallback failed:`, error);
