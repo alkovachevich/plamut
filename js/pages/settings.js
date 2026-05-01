@@ -14,6 +14,94 @@ import {
 
 const SETTINGS_SECTIONS = ["appearance", "avatar", "profile", "password"];
 
+const I18N = {
+  ru: {
+    settings: "Настройки",
+    loginRequired: "Чтобы управлять профилем, нужно войти в аккаунт.",
+    login: "Войти",
+    appearance: "Внешний вид",
+    avatar: "Аватар",
+    profile: "Профиль",
+    password: "Пароль",
+    theme: "Тема",
+    light: "Светлая",
+    dark: "Тёмная",
+    language: "Язык",
+    save: "Сохранить",
+    saving: "Сохраняем…",
+    saved: "Настройки сохранены",
+    uploadAvatar: "Загрузить аватар",
+    chooseImageFirst: "Сначала выбери изображение",
+    uploadingAvatar: "Загружаем аватар…",
+    avatarSaved: "Аватар сохранён",
+    avatarFailed: "Не удалось загрузить аватар",
+    displayName: "Display name",
+    username: "Username",
+    enterName: "Введите имя",
+    enterUsername: "Введите username",
+    saveProfile: "Сохранить профиль",
+    savingProfile: "Сохраняем профиль…",
+    profileSaved: "Профиль сохранён",
+    displayNameEmpty: "Display name не должен быть пустым",
+    usernameEmpty: "Username не должен быть пустым",
+    newPassword: "Новый пароль",
+    confirmPassword: "Подтвердить пароль",
+    changePassword: "Сменить пароль",
+    fillBothFields: "Заполни оба поля",
+    passwordsMismatch: "Пароли не совпадают",
+    changingPassword: "Меняем пароль…",
+    passwordChanged: "Пароль изменён",
+    saveFailed: "Не удалось сохранить настройки",
+    profileFailed: "Не удалось сохранить профиль",
+    passwordFailed: "Не удалось изменить пароль"
+  },
+  en: {
+    settings: "Settings",
+    loginRequired: "Sign in to manage your profile.",
+    login: "Sign in",
+    appearance: "Appearance",
+    avatar: "Avatar",
+    profile: "Profile",
+    password: "Password",
+    theme: "Theme",
+    light: "Light",
+    dark: "Dark",
+    language: "Language",
+    save: "Save",
+    saving: "Saving…",
+    saved: "Settings saved",
+    uploadAvatar: "Upload avatar",
+    chooseImageFirst: "Choose an image first",
+    uploadingAvatar: "Uploading avatar…",
+    avatarSaved: "Avatar saved",
+    avatarFailed: "Could not upload avatar",
+    displayName: "Display name",
+    username: "Username",
+    enterName: "Enter name",
+    enterUsername: "Enter username",
+    saveProfile: "Save profile",
+    savingProfile: "Saving profile…",
+    profileSaved: "Profile saved",
+    displayNameEmpty: "Display name cannot be empty",
+    usernameEmpty: "Username cannot be empty",
+    newPassword: "New password",
+    confirmPassword: "Confirm password",
+    changePassword: "Change password",
+    fillBothFields: "Fill both fields",
+    passwordsMismatch: "Passwords do not match",
+    changingPassword: "Changing password…",
+    passwordChanged: "Password changed",
+    saveFailed: "Could not save settings",
+    profileFailed: "Could not save profile",
+    passwordFailed: "Could not change password"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
 function cleanText(value = "") {
   return String(value || "").trim();
 }
@@ -42,13 +130,13 @@ function getInitialSection() {
 function renderGuestState(root) {
   root.innerHTML = `
     <section style="display:flex;flex-direction:column;gap:16px;padding:24px 0;">
-      <div style="font-size:28px;font-weight:800;color:var(--text);">Настройки</div>
+      <div style="font-size:28px;font-weight:800;color:var(--text);">${escapeHtml(t("settings"))}</div>
       <div style="border:1px solid var(--border-soft);background:var(--surface);border-radius:20px;padding:20px;">
         <div style="color:var(--text-soft);line-height:1.6;margin-bottom:14px;">
-          Чтобы управлять профилем, нужно войти в аккаунт.
+          ${escapeHtml(t("loginRequired"))}
         </div>
         <button style="padding:10px 16px;border-radius:999px;background:var(--accent);color:#fff;font-weight:700;" data-action="login">
-          Войти
+          ${escapeHtml(t("login"))}
         </button>
       </div>
     </section>
@@ -290,18 +378,18 @@ function renderSectionContent(section, localState) {
   if (section === "appearance") {
     return `
       <div class="settings-panel-card">
-        <div class="settings-panel-title">Внешний вид</div>
+        <div class="settings-panel-title">${escapeHtml(t("appearance"))}</div>
 
         <div class="settings-setting-block">
-          <div class="settings-setting-title">Тема</div>
+          <div class="settings-setting-title">${escapeHtml(t("theme"))}</div>
           <div class="settings-chip-row">
-            <button class="settings-chip ${theme === "light" ? "is-active" : ""}" type="button" data-theme="light">Светлая</button>
-            <button class="settings-chip ${theme === "dark" ? "is-active" : ""}" type="button" data-theme="dark">Тёмная</button>
+            <button class="settings-chip ${theme === "light" ? "is-active" : ""}" type="button" data-theme="light">${escapeHtml(t("light"))}</button>
+            <button class="settings-chip ${theme === "dark" ? "is-active" : ""}" type="button" data-theme="dark">${escapeHtml(t("dark"))}</button>
           </div>
         </div>
 
         <div class="settings-setting-block">
-          <div class="settings-setting-title">Язык</div>
+          <div class="settings-setting-title">${escapeHtml(t("language"))}</div>
           <div class="settings-chip-row">
             <button class="settings-chip ${language === "ru" ? "is-active" : ""}" type="button" data-language="ru">Русский</button>
             <button class="settings-chip ${language === "en" ? "is-active" : ""}" type="button" data-language="en">English</button>
@@ -309,7 +397,7 @@ function renderSectionContent(section, localState) {
         </div>
 
         <div class="settings-inline-actions">
-          <button class="settings-primary-button" type="button" data-action="save-appearance">Сохранить</button>
+          <button class="settings-primary-button" type="button" data-action="save-appearance">${escapeHtml(t("save"))}</button>
         </div>
 
         <div class="settings-status" data-settings-status></div>
@@ -320,7 +408,7 @@ function renderSectionContent(section, localState) {
   if (section === "avatar") {
     return `
       <div class="settings-panel-card">
-        <div class="settings-panel-title">Аватар</div>
+        <div class="settings-panel-title">${escapeHtml(t("avatar"))}</div>
 
         <div class="settings-avatar-block">
           <div class="settings-avatar-preview">
@@ -329,7 +417,7 @@ function renderSectionContent(section, localState) {
 
           <div class="settings-avatar-controls">
             <input class="settings-file-input" type="file" accept="image/*" data-avatar-file />
-            <button class="settings-primary-button" type="button" data-action="save-avatar">Загрузить аватар</button>
+            <button class="settings-primary-button" type="button" data-action="save-avatar">${escapeHtml(t("uploadAvatar"))}</button>
           </div>
         </div>
 
@@ -341,22 +429,22 @@ function renderSectionContent(section, localState) {
   if (section === "profile") {
     return `
       <div class="settings-panel-card">
-        <div class="settings-panel-title">Профиль</div>
+        <div class="settings-panel-title">${escapeHtml(t("profile"))}</div>
 
         <div class="settings-form-grid">
           <label class="settings-label">
-            <span>Display name</span>
-            <input class="settings-input" data-profile-display-name type="text" value="${escapeHtml(displayName)}" placeholder="Введите имя" />
+            <span>${escapeHtml(t("displayName"))}</span>
+            <input class="settings-input" data-profile-display-name type="text" value="${escapeHtml(displayName)}" placeholder="${escapeHtml(t("enterName"))}" />
           </label>
 
           <label class="settings-label">
-            <span>Username</span>
-            <input class="settings-input" data-profile-username type="text" value="${escapeHtml(username)}" placeholder="Введите username" />
+            <span>${escapeHtml(t("username"))}</span>
+            <input class="settings-input" data-profile-username type="text" value="${escapeHtml(username)}" placeholder="${escapeHtml(t("enterUsername"))}" />
           </label>
         </div>
 
         <div class="settings-inline-actions">
-          <button class="settings-primary-button" type="button" data-action="save-profile">Сохранить профиль</button>
+          <button class="settings-primary-button" type="button" data-action="save-profile">${escapeHtml(t("saveProfile"))}</button>
         </div>
 
         <div class="settings-status" data-settings-status></div>
@@ -367,22 +455,22 @@ function renderSectionContent(section, localState) {
   if (section === "password") {
     return `
       <div class="settings-panel-card">
-        <div class="settings-panel-title">Пароль</div>
+        <div class="settings-panel-title">${escapeHtml(t("password"))}</div>
 
         <div class="settings-form-grid">
           <label class="settings-label">
-            <span>Новый пароль</span>
+            <span>${escapeHtml(t("newPassword"))}</span>
             <input class="settings-input" data-password-new type="password" placeholder="••••••••" />
           </label>
 
           <label class="settings-label">
-            <span>Подтвердить пароль</span>
+            <span>${escapeHtml(t("confirmPassword"))}</span>
             <input class="settings-input" data-password-confirm type="password" placeholder="••••••••" />
           </label>
         </div>
 
         <div class="settings-inline-actions">
-          <button class="settings-primary-button" type="button" data-action="save-password">Сменить пароль</button>
+          <button class="settings-primary-button" type="button" data-action="save-password">${escapeHtml(t("changePassword"))}</button>
         </div>
 
         <div class="settings-status" data-settings-status></div>
@@ -439,14 +527,14 @@ export function renderSettingsPage(root) {
     ${renderStyles()}
 
     <section class="settings-page">
-      <div class="settings-title">Настройки</div>
+      <div class="settings-title">${escapeHtml(t("settings"))}</div>
 
       <div class="settings-layout">
         <aside class="settings-sidebar">
-          <button class="settings-nav-button" type="button" data-section="appearance">Внешний вид</button>
-          <button class="settings-nav-button" type="button" data-section="avatar">Аватар</button>
-          <button class="settings-nav-button" type="button" data-section="profile">Профиль</button>
-          <button class="settings-nav-button" type="button" data-section="password">Пароль</button>
+          <button class="settings-nav-button" type="button" data-section="appearance">${escapeHtml(t("appearance"))}</button>
+          <button class="settings-nav-button" type="button" data-section="avatar">${escapeHtml(t("avatar"))}</button>
+          <button class="settings-nav-button" type="button" data-section="profile">${escapeHtml(t("profile"))}</button>
+          <button class="settings-nav-button" type="button" data-section="password">${escapeHtml(t("password"))}</button>
         </aside>
 
         <div class="settings-content" data-settings-content></div>
@@ -486,7 +574,7 @@ export function renderSettingsPage(root) {
 
       try {
         setLoading(button, true);
-        setStatus(contentRoot, "Сохраняем…");
+        setStatus(contentRoot, t("saving"));
 
         const theme = normalizeTheme(localState.profile.preferred_theme);
         const language = normalizeLanguage(localState.profile.preferred_language);
@@ -506,9 +594,14 @@ export function renderSettingsPage(root) {
         setTheme(nextTheme);
         setLanguage(nextLanguage);
 
-        setStatus(contentRoot, "Настройки сохранены", "success");
+        updateLocalUserProfile({
+          preferred_theme: nextTheme,
+          preferred_language: nextLanguage
+        });
+
+        setStatus(contentRoot, t("saved"), "success");
       } catch (error) {
-        setStatus(contentRoot, error.message || "Не удалось сохранить настройки", "error");
+        setStatus(contentRoot, error.message || t("saveFailed"), "error");
       } finally {
         setLoading(button, false);
       }
@@ -531,13 +624,13 @@ export function renderSettingsPage(root) {
       const button = event.currentTarget;
 
       if (!localState.avatarFile) {
-        setStatus(contentRoot, "Сначала выбери изображение", "error");
+        setStatus(contentRoot, t("chooseImageFirst"), "error");
         return;
       }
 
       try {
         setLoading(button, true);
-        setStatus(contentRoot, "Загружаем аватар…");
+        setStatus(contentRoot, t("uploadingAvatar"));
 
         const avatarUrl = await uploadAvatarImage(userId, localState.avatarFile);
         const saved = await upsertUserProfile({
@@ -558,9 +651,9 @@ export function renderSettingsPage(root) {
         });
 
         renderSection();
-        setStatus(contentRoot, "Аватар сохранён", "success");
+        setStatus(contentRoot, t("avatarSaved"), "success");
       } catch (error) {
-        setStatus(contentRoot, error.message || "Не удалось загрузить аватар", "error");
+        setStatus(contentRoot, error.message || t("avatarFailed"), "error");
       } finally {
         setLoading(button, false);
       }
@@ -572,18 +665,18 @@ export function renderSettingsPage(root) {
       const username = normalizeUsername(contentRoot.querySelector("[data-profile-username]")?.value || "");
 
       if (!displayName) {
-        setStatus(contentRoot, "Display name не должен быть пустым", "error");
+        setStatus(contentRoot, t("displayNameEmpty"), "error");
         return;
       }
 
       if (!username) {
-        setStatus(contentRoot, "Username не должен быть пустым", "error");
+        setStatus(contentRoot, t("usernameEmpty"), "error");
         return;
       }
 
       try {
         setLoading(button, true);
-        setStatus(contentRoot, "Сохраняем профиль…");
+        setStatus(contentRoot, t("savingProfile"));
 
         const saved = await upsertUserProfile({
           id: userId,
@@ -599,9 +692,9 @@ export function renderSettingsPage(root) {
           username: localState.profile.username
         });
 
-        setStatus(contentRoot, "Профиль сохранён", "success");
+        setStatus(contentRoot, t("profileSaved"), "success");
       } catch (error) {
-        setStatus(contentRoot, error.message || "Не удалось сохранить профиль", "error");
+        setStatus(contentRoot, error.message || t("profileFailed"), "error");
       } finally {
         setLoading(button, false);
       }
@@ -615,27 +708,27 @@ export function renderSettingsPage(root) {
       const confirmPassword = confirmPasswordInput?.value || "";
 
       if (!newPassword || !confirmPassword) {
-        setStatus(contentRoot, "Заполни оба поля", "error");
+        setStatus(contentRoot, t("fillBothFields"), "error");
         return;
       }
 
       if (newPassword !== confirmPassword) {
-        setStatus(contentRoot, "Пароли не совпадают", "error");
+        setStatus(contentRoot, t("passwordsMismatch"), "error");
         return;
       }
 
       try {
         setLoading(button, true);
-        setStatus(contentRoot, "Меняем пароль…");
+        setStatus(contentRoot, t("changingPassword"));
 
         await updateUserPassword(newPassword);
 
         if (newPasswordInput) newPasswordInput.value = "";
         if (confirmPasswordInput) confirmPasswordInput.value = "";
 
-        setStatus(contentRoot, "Пароль изменён", "success");
+        setStatus(contentRoot, t("passwordChanged"), "success");
       } catch (error) {
-        setStatus(contentRoot, error.message || "Не удалось изменить пароль", "error");
+        setStatus(contentRoot, error.message || t("passwordFailed"), "error");
       } finally {
         setLoading(button, false);
       }
