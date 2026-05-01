@@ -1,151 +1,515 @@
-// js/lib/supabase-client.js
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.js";
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+let client = null;
+let cachedSession = null;
+let authStatePromise = null;
+let profileCacheByUserId = new Map();
+let profilePromiseByUserId = new Map();
 
-const SUPABASE_URL = window.SUPABASE_URL;
-const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
+const DEFAULT_TIMEOUT_MS = 12000;
+const AUTH_TIMEOUT_MS = 12000;
+const PROFILE_TIMEOUT_MS = 12000;
+const STORAGE_TIMEOUT_MS = 60000;
+const PROFILE_CACHE_TTL_MS = 1000 * 60 * 5;
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error("Supabase config missing");
-}
+const AUTH_STATUSES = {
+  RESTORING: "restoring",
+  AUTHENTICATED: "authenticated",
+  GUEST: "guest",
+  ERROR: "error"
+};
 
-let supabase = null;
+function createClient() {
+  if (!window.supabase) {
+    throw new Error("Supabase SDK не загружен");
+  }
 
-// единый источник правды
-let currentSession = null;
-let currentUser = null;
-
-// единый флаг инициализации
-let isInitialized = false;
-let initPromise = null;
-
-// ===== INIT =====
-
-function initClient() {
-  if (supabase) return supabase;
-
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
-      autoRefreshToken: true
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storage: window.localStorage,
+      storageKey: "plamut-auth-token",
+      flowType: "pkce"
+    },
+    global: {
+      headers: {
+        "X-Client-Info": "plamut-web"
+      }
+    }
+  });
+}
+
+export function getSupabaseClient() {
+  if (!client) {
+    client = createClient();
+  }
+
+  return client;
+}
+
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
+function cleanPayload(payload = {}) {
+  const result = {};
+
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value !== undefined) {
+      result[key] = value;
     }
   });
 
-  return supabase;
+  return result;
 }
 
-async function initAuth() {
-  if (isInitialized) return;
-  if (initPromise) return initPromise;
+function normalizeTheme(value = "") {
+  return value === "light" || value === "dark" ? value : "dark";
+}
 
-  initPromise = (async () => {
-    const client = initClient();
+function normalizeLanguage(value = "") {
+  return value === "en" || value === "ru" ? value : "ru";
+}
 
+function getCachedProfile(userId = "") {
+  const key = cleanText(userId);
+  if (!key) return null;
+
+  const row = profileCacheByUserId.get(key);
+  if (!row) return null;
+
+  if (Date.now() - Number(row.ts || 0) > PROFILE_CACHE_TTL_MS) {
+    profileCacheByUserId.delete(key);
+    return null;
+  }
+
+  return row.profile || null;
+}
+
+function setCachedProfile(userId = "", profile = null) {
+  const key = cleanText(userId);
+  if (!key) return;
+
+  if (!profile) {
+    profileCacheByUserId.delete(key);
+    return;
+  }
+
+  profileCacheByUserId.set(key, {
+    profile,
+    ts: Date.now()
+  });
+}
+
+function sanitizeFilename(filename = "avatar") {
+  return String(filename)
+    .toLowerCase()
+    .replace(/[^a-z0-9.\-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function setCachedSession(session) {
+  cachedSession = session || null;
+}
+
+export function clearCachedSession() {
+  cachedSession = null;
+  authStatePromise = null;
+  profileCacheByUserId = new Map();
+  profilePromiseByUserId = new Map();
+}
+
+export function withTimeout(promise, label = "Запрос", timeoutMs = DEFAULT_TIMEOUT_MS) {
+  let timer;
+
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label}: превышено время ожидания`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+export async function withRetry(factory, label = "Запрос", options = {}) {
+  const retries = Number.isFinite(Number(options.retries)) ? Number(options.retries) : 1;
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Number(options.timeoutMs)
+    : DEFAULT_TIMEOUT_MS;
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Number(options.delayMs) : 500;
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      const { data, error } = await client.auth.getSession();
+      return await withTimeout(factory(), label, timeoutMs);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export async function getCurrentAuthState() {
+  if (cachedSession?.user?.id) {
+    return {
+      status: AUTH_STATUSES.AUTHENTICATED,
+      session: cachedSession,
+      error: null
+    };
+  }
+
+  if (authStatePromise) {
+    return authStatePromise;
+  }
+
+  authStatePromise = (async () => {
+    try {
+      const supabase = getSupabaseClient();
+
+      const { data, error } = await withTimeout(
+        supabase.auth.getSession(),
+        "Получение сессии",
+        AUTH_TIMEOUT_MS
+      );
 
       if (error) {
-        console.warn("getSession error:", error);
+        console.warn("getCurrentAuthState error:", error);
+
+        return {
+          status: cachedSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.ERROR,
+          session: cachedSession || null,
+          error
+        };
       }
 
-      currentSession = data?.session || null;
-      currentUser = currentSession?.user || null;
+      cachedSession = data?.session || null;
 
-      // подписка на изменения
-      client.auth.onAuthStateChange((event, session) => {
-        currentSession = session || null;
-        currentUser = session?.user || null;
-      });
+      return {
+        status: cachedSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.GUEST,
+        session: cachedSession,
+        error: null
+      };
+    } catch (error) {
+      console.warn("getCurrentAuthState skipped:", error);
 
-    } catch (e) {
-      console.warn("initAuth failed:", e);
+      return {
+        status: cachedSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.ERROR,
+        session: cachedSession || null,
+        error
+      };
+    } finally {
+      authStatePromise = null;
     }
-
-    isInitialized = true;
   })();
 
-  return initPromise;
-}
-
-// ===== PUBLIC API =====
-
-export function getSupabaseClient() {
-  return initClient();
+  return authStatePromise;
 }
 
 export async function getCurrentSession() {
-  await initAuth();
-  return currentSession;
+  const authState = await getCurrentAuthState();
+  return authState?.session || null;
 }
 
 export async function getCurrentUser() {
-  await initAuth();
-  return currentUser;
+  const session = await getCurrentSession();
+  return session?.user || null;
 }
 
 export async function requireUser() {
   const user = await getCurrentUser();
-  if (!user) throw new Error("User not authenticated");
+
+  if (!user?.id) {
+    throw new Error("Пользователь не авторизован");
+  }
+
   return user;
 }
 
-// ===== AUTH ACTIONS =====
-
 export async function signIn(email, password) {
-  const client = getSupabaseClient();
+  const supabase = getSupabaseClient();
 
-  const { data, error } = await client.auth.signInWithPassword({
-    email,
-    password
-  });
+  const { data, error } = await withRetry(
+    () => supabase.auth.signInWithPassword({ email, password }),
+    "Вход",
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
 
   if (error) throw error;
 
-  currentSession = data.session;
-  currentUser = data.user;
-
+  cachedSession = data?.session || null;
   return data;
 }
 
 export async function signUp(email, password) {
-  const client = getSupabaseClient();
+  const supabase = getSupabaseClient();
 
-  const { data, error } = await client.auth.signUp({
-    email,
-    password
+  const { data, error } = await withRetry(
+    () => supabase.auth.signUp({ email, password }),
+    "Регистрация",
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
+
+  if (error) throw error;
+
+  cachedSession = data?.session || null;
+  return data;
+}
+
+export async function signInWithEmail(email, password) {
+  return signIn(email, password);
+}
+
+export async function signUpWithEmail(email, password) {
+  return signUp(email, password);
+}
+
+export async function signOut() {
+  const supabase = getSupabaseClient();
+
+  const { error } = await withRetry(
+    () => supabase.auth.signOut(),
+    "Выход",
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
+
+  if (error) throw error;
+
+  clearCachedSession();
+  return true;
+}
+
+export async function fetchUserProfile(userId) {
+  const cleanUserId = cleanText(userId);
+  if (!cleanUserId) return null;
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withRetry(
+    () =>
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", cleanUserId)
+        .maybeSingle(),
+    "Загрузка профиля",
+    {
+      retries: 1,
+      timeoutMs: PROFILE_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
+
+  if (error) throw error;
+
+  if (data?.id) {
+    setCachedProfile(cleanUserId, data);
+  }
+
+  return data || null;
+}
+
+export async function fetchUserProfileResultSafe(userId) {
+  const cleanUserId = cleanText(userId);
+  if (!cleanUserId) {
+    return {
+      status: "empty",
+      profile: null,
+      error: null
+    };
+  }
+
+  const cached = getCachedProfile(cleanUserId);
+
+  if (cached?.id) {
+    return {
+      status: "found",
+      profile: cached,
+      error: null,
+      cached: true
+    };
+  }
+
+  if (profilePromiseByUserId.has(cleanUserId)) {
+    return profilePromiseByUserId.get(cleanUserId);
+  }
+
+  const promise = (async () => {
+    try {
+      const profile = await fetchUserProfile(cleanUserId);
+
+      return {
+        status: profile?.id ? "found" : "not_found",
+        profile: profile || null,
+        error: null
+      };
+    } catch (error) {
+      console.warn("fetchUserProfileResultSafe skipped:", error);
+
+      return {
+        status: String(error?.message || "").includes("превышено время ожидания") ? "timeout" : "error",
+        profile: null,
+        error
+      };
+    } finally {
+      profilePromiseByUserId.delete(cleanUserId);
+    }
+  })();
+
+  profilePromiseByUserId.set(cleanUserId, promise);
+  return promise;
+}
+
+export async function fetchUserProfileSafe(userId) {
+  const result = await fetchUserProfileResultSafe(userId);
+  return result?.profile || null;
+}
+
+export async function upsertUserProfile(profile) {
+  if (!profile?.id) {
+    throw new Error("upsertUserProfile: profile.id is required");
+  }
+
+  const supabase = getSupabaseClient();
+
+  const payload = cleanPayload({
+    id: profile.id,
+    username: profile.username !== undefined ? cleanText(profile.username) : undefined,
+    display_name: profile.display_name !== undefined ? cleanText(profile.display_name) : undefined,
+    avatar_url: profile.avatar_url !== undefined ? cleanText(profile.avatar_url) : undefined,
+    preferred_language:
+      profile.preferred_language !== undefined
+        ? normalizeLanguage(profile.preferred_language)
+        : undefined,
+    preferred_theme:
+      profile.preferred_theme !== undefined
+        ? normalizeTheme(profile.preferred_theme)
+        : undefined
   });
+
+  const { data, error } = await withRetry(
+    () =>
+      supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" })
+        .select("*")
+        .single(),
+    "Сохранение профиля",
+    {
+      retries: 1,
+      timeoutMs: PROFILE_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
+
+  if (error) throw error;
+
+  if (!data) {
+    throw new Error("Профиль не был сохранён");
+  }
+
+  setCachedProfile(profile.id, data);
+
+  return data;
+}
+
+export async function upsertUserProfileSafe(profile) {
+  try {
+    return await upsertUserProfile(profile);
+  } catch (error) {
+    console.warn("upsertUserProfileSafe skipped:", error);
+    return null;
+  }
+}
+
+export async function updateUserPassword(newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("Пароль должен содержать минимум 6 символов");
+  }
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withRetry(
+    () => supabase.auth.updateUser({ password: newPassword }),
+    "Смена пароля",
+    {
+      retries: 1,
+      timeoutMs: AUTH_TIMEOUT_MS,
+      delayMs: 700
+    }
+  );
 
   if (error) throw error;
 
   return data;
 }
 
-export async function signOut() {
-  const client = getSupabaseClient();
+export async function uploadAvatarImage(userId, file) {
+  const cleanUserId = cleanText(userId);
 
-  const { error } = await client.auth.signOut();
-
-  if (error) throw error;
-
-  currentSession = null;
-  currentUser = null;
-}
-
-// ===== UTILS =====
-
-// простой timeout без сложной логики
-export async function withTimeout(promise, label = "request", ms = 10000) {
-  let timeout;
-
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error(`${label}: timeout`));
-    }, ms);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    clearTimeout(timeout);
+  if (!cleanUserId) {
+    throw new Error("Не найден пользователь");
   }
+
+  if (!file) {
+    throw new Error("Файл не выбран");
+  }
+
+  if (!String(file.type || "").startsWith("image/")) {
+    throw new Error("Нужно выбрать изображение");
+  }
+
+  const supabase = getSupabaseClient();
+  const extension = (file.name.split(".").pop() || "png").toLowerCase();
+  const safeName = sanitizeFilename(file.name || `avatar.${extension}`);
+  const path = `${cleanUserId}/${Date.now()}-${safeName}`;
+
+  const { error: uploadError } = await withRetry(
+    () =>
+      supabase.storage
+        .from("avatars")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false
+        }),
+    "Загрузка аватара",
+    {
+      retries: 1,
+      timeoutMs: STORAGE_TIMEOUT_MS,
+      delayMs: 1000
+    }
+  );
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  const publicUrl = data?.publicUrl || "";
+
+  if (!publicUrl) {
+    throw new Error("Не удалось получить ссылку аватара");
+  }
+
+  return publicUrl;
 }
