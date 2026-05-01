@@ -1,10 +1,30 @@
 import { APP_NAME } from "../config.js";
 import { navigate } from "../router.js";
-import { openSidebar } from "../state.js";
+import { openSidebar, state } from "../state.js";
 import { escapeHtml, getInitials } from "../utils.js";
 
+const I18N = {
+  ru: {
+    guest: "Гость",
+    subtitle: "Библиотека и вселенные",
+    home: "На главную",
+    openProfile: "Открыть профиль"
+  },
+  en: {
+    guest: "Guest",
+    subtitle: "Library & universes",
+    home: "Home",
+    openProfile: "Open profile"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
 function renderAvatar(user) {
-  const name = user?.display_name || user?.username || "Гость";
+  const name = user?.display_name || user?.username || t("guest");
 
   if (user?.avatar_url) {
     return `
@@ -21,8 +41,8 @@ function renderAvatar(user) {
 }
 
 export function renderHeader(root) {
-  const user = window.__PLAMUT_STATE__?.user || {
-    display_name: "Гость",
+  const user = state.user || {
+    display_name: t("guest"),
     username: "guest",
     avatar_url: null
   };
@@ -100,13 +120,13 @@ export function renderHeader(root) {
 
     <div class="app-header__inner">
       <div class="brand-row">
-        <button class="brand-title-button" type="button" aria-label="На главную">
-          <div class="brand-title">${APP_NAME}</div>
-          <div class="brand-subtitle">Library & universes</div>
+        <button class="brand-title-button" type="button" aria-label="${escapeHtml(t("home"))}">
+          <div class="brand-title">${escapeHtml(APP_NAME)}</div>
+          <div class="brand-subtitle">${escapeHtml(t("subtitle"))}</div>
         </button>
       </div>
 
-      <button class="avatar-button" type="button" aria-label="Открыть профиль">
+      <button class="avatar-button" type="button" aria-label="${escapeHtml(t("openProfile"))}">
         ${renderAvatar(user)}
       </button>
     </div>
