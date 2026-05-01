@@ -223,6 +223,83 @@ function getYearFromDate(value = "") {
   return Number.isFinite(year) ? year : null;
 }
 
+function getTmdbResultYear(item = {}, type = "movie") {
+  return type === "tv"
+    ? getYearFromDate(item.first_air_date)
+    : getYearFromDate(item.release_date);
+}
+
+function normalizeCompareTitle(value = "") {
+  return cleanLower(value)
+    .replace(/ё/g, "е")
+    .replace(/[^a-z0-9а-яе]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTmdbResultTitle(item = {}, type = "movie") {
+  return type === "tv"
+    ? cleanText(item.name || item.original_name)
+    : cleanText(item.title || item.original_title);
+}
+
+function getTmdbResultOriginalTitle(item = {}, type = "movie") {
+  return type === "tv"
+    ? cleanText(item.original_name || item.name)
+    : cleanText(item.original_title || item.title);
+}
+
+function scoreTmdbCandidate(item = {}, entity = {}, type = "movie") {
+  const entityYear = normalizeYear(entity.year);
+  const itemYear = getTmdbResultYear(item, type);
+  const entityTitles = getTitleCandidates(entity).map(normalizeCompareTitle).filter(Boolean);
+  const itemTitles = [
+    getTmdbResultTitle(item, type),
+    getTmdbResultOriginalTitle(item, type)
+  ].map(normalizeCompareTitle).filter(Boolean);
+
+  let score = 0;
+
+  if (item.poster_path) score += 40;
+  if (item.overview) score += 10;
+
+  if (entityYear && itemYear) {
+    if (entityYear === itemYear) score += 40;
+    else if (Math.abs(entityYear - itemYear) <= 1) score += 20;
+    else score -= 20;
+  }
+
+  if (entityTitles.length && itemTitles.length) {
+    const exact = itemTitles.some((itemTitle) => entityTitles.includes(itemTitle));
+    const partial = itemTitles.some((itemTitle) =>
+      entityTitles.some((entityTitle) =>
+        itemTitle.includes(entityTitle) || entityTitle.includes(itemTitle)
+      )
+    );
+
+    if (exact) score += 35;
+    else if (partial) score += 18;
+  }
+
+  score += Math.min(Number(item.popularity || 0), 100) / 10;
+
+  return score;
+}
+
+function pickBestTmdbCandidate(results = [], entity = {}, type = "movie") {
+  const candidates = safeArray(results)
+    .filter((item) => item?.id)
+    .slice(0, 8)
+    .map((item) => ({
+      item,
+      score: scoreTmdbCandidate(item, entity, type)
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const withPoster = candidates.find((candidate) => candidate.item.poster_path);
+  return (withPoster || candidates[0])?.item || null;
+}
+
 async function fetchTmdbDetails(entity = {}, language = "ru") {
   const ids = normalizeJson(entity.external_ids, {});
   const tmdbId = cleanText(ids.tmdb);
@@ -234,7 +311,7 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
 
   url.searchParams.set("api_key", TMDB_API_KEY);
   url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
-  url.searchParams.set("append_to_response", "external_ids");
+  url.searchParams.set("append_to_response", "external_ids,images");
 
   const payload = await fetchJson(url.toString(), {
     headers: {
@@ -257,13 +334,16 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
       ? getYearFromDate(payload.first_air_date)
       : getYearFromDate(payload.release_date);
 
+  const fallbackPoster = safeArray(payload?.images?.posters)
+    .find((poster) => poster?.file_path)?.file_path || "";
+
   return {
     title_primary: title || originalTitle,
     title_ru: language === "ru" ? title : "",
     title_en: language === "en" ? title : "",
     original_title: originalTitle || title,
     year,
-    cover_url: buildTmdbCover(payload.poster_path),
+    cover_url: buildTmdbCover(payload.poster_path || fallbackPoster),
     description_ru: language === "ru" ? cleanText(payload.overview) : "",
     description_en: language === "en" ? cleanText(payload.overview) : "",
     external_ids: {
@@ -284,17 +364,17 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
   };
 }
 
-async function fetchTmdbBySearch(entity = {}, language = "ru") {
+async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru") {
   if (!TMDB_API_KEY) return null;
 
-  const title = getBestTitle(entity);
-  if (!title) return null;
+  const cleanQuery = cleanText(query);
+  if (!cleanQuery) return null;
 
   const type = getTmdbType(entity);
   const url = new URL(`${TMDB_BASE_URL}/search/${type}`);
 
   url.searchParams.set("api_key", TMDB_API_KEY);
-  url.searchParams.set("query", title);
+  url.searchParams.set("query", cleanQuery);
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("page", "1");
   url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
@@ -305,7 +385,7 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
     }
   });
 
-  const result = safeArray(payload.results)[0];
+  const result = pickBestTmdbCandidate(payload.results, entity, type);
   if (!result?.id) return null;
 
   return fetchTmdbDetails(
@@ -318,6 +398,31 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
     },
     language
   );
+}
+
+async function fetchTmdbBySearch(entity = {}, language = "ru") {
+  if (!TMDB_API_KEY) return null;
+
+  const queries = uniqueArray([
+    entity.title_ru,
+    entity.title_en,
+    entity.original_title,
+    entity.title_primary,
+    entity.title
+  ].map(cleanText).filter(Boolean));
+
+  for (const query of queries) {
+    try {
+      const patch = await fetchTmdbBySingleSearch(entity, query, language);
+      if (patch?.cover_url || patch?.description_ru || patch?.description_en) {
+        return patch;
+      }
+    } catch (error) {
+      console.warn(`TMDB search skipped for "${query}":`, error);
+    }
+  }
+
+  return null;
 }
 
 function wikimediaFileUrl(filename = "") {
