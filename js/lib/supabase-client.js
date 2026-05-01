@@ -73,6 +73,26 @@ function normalizeLanguage(value = "") {
   return value === "en" || value === "ru" ? value : "ru";
 }
 
+function isTimeoutError(error) {
+  return String(error?.message || "")
+    .toLowerCase()
+    .includes("превышено время ожидания");
+}
+
+function isNetworkLikeError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+
+  return [
+    "failed to fetch",
+    "network",
+    "fetch",
+    "load failed",
+    "networkerror",
+    "functionsfetcherror",
+    "failed to send a request"
+  ].some((chunk) => message.includes(chunk));
+}
+
 function getCachedProfile(userId = "") {
   const key = cleanText(userId);
   if (!key) return null;
@@ -165,7 +185,8 @@ export async function getCurrentAuthState() {
     return {
       status: AUTH_STATUSES.AUTHENTICATED,
       session: cachedSession,
-      error: null
+      error: null,
+      cached: true
     };
   }
 
@@ -206,7 +227,9 @@ export async function getCurrentAuthState() {
       return {
         status: cachedSession?.user?.id ? AUTH_STATUSES.AUTHENTICATED : AUTH_STATUSES.ERROR,
         session: cachedSession || null,
-        error
+        error,
+        timeout: isTimeoutError(error),
+        network: isNetworkLikeError(error)
       };
     } finally {
       authStatePromise = null;
@@ -333,6 +356,7 @@ export async function fetchUserProfile(userId) {
 
 export async function fetchUserProfileResultSafe(userId) {
   const cleanUserId = cleanText(userId);
+
   if (!cleanUserId) {
     return {
       status: "empty",
@@ -369,7 +393,7 @@ export async function fetchUserProfileResultSafe(userId) {
       console.warn("fetchUserProfileResultSafe skipped:", error);
 
       return {
-        status: String(error?.message || "").includes("превышено время ожидания") ? "timeout" : "error",
+        status: isTimeoutError(error) ? "timeout" : "error",
         profile: null,
         error
       };
