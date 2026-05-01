@@ -10,8 +10,8 @@ const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 const USER_MEDIA_TABLE = "user_media";
 
-const READ_TIMEOUT_MS = 8000;
-const WRITE_TIMEOUT_MS = 12000;
+const READ_TIMEOUT_MS = 9000;
+const WRITE_TIMEOUT_MS = 14000;
 
 const entityCacheByCanonicalKey = new Map();
 const userMediaCacheByKey = new Map();
@@ -19,42 +19,6 @@ const pendingEntitySaveByCanonicalKey = new Map();
 const pendingUserMediaByKey = new Map();
 
 const CACHE_TTL_MS = 1000 * 60 * 5;
-
-const USER_MEDIA_LIGHT_SELECT = `
-  id,
-  user_id,
-  entity_id,
-  category,
-  status,
-  folder_name,
-  created_at,
-  updated_at
-`;
-
-const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
-  id,
-  user_id,
-  entity_id,
-  category,
-  status,
-  folder_name,
-  created_at,
-  updated_at,
-  media_entities (
-    id,
-    canonical_key,
-    category,
-    title_primary,
-    title_ru,
-    title_en,
-    original_title,
-    year,
-    cover_url,
-    description_ru,
-    description_en,
-    universe_key
-  )
-`;
 
 const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
@@ -577,21 +541,7 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
   const cached = getCachedEntity(key);
 
   if (cached?.id) {
-    return {
-      id: cached.id,
-      canonical_key: cached.canonical_key,
-      category: cached.category,
-      title_primary: cached.title_primary,
-      title_ru: cached.title_ru,
-      title_en: cached.title_en,
-      original_title: cached.original_title,
-      year: cached.year,
-      cover_url: cached.cover_url,
-      description_ru: cached.description_ru,
-      description_en: cached.description_en,
-      universe_key: cached.universe_key,
-      relations_status: cached.relations_status
-    };
+    return cached;
   }
 
   const supabase = getSupabaseClient();
@@ -603,6 +553,7 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
         id,
         canonical_key,
         category,
+        primary_source,
         title_primary,
         title_ru,
         title_en,
@@ -611,7 +562,10 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
         cover_url,
         description_ru,
         description_en,
+        external_ids,
+        meta,
         universe_key,
+        relations_built_at,
         relations_status
       `)
       .eq("canonical_key", key)
@@ -624,6 +578,7 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
 
   if (data?.id) {
     setCachedEntity(data);
+    scheduleEntityEnrichment(data);
   }
 
   return data || null;
@@ -781,7 +736,7 @@ export async function getUserLibraryEntryLight(userId, entityId) {
     const { data, error } = await withTimeout(
       supabase
         .from(USER_MEDIA_TABLE)
-        .select(USER_MEDIA_LIGHT_SELECT)
+        .select(USER_MEDIA_WITH_ENTITY_SELECT)
         .eq("user_id", cleanUserId)
         .eq("entity_id", cleanEntityId)
         .maybeSingle(),
@@ -793,6 +748,11 @@ export async function getUserLibraryEntryLight(userId, entityId) {
 
     if (data) {
       setCachedUserMedia(cleanUserId, cleanEntityId, data);
+
+      if (data.media_entities?.id) {
+        setCachedEntity(data.media_entities);
+        scheduleEntityEnrichment(data.media_entities);
+      }
     }
 
     return data || null;
@@ -815,16 +775,15 @@ export async function getUserLibraryEntry(userId, entityId, { full = true } = {}
   }
 
   const supabase = getSupabaseClient();
-  const select = full ? USER_MEDIA_WITH_ENTITY_SELECT : USER_MEDIA_WITH_ENTITY_LIGHT_SELECT;
 
   const { data, error } = await withTimeout(
     supabase
       .from(USER_MEDIA_TABLE)
-      .select(select)
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .eq("user_id", cleanUserId)
       .eq("entity_id", cleanEntityId)
       .maybeSingle(),
-    full ? "Проверка библиотеки" : "Быстрая проверка библиотеки",
+    "Проверка библиотеки",
     READ_TIMEOUT_MS
   );
 
@@ -903,7 +862,7 @@ export async function addToUserLibrary({
     supabase
       .from(USER_MEDIA_TABLE)
       .insert(insertPayload)
-      .select(USER_MEDIA_WITH_ENTITY_LIGHT_SELECT)
+      .select(USER_MEDIA_WITH_ENTITY_SELECT)
       .single(),
     "Добавление в библиотеку",
     WRITE_TIMEOUT_MS
