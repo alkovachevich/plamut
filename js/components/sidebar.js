@@ -14,8 +14,42 @@ import {
   upsertUserProfile
 } from "../lib/supabase-client.js";
 
+const I18N = {
+  ru: {
+    guest: "Гость",
+    saveLibraryHint: "Войди, чтобы сохранить библиотеку",
+    language: "Язык",
+    theme: "Тема",
+    settings: "Настройки",
+    logout: "Выйти",
+    loggingOut: "Выход…",
+    login: "Войти",
+    register: "Регистрация",
+    dark: "Dark",
+    light: "Light"
+  },
+  en: {
+    guest: "Guest",
+    saveLibraryHint: "Sign in to save your library",
+    language: "Language",
+    theme: "Theme",
+    settings: "Settings",
+    logout: "Sign out",
+    loggingOut: "Signing out…",
+    login: "Sign in",
+    register: "Create account",
+    dark: "Dark",
+    light: "Light"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
 function renderAvatar(user) {
-  const name = user?.display_name || user?.username || "Гость";
+  const name = user?.display_name || user?.username || t("guest");
 
   if (user?.avatar_url) {
     return `
@@ -36,7 +70,7 @@ function isLoggedIn(user) {
 }
 
 async function savePreference(patch = {}) {
-  if (!state.user?.id) return;
+  if (!state.user?.id) return null;
 
   const saved = await upsertUserProfile({
     id: state.user.id,
@@ -50,10 +84,12 @@ async function savePreference(patch = {}) {
       preferred_language: saved.preferred_language || state.user.preferred_language
     });
   }
+
+  return saved || null;
 }
 
 export function renderSidebar(root) {
-  const user = state.user;
+  const user = state.user || {};
   const loggedIn = isLoggedIn(user);
   const isOpen = state.sidebarOpen;
 
@@ -228,20 +264,20 @@ export function renderSidebar(root) {
 
           <div>
             <div class="sidebar-profile__name">
-              ${escapeHtml(user.display_name || "Гость")}
+              ${escapeHtml(user.display_name || t("guest"))}
             </div>
             <div class="sidebar-profile__sub">
               ${
                 loggedIn
                   ? `@${escapeHtml(user.username || "user")}`
-                  : "Войди, чтобы сохранить библиотеку"
+                  : escapeHtml(t("saveLibraryHint"))
               }
             </div>
           </div>
         </div>
 
         <div class="setting-row">
-          <span>Язык</span>
+          <span>${escapeHtml(t("language"))}</span>
           <div class="segmented">
             <button type="button" data-lang="ru" class="${state.language === "ru" ? "active" : ""}">RU</button>
             <button type="button" data-lang="en" class="${state.language === "en" ? "active" : ""}">EN</button>
@@ -249,10 +285,10 @@ export function renderSidebar(root) {
         </div>
 
         <div class="setting-row">
-          <span>Тема</span>
+          <span>${escapeHtml(t("theme"))}</span>
           <div class="segmented">
-            <button type="button" data-theme="dark" class="${state.theme === "dark" ? "active" : ""}">Dark</button>
-            <button type="button" data-theme="light" class="${state.theme === "light" ? "active" : ""}">Light</button>
+            <button type="button" data-theme="dark" class="${state.theme === "dark" ? "active" : ""}">${escapeHtml(t("dark"))}</button>
+            <button type="button" data-theme="light" class="${state.theme === "light" ? "active" : ""}">${escapeHtml(t("light"))}</button>
           </div>
         </div>
 
@@ -261,20 +297,20 @@ export function renderSidebar(root) {
             loggedIn
               ? `
                 <button class="btn secondary" type="button" data-action="settings">
-                  Настройки
+                  ${escapeHtml(t("settings"))}
                 </button>
 
                 <button class="btn danger" type="button" data-action="logout">
-                  Выйти
+                  ${escapeHtml(t("logout"))}
                 </button>
               `
               : `
                 <button class="btn primary" type="button" data-action="login">
-                  Войти
+                  ${escapeHtml(t("login"))}
                 </button>
 
                 <button class="btn secondary" type="button" data-action="register">
-                  Регистрация
+                  ${escapeHtml(t("register"))}
                 </button>
               `
           }
@@ -344,7 +380,7 @@ export function renderSidebar(root) {
     try {
       if (logoutButton) {
         logoutButton.disabled = true;
-        logoutButton.textContent = "Выход…";
+        logoutButton.textContent = t("loggingOut");
       }
 
       await signOut();
@@ -355,7 +391,7 @@ export function renderSidebar(root) {
 
       if (logoutButton) {
         logoutButton.disabled = false;
-        logoutButton.textContent = "Выйти";
+        logoutButton.textContent = t("logout");
       }
     }
   });
