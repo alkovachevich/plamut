@@ -1,6 +1,10 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
 import { updateCachedLibraryItem } from "./library-cache.js";
+import {
+  enrichMediaEntityInBackground,
+  shouldEnrichEntity
+} from "./metadata-enrichment.js";
 
 const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
@@ -46,6 +50,8 @@ const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
     original_title,
     year,
     cover_url,
+    description_ru,
+    description_en,
     universe_key
   )
 `;
@@ -581,6 +587,8 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
       original_title: cached.original_title,
       year: cached.year,
       cover_url: cached.cover_url,
+      description_ru: cached.description_ru,
+      description_en: cached.description_en,
       universe_key: cached.universe_key,
       relations_status: cached.relations_status
     };
@@ -601,6 +609,8 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
         original_title,
         year,
         cover_url,
+        description_ru,
+        description_en,
         universe_key,
         relations_status
       `)
@@ -682,12 +692,25 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
   return data || [];
 }
 
+function scheduleEntityEnrichment(entity = {}) {
+  if (!entity?.id) return;
+
+  if (!shouldEnrichEntity(entity)) {
+    return;
+  }
+
+  enrichMediaEntityInBackground(entity);
+}
+
 export async function saveEntityIfMissing(inputEntity) {
   const entity = normalizeEntity(inputEntity);
   const cacheKey = cleanLower(entity.canonical_key);
 
   const cached = getCachedEntity(cacheKey);
-  if (cached?.id) return cached;
+  if (cached?.id) {
+    scheduleEntityEnrichment(cached);
+    return cached;
+  }
 
   if (pendingEntitySaveByCanonicalKey.has(cacheKey)) {
     return pendingEntitySaveByCanonicalKey.get(cacheKey);
@@ -725,6 +748,8 @@ export async function saveEntityIfMissing(inputEntity) {
     saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
       console.warn("saveEntityIfMissing aliases skipped:", error);
     });
+
+    scheduleEntityEnrichment(data);
 
     return data;
   })().finally(() => {
@@ -807,6 +832,11 @@ export async function getUserLibraryEntry(userId, entityId, { full = true } = {}
 
   if (data) {
     setCachedUserMedia(cleanUserId, cleanEntityId, data);
+
+    if (data.media_entities?.id) {
+      setCachedEntity(data.media_entities);
+      scheduleEntityEnrichment(data.media_entities);
+    }
   }
 
   return data || null;
@@ -849,6 +879,8 @@ export async function addToUserLibrary({
       category: existingEntry.category || savedEntity.category
     });
 
+    scheduleEntityEnrichment(savedEntity);
+
     return {
       added: false,
       alreadyExists: true,
@@ -889,6 +921,8 @@ export async function addToUserLibrary({
   updateCachedLibraryItem(cleanUserId, cachedEntry, {
     category: cachedEntry.category || savedEntity.category
   });
+
+  scheduleEntityEnrichment(cachedEntry.media_entities || savedEntity);
 
   return {
     added: true,
