@@ -29,8 +29,10 @@ import { renderGuestPage } from "./pages/guest.js";
 
 import {
   getSupabaseClient,
-  getCurrentSession,
-  fetchUserProfileSafe
+  getCurrentAuthState,
+  fetchUserProfileSafe,
+  setCachedSession,
+  clearCachedSession
 } from "./lib/supabase-client.js";
 
 import { repairMissingMetadata } from "./services/metadata-enrichment.js";
@@ -52,6 +54,7 @@ let initialized = false;
 let authSubscription = null;
 let routeCleanup = null;
 let routeRenderToken = 0;
+let authApplyToken = 0;
 let autoRepairStarted = false;
 
 let lastHeaderSignature = "";
@@ -70,6 +73,20 @@ function normalizeTheme(value = "") {
 
 function normalizeLanguage(value = "") {
   return value === "en" || value === "ru" ? value : "ru";
+}
+
+function isAuthTimeoutOrNetworkError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+
+  return [
+    "timeout",
+    "превышено время ожидания",
+    "failed to fetch",
+    "network",
+    "fetch",
+    "load failed",
+    "networkerror"
+  ].some((chunk) => message.includes(chunk));
 }
 
 function renderFatalAppError(message) {
@@ -330,13 +347,27 @@ function applyUserPreferences(user) {
   }
 }
 
+function hardLogoutToGuest() {
+  authApplyToken += 1;
+  clearCachedSession();
+  clearCachedUser();
+  setAuthStatus("guest");
+  logoutUser();
+  closeAuthModal();
+}
+
 async function applyAuthenticatedUser(authUser) {
   if (!authUser?.id) return;
+
+  const token = authApplyToken + 1;
+  authApplyToken = token;
 
   const profile = await fetchUserProfileSafe(authUser.id).catch((error) => {
     console.warn("Profile load skipped:", error);
     return null;
   });
+
+  if (token !== authApplyToken) return;
 
   const normalizedUser = normalizeAuthUser(authUser, profile);
 
@@ -350,34 +381,37 @@ async function applyAuthenticatedUser(authUser) {
 }
 
 async function hydrateAuthState() {
-  try {
-    const session = await getCurrentSession();
+  const authState = await getCurrentAuthState();
 
-    if (session?.user?.id) {
-      await applyAuthenticatedUser(session.user);
-      return;
-    }
-
-    if (state.user?.id) {
-      setAuthStatus("authenticated");
-      scheduleMetadataAutoRepair(state.user.id);
-      return;
-    }
-
-    setAuthStatus("guest");
-    logoutUser();
-    clearCachedUser();
-  } catch (error) {
-    console.warn("Auth hydration skipped:", error);
-
-    if (state.user?.id) {
-      setAuthStatus("authenticated");
-      scheduleMetadataAutoRepair(state.user.id);
-      return;
-    }
-
-    setAuthStatus("guest");
+  if (authState?.session?.user?.id) {
+    setCachedSession(authState.session);
+    await applyAuthenticatedUser(authState.session.user);
+    return;
   }
+
+  if (authState?.status === "guest") {
+    hardLogoutToGuest();
+    return;
+  }
+
+  if (authState?.status === "error") {
+    if (state.user?.id && isAuthTimeoutOrNetworkError(authState.error)) {
+      setAuthStatus("authenticated");
+      scheduleMetadataAutoRepair(state.user.id);
+      return;
+    }
+
+    hardLogoutToGuest();
+    return;
+  }
+
+  if (state.user?.id) {
+    setAuthStatus("authenticated");
+    scheduleMetadataAutoRepair(state.user.id);
+    return;
+  }
+
+  setAuthStatus("guest");
 }
 
 function bindAuthListener() {
@@ -391,14 +425,13 @@ function bindAuthListener() {
 
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
-        setAuthStatus("guest");
-        logoutUser();
-        clearCachedUser();
-        closeAuthModal();
+        hardLogoutToGuest();
         return;
       }
 
       if (session?.user?.id) {
+        setCachedSession(session);
+
         applyAuthenticatedUser(session.user).catch((error) => {
           console.warn("Auth state apply skipped:", error);
         });
@@ -415,7 +448,7 @@ function bindAuthListener() {
         return;
       }
 
-      if (!state.user?.id) {
+      if (event === "INITIAL_SESSION" && !session?.user?.id && !state.user?.id) {
         setAuthStatus("guest");
       }
     });
@@ -646,26 +679,26 @@ async function init() {
   initState();
   subscribe(renderApp);
 
+  restoreCachedUserBeforeNetwork();
+  renderApp();
+  bindAuthListener();
+
   try {
     initRouter();
   } catch (error) {
     console.warn("Router init error:", error);
   }
 
-  restoreCachedUserBeforeNetwork();
-  renderApp();
-  bindAuthListener();
-
   hydrateAuthState().catch((error) => {
     console.warn("Deferred auth hydration skipped:", error);
 
-    if (state.user?.id) {
+    if (state.user?.id && isAuthTimeoutOrNetworkError(error)) {
       setAuthStatus("authenticated");
       scheduleMetadataAutoRepair(state.user.id);
       return;
     }
 
-    setAuthStatus("guest");
+    hardLogoutToGuest();
   });
 }
 
