@@ -1,4 +1,4 @@
-import { TMDB_API_KEY, API_ENDPOINTS } from "../config.js";
+import { TMDB_API_KEY } from "../config.js";
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { safeArray, uniqueArray } from "../utils.js";
 
@@ -17,14 +17,14 @@ const WIKIPEDIA_RU_API_URL = "https://ru.wikipedia.org/w/api.php";
 const WIKIPEDIA_EN_API_URL = "https://en.wikipedia.org/w/api.php";
 
 const pendingEnrichmentByEntityId = new Map();
-const pendingRepairKey = "repair";
+const pendingRepairByCategory = new Map();
 
 const COVER_CONFIDENCE = {
   tmdb_details: 1,
   tmdb_find_imdb: 0.98,
   tmdb_search_original_year: 0.9,
-  wikidata: 0.7,
-  openlibrary: 0.65,
+  wikidata: 0.72,
+  openlibrary: 0.68,
   wikipedia: 0.55,
   unknown: 0.2
 };
@@ -68,9 +68,28 @@ function hasUsefulCover(value = "") {
   return /^https?:\/\//i.test(cover) || cover.startsWith("/");
 }
 
+function getMissingFields(entity = {}) {
+  const missing = [];
+
+  if (!hasUsefulCover(entity.cover_url)) missing.push("cover_url");
+  if (!hasUsefulText(entity.description_ru)) missing.push("description_ru");
+  if (!hasUsefulText(entity.description_en)) missing.push("description_en");
+
+  return missing;
+}
+
+function getMetadataStatus(entity = {}) {
+  const missing = getMissingFields(entity);
+
+  if (!missing.length) return "ready";
+  if (missing.length >= 3) return "needs_enrichment";
+  return "partial";
+}
+
 function getCurrentCoverConfidence(entity = {}) {
   const meta = normalizeJson(entity.meta, {});
   const value = Number(meta.cover_confidence);
+
   if (Number.isFinite(value)) return value;
   return hasUsefulCover(entity.cover_url) ? COVER_CONFIDENCE.unknown : 0;
 }
@@ -93,41 +112,6 @@ function getPatchCoverConfidence(patch = {}) {
   return COVER_CONFIDENCE.unknown;
 }
 
-function getMissingFields(entity = {}) {
-  const missing = [];
-
-  if (!hasUsefulCover(entity.cover_url)) missing.push("cover_url");
-  if (!hasUsefulText(entity.description_ru)) missing.push("description_ru");
-  if (!hasUsefulText(entity.description_en)) missing.push("description_en");
-
-  return missing;
-}
-
-function getMetadataStatus(entity = {}) {
-  const missing = getMissingFields(entity);
-
-  if (!missing.length) return "ready";
-  if (missing.length >= 3) return "needs_enrichment";
-  return "partial";
-}
-
-function buildQuality(entity = {}, sources = [], extra = {}) {
-  const missing = getMissingFields(entity);
-  const meta = normalizeJson(entity.meta, {});
-
-  return {
-    has_cover: hasUsefulCover(entity.cover_url),
-    has_description_ru: hasUsefulText(entity.description_ru),
-    has_description_en: hasUsefulText(entity.description_en),
-    cover_source: cleanText(meta.cover_source || ""),
-    cover_confidence: Number(meta.cover_confidence || 0),
-    missing_fields: missing,
-    sources: uniqueArray(sources.map(cleanText).filter(Boolean)),
-    updated_at: new Date().toISOString(),
-    ...extra
-  };
-}
-
 function pickBetterText(current = "", incoming = "") {
   const left = cleanText(current);
   const right = cleanText(incoming);
@@ -135,7 +119,8 @@ function pickBetterText(current = "", incoming = "") {
   if (!left) return right;
   if (!right) return left;
 
-  return right.length > left.length ? right : left;
+  if (right.length >= left.length + 24) return right;
+  return left;
 }
 
 function pickBetterCover(entity = {}, patch = {}) {
@@ -148,47 +133,41 @@ function pickBetterCover(entity = {}, patch = {}) {
   const currentConfidence = getCurrentCoverConfidence(entity);
   const incomingConfidence = getPatchCoverConfidence(patch);
 
-  return incomingConfidence >= currentConfidence ? incomingCover : currentCover;
-}
-
-function mergeExternalIds(current = {}, incoming = {}) {
-  return {
-    ...normalizeJson(current, {}),
-    ...normalizeJson(incoming, {})
-  };
-}
-
-function mergeMeta(current = {}, incoming = {}) {
-  return {
-    ...normalizeJson(current, {}),
-    ...normalizeJson(incoming, {})
-  };
-}
-
-function buildCoverMeta(entity = {}, patch = {}) {
-  const currentCover = cleanText(entity.cover_url);
-  const incomingCover = cleanText(patch.cover_url);
-  const currentConfidence = getCurrentCoverConfidence(entity);
-  const incomingConfidence = getPatchCoverConfidence(patch);
-
-  if (hasUsefulCover(incomingCover) && (!hasUsefulCover(currentCover) || incomingConfidence >= currentConfidence)) {
-    return {
-      cover_source: cleanText(patch.__cover_source || patch.__source || "unknown"),
-      cover_confidence: incomingConfidence,
-      cover_updated_at: new Date().toISOString()
-    };
-  }
-
-  return {};
+  return incomingConfidence > currentConfidence ? incomingCover : currentCover;
 }
 
 function mergeEntityMetadata(entity = {}, patch = {}) {
-  const coverMeta = buildCoverMeta(entity, patch);
-  const externalIds = mergeExternalIds(entity.external_ids, patch.external_ids);
-  const meta = mergeMeta(
-    mergeMeta(entity.meta, patch.meta),
-    coverMeta
-  );
+  const currentMeta = normalizeJson(entity.meta, {});
+  const patchMeta = normalizeJson(patch.meta, {});
+  const externalIds = {
+    ...normalizeJson(entity.external_ids, {}),
+    ...normalizeJson(patch.external_ids, {})
+  };
+
+  const currentCover = cleanText(entity.cover_url);
+  const incomingCover = cleanText(patch.cover_url);
+  const incomingConfidence = getPatchCoverConfidence(patch);
+  const currentConfidence = getCurrentCoverConfidence(entity);
+
+  const shouldUseIncomingCover =
+    hasUsefulCover(incomingCover) &&
+    (!hasUsefulCover(currentCover) || incomingConfidence > currentConfidence);
+
+  const meta = {
+    ...currentMeta,
+    ...patchMeta,
+    metadata_status: getMetadataStatus({
+      ...entity,
+      ...patch
+    }),
+    metadata_checked_at: new Date().toISOString()
+  };
+
+  if (shouldUseIncomingCover) {
+    meta.cover_source = cleanText(patch.__cover_source || patch.__source || "unknown");
+    meta.cover_confidence = incomingConfidence;
+    meta.cover_updated_at = new Date().toISOString();
+  }
 
   return {
     ...entity,
@@ -200,7 +179,7 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
 
     year: normalizeYear(entity.year) || normalizeYear(patch.year),
 
-    cover_url: pickBetterCover(entity, patch),
+    cover_url: shouldUseIncomingCover ? incomingCover : currentCover,
 
     description_ru: pickBetterText(entity.description_ru, patch.description_ru),
     description_en: pickBetterText(entity.description_en, patch.description_en),
@@ -208,81 +187,6 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
     external_ids: externalIds,
     meta
   };
-}
-
-function isValidMediaEntity(entity = {}) {
-  const category = normalizeCategory(entity.category);
-
-  if (!category) return false;
-
-  if (category !== "movies" && category !== "series") return true;
-
-  const title =
-    cleanText(entity.title_primary) ||
-    cleanText(entity.title_ru) ||
-    cleanText(entity.title_en) ||
-    cleanText(entity.original_title);
-
-  if (!title) return false;
-
-  const ids = normalizeJson(entity.external_ids, {});
-  const hasTmdb = Boolean(cleanText(ids.tmdb));
-  const hasImdb = Boolean(cleanText(ids.imdb));
-  const hasYear = Boolean(normalizeYear(entity.year));
-  const canonicalKey = cleanLower(entity.canonical_key);
-
-  if (canonicalKey.includes(":character:")) return false;
-  if (canonicalKey.includes(":person:")) return false;
-  if (canonicalKey.includes(":actor:")) return false;
-  if (canonicalKey.includes(":creator:")) return false;
-
-  const meta = normalizeJson(entity.meta, {});
-  const typeHints = [
-    cleanText(meta.type),
-    cleanText(meta.entity_type),
-    cleanText(meta.wikidata_type),
-    cleanText(meta.instance_of),
-    cleanText(meta.description),
-    cleanText(entity.description_ru),
-    cleanText(entity.description_en)
-  ].join(" ").toLowerCase();
-
-  const blockedHints = [
-    "fictional character",
-    "персонаж",
-    "character",
-    "superhero",
-    "супергерой",
-    "actor",
-    "актер",
-    "актёр",
-    "person",
-    "human",
-    "человек"
-  ];
-
-  if (blockedHints.some((hint) => typeHints.includes(hint))) return false;
-
-  if (!hasTmdb && !hasImdb && !hasYear) return false;
-
-  return true;
-}
-
-function needsAuthoritativeMovieCoverRepair(entity = {}) {
-  const category = normalizeCategory(entity.category);
-  if (category !== "movies" && category !== "series") return false;
-
-  const ids = normalizeJson(entity.external_ids, {});
-  const hasTmdb = Boolean(cleanText(ids.tmdb));
-  if (!hasTmdb) return false;
-
-  const meta = normalizeJson(entity.meta, {});
-  const coverSource = cleanText(meta.cover_source);
-  const coverConfidence = Number(meta.cover_confidence || 0);
-
-  return !hasUsefulCover(entity.cover_url) ||
-    coverSource !== "tmdb_details" ||
-    coverConfidence < COVER_CONFIDENCE.tmdb_details;
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
@@ -305,6 +209,32 @@ async function fetchJson(url, options = {}) {
   }
 
   return response.json();
+}
+
+function getYearFromDate(value = "") {
+  const raw = cleanText(value);
+  if (!raw) return null;
+
+  const year = Number(raw.slice(0, 4));
+  return Number.isFinite(year) ? year : null;
+}
+
+function buildTmdbCover(path = "") {
+  const clean = cleanText(path);
+  return clean ? `${TMDB_IMAGE_BASE_URL}${clean}` : "";
+}
+
+function getTmdbType(entity = {}) {
+  const category = normalizeCategory(entity.category);
+  const meta = normalizeJson(entity.meta, {});
+  const canonicalKey = cleanLower(entity.canonical_key);
+
+  if (meta.tmdb_type === "tv") return "tv";
+  if (meta.tmdb_type === "movie") return "movie";
+  if (category === "series") return "tv";
+  if (canonicalKey.includes(":tv:")) return "tv";
+
+  return "movie";
 }
 
 function getTitleCandidates(entity = {}) {
@@ -332,48 +262,6 @@ function getLocalizedTitleCandidates(entity = {}) {
   ].map(cleanText).filter(Boolean));
 }
 
-function getBestTitle(entity = {}) {
-  return (
-    cleanText(entity.original_title) ||
-    cleanText(entity.title_en) ||
-    cleanText(entity.title_primary) ||
-    cleanText(entity.title_ru) ||
-    cleanText(entity.title) ||
-    ""
-  );
-}
-
-function getTmdbType(entity = {}) {
-  const category = normalizeCategory(entity.category);
-  const meta = normalizeJson(entity.meta, {});
-  const canonicalKey = cleanLower(entity.canonical_key);
-
-  if (meta.tmdb_type === "tv") return "tv";
-  if (meta.tmdb_type === "movie") return "movie";
-  if (category === "series") return "tv";
-  if (canonicalKey.includes(":tv:")) return "tv";
-  return "movie";
-}
-
-function buildTmdbCover(path = "") {
-  const clean = cleanText(path);
-  return clean ? `${TMDB_IMAGE_BASE_URL}${clean}` : "";
-}
-
-function getYearFromDate(value = "") {
-  const raw = cleanText(value);
-  if (!raw) return null;
-
-  const year = Number(raw.slice(0, 4));
-  return Number.isFinite(year) ? year : null;
-}
-
-function getTmdbResultYear(item = {}, type = "movie") {
-  return type === "tv"
-    ? getYearFromDate(item.first_air_date)
-    : getYearFromDate(item.release_date);
-}
-
 function normalizeCompareTitle(value = "") {
   return cleanLower(value)
     .replace(/ё/g, "е")
@@ -395,13 +283,10 @@ function getTmdbResultOriginalTitle(item = {}, type = "movie") {
     : cleanText(item.original_title || item.title);
 }
 
-function getCanonicalExternalIds(entity = {}) {
-  const ids = normalizeJson(entity.external_ids, {});
-  return {
-    tmdb: cleanText(ids.tmdb),
-    imdb: cleanText(ids.imdb),
-    wikidata: cleanText(ids.wikidata)
-  };
+function getTmdbResultYear(item = {}, type = "movie") {
+  return type === "tv"
+    ? getYearFromDate(item.first_air_date)
+    : getYearFromDate(item.release_date);
 }
 
 function hasStrongTitleMatch(item = {}, entity = {}, type = "movie") {
@@ -542,6 +427,7 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
     description_ru: language === "ru" ? cleanText(payload.overview) : "",
     description_en: language === "en" ? cleanText(payload.overview) : "",
     external_ids: {
+      ...ids,
       tmdb: tmdbId,
       imdb: cleanText(payload?.external_ids?.imdb_id) || ids.imdb || null
     },
@@ -551,8 +437,6 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
       tmdb_vote_average: payload.vote_average || null,
       tmdb_vote_count: payload.vote_count || null,
       tmdb_popularity: payload.popularity || null,
-      tmdb_homepage: payload.homepage || "",
-      tmdb_status: payload.status || "",
       tmdb_original_language: payload.original_language || "",
       cover_source: "tmdb_details",
       cover_confidence: COVER_CONFIDENCE.tmdb_details
@@ -563,7 +447,7 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
 }
 
 async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
-  const ids = getCanonicalExternalIds(entity);
+  const ids = normalizeJson(entity.external_ids, {});
 
   if (!ids.imdb || !TMDB_API_KEY) return null;
 
@@ -590,7 +474,7 @@ async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
     {
       ...entity,
       external_ids: {
-        ...normalizeJson(entity.external_ids, {}),
+        ...ids,
         tmdb: String(result.id)
       }
     },
@@ -660,10 +544,10 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
   };
 }
 
-async function fetchTmdbBySearch(entity = {}, language = "ru") {
+async function fetchTmdbPatch(entity = {}, language = "ru") {
   if (!TMDB_API_KEY) return null;
 
-  const ids = getCanonicalExternalIds(entity);
+  const ids = normalizeJson(entity.external_ids, {});
 
   if (ids.tmdb) return fetchTmdbDetails(entity, language);
 
@@ -700,12 +584,80 @@ async function fetchTmdbBySearch(entity = {}, language = "ru") {
 
         if (patch?.cover_url || patch?.description_ru || patch?.description_en) return patch;
       } catch (error) {
-        console.warn(`TMDB weak localized search skipped for "${query}":`, error);
+        console.warn(`TMDB weak search skipped for "${query}":`, error);
       }
     }
   }
 
   return null;
+}
+
+function openLibraryCoverUrlFromId(coverId) {
+  return coverId ? `${OPEN_LIBRARY_COVER_BASE_URL}/${coverId}-L.jpg` : "";
+}
+
+function normalizeOpenLibraryWork(value = "") {
+  return cleanText(value).replace("/works/", "");
+}
+
+async function fetchOpenLibraryPatch(entity = {}) {
+  const ids = normalizeJson(entity.external_ids, {});
+  let workId = normalizeOpenLibraryWork(ids.openlibrary_work || ids.openlibrary || "");
+
+  if (!workId) {
+    const title = getTitleCandidates(entity)[0];
+    if (!title) return null;
+
+    const url = new URL(`${OPEN_LIBRARY_BASE_URL}/search.json`);
+    url.searchParams.set("title", title);
+    url.searchParams.set("limit", "5");
+
+    const searchPayload = await fetchJson(url.toString(), {
+      headers: {
+        Accept: "application/json"
+      }
+    }).catch(() => null);
+
+    const first = safeArray(searchPayload?.docs).find((item) => item?.key || item?.cover_i);
+    workId = normalizeOpenLibraryWork(first?.key || "");
+  }
+
+  if (!workId) return null;
+
+  const payload = await fetchJson(`${OPEN_LIBRARY_BASE_URL}/works/${encodeURIComponent(workId)}.json`, {
+    headers: {
+      Accept: "application/json"
+    }
+  }).catch(() => null);
+
+  if (!payload) return null;
+
+  const description =
+    typeof payload.description === "string"
+      ? payload.description
+      : cleanText(payload.description?.value);
+
+  const title = cleanText(payload.title);
+  const coverId = safeArray(payload.covers)[0];
+
+  return {
+    title_primary: title,
+    title_en: title,
+    original_title: title,
+    cover_url: openLibraryCoverUrlFromId(coverId),
+    description_en: description,
+    external_ids: {
+      ...ids,
+      openlibrary_work: workId
+    },
+    meta: {
+      openlibrary_loaded: true,
+      cover_source: "openlibrary",
+      cover_confidence: COVER_CONFIDENCE.openlibrary
+    },
+    __source: "openlibrary",
+    __cover_source: "openlibrary"
+  };
 }
 
 function wikimediaFileUrl(filename = "") {
@@ -724,20 +676,6 @@ function getClaimValue(entity = {}, property = "") {
   return getClaimValues(entity, property)[0] || null;
 }
 
-function getEntityIdFromClaimValue(value) {
-  if (!value || typeof value !== "object") return "";
-  return value.id || (value["entity-type"] === "item" && value["numeric-id"] ? `Q${value["numeric-id"]}` : "");
-}
-
-function getClaimEntityIds(entity = {}, properties = []) {
-  return uniqueArray(
-    safeArray(properties)
-      .flatMap((property) => getClaimValues(entity, property))
-      .map(getEntityIdFromClaimValue)
-      .filter(Boolean)
-  );
-}
-
 function getYearFromWikidataTime(value) {
   const time = cleanText(value?.time);
   if (!time) return null;
@@ -747,6 +685,32 @@ function getYearFromWikidataTime(value) {
 
   const year = Number(match[1]);
   return Number.isFinite(year) ? year : null;
+}
+
+async function searchWikidataIds(query = "", language = "ru") {
+  const cleanQuery = cleanText(query);
+  if (!cleanQuery) return [];
+
+  const url = new URL(WIKIDATA_API_URL);
+
+  url.searchParams.set("action", "wbsearchentities");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("language", language);
+  url.searchParams.set("uselang", language);
+  url.searchParams.set("type", "item");
+  url.searchParams.set("origin", "*");
+  url.searchParams.set("limit", "6");
+  url.searchParams.set("search", cleanQuery);
+
+  const payload = await fetchJson(url.toString(), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  return safeArray(payload?.search)
+    .map((item) => cleanText(item?.id))
+    .filter(Boolean);
 }
 
 async function fetchWikidataEntities(ids = []) {
@@ -769,32 +733,6 @@ async function fetchWikidataEntities(ids = []) {
   });
 
   return Object.values(payload?.entities || {}).filter((item) => item?.id && item.id !== "-1");
-}
-
-async function searchWikidataIds(query = "", language = "ru") {
-  const cleanQuery = cleanText(query);
-  if (!cleanQuery) return [];
-
-  const url = new URL(WIKIDATA_API_URL);
-
-  url.searchParams.set("action", "wbsearchentities");
-  url.searchParams.set("format", "json");
-  url.searchParams.set("language", language);
-  url.searchParams.set("uselang", language);
-  url.searchParams.set("type", "item");
-  url.searchParams.set("origin", "*");
-  url.searchParams.set("limit", "8");
-  url.searchParams.set("search", cleanQuery);
-
-  const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  return safeArray(payload?.search)
-    .map((item) => cleanText(item?.id))
-    .filter(Boolean);
 }
 
 async function fetchWikidataPatch(entity = {}) {
@@ -830,11 +768,6 @@ async function fetchWikidataPatch(entity = {}) {
   const publicationDate = getClaimValue(wikidataEntity, "P577");
   const inceptionDate = getClaimValue(wikidataEntity, "P571");
 
-  const previousIds = getClaimEntityIds(wikidataEntity, ["P155"]);
-  const nextIds = getClaimEntityIds(wikidataEntity, ["P156"]);
-  const seriesIds = getClaimEntityIds(wikidataEntity, ["P179", "P361"]);
-  const basedOnIds = getClaimEntityIds(wikidataEntity, ["P144"]);
-
   return {
     title_primary: titleRu || titleEn,
     title_ru: titleRu,
@@ -845,17 +778,12 @@ async function fetchWikidataPatch(entity = {}) {
     description_ru: descriptionRu,
     description_en: descriptionEn,
     external_ids: {
+      ...ids,
       wikidata: wikidataId
     },
     meta: {
       wikidata_loaded: true,
       wikidata_id: wikidataId,
-      wikidata_relations: {
-        previous: previousIds,
-        next: nextIds,
-        series: seriesIds,
-        based_on: basedOnIds
-      },
       cover_source: "wikidata",
       cover_confidence: COVER_CONFIDENCE.wikidata
     },
@@ -908,357 +836,72 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
       });
 
       const page = Object.values(summaryPayload?.query?.pages || {})[0];
-      const extract = cleanText(page?.extract);
-      const cover = cleanText(page?.original?.source);
+      if (!page) continue;
 
-      if (!extract && !cover) continue;
+      const extract = cleanText(page.extract);
+      const image = cleanText(page?.original?.source);
+
+      if (!extract && !image) continue;
 
       return {
-        cover_url: cover,
-        description_ru: language === "ru" ? extract : "",
-        description_en: language === "en" ? extract : "",
+        title_primary: cleanText(page.title),
+        [language === "en" ? "description_en" : "description_ru"]: extract,
+        cover_url: image,
         meta: {
-          [`wikipedia_${language}_title`]: pageTitle,
           [`wikipedia_${language}_loaded`]: true,
-          cover_source: `wikipedia_${language}`,
+          [`wikipedia_${language}_title`]: cleanText(page.title),
+          cover_source: "wikipedia",
           cover_confidence: COVER_CONFIDENCE.wikipedia
         },
         __source: `wikipedia_${language}`,
-        __cover_source: `wikipedia_${language}`
+        __cover_source: "wikipedia"
       };
     } catch (error) {
-      console.warn(`Wikipedia ${language} summary skipped:`, error);
+      console.warn(`Wikipedia ${language} summary skipped for "${title}":`, error);
     }
   }
 
   return null;
 }
 
-function openLibraryCoverUrlFromId(coverId) {
-  const id = cleanText(coverId);
-  return id ? `${OPEN_LIBRARY_COVER_BASE_URL}/${id}-L.jpg` : "";
-}
-
-async function fetchOpenLibraryWork(entity = {}) {
-  const ids = normalizeJson(entity.external_ids, {});
-  let workId = cleanText(ids.openlibrary_work).replace("/works/", "");
-
-  if (!workId) {
-    const title = getBestTitle(entity);
-    if (!title) return null;
-
-    const searchUrl = new URL(`${OPEN_LIBRARY_BASE_URL}/search.json`);
-
-    searchUrl.searchParams.set("title", title);
-    searchUrl.searchParams.set("limit", "1");
-    searchUrl.searchParams.set("fields", "key,title,author_name,first_publish_year,cover_i");
-
-    const searchPayload = await fetchJson(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json"
-      }
-    });
-
-    const doc = safeArray(searchPayload?.docs)[0];
-    workId = cleanText(doc?.key).replace("/works/", "");
-
-    if (!workId && doc?.cover_i) {
-      return {
-        cover_url: openLibraryCoverUrlFromId(doc.cover_i),
-        year: normalizeYear(doc.first_publish_year),
-        external_ids: {},
-        meta: {
-          openlibrary_search_loaded: true,
-          cover_source: "openlibrary_search",
-          cover_confidence: COVER_CONFIDENCE.openlibrary
-        },
-        __source: "openlibrary_search",
-        __cover_source: "openlibrary_search"
-      };
-    }
-  }
-
-  if (!workId) return null;
-
-  const workPayload = await fetchJson(`${OPEN_LIBRARY_BASE_URL}/works/${encodeURIComponent(workId)}.json`, {
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  let description = "";
-
-  if (typeof workPayload.description === "string") {
-    description = cleanText(workPayload.description);
-  } else if (workPayload.description && typeof workPayload.description === "object") {
-    description = cleanText(workPayload.description.value);
-  }
-
-  const coverId = safeArray(workPayload.covers)[0];
-
-  return {
-    title_primary: cleanText(workPayload.title),
-    cover_url: openLibraryCoverUrlFromId(coverId),
-    description_en: description,
-    external_ids: {
-      openlibrary_work: workId
-    },
-    meta: {
-      openlibrary_work: workId,
-      openlibrary_loaded: true,
-      cover_source: "openlibrary",
-      cover_confidence: COVER_CONFIDENCE.openlibrary
-    },
-    __source: "openlibrary",
-    __cover_source: "openlibrary"
-  };
-}
-
-async function fetchAniListDetails(entity = {}) {
-  const ids = normalizeJson(entity.external_ids, {});
-  const anilistId = cleanText(ids.anilist);
-  const title = getBestTitle(entity);
-
-  if (!anilistId && !title) return null;
-
-  const graphqlQuery = `
-    query EnrichMedia($id: Int, $search: String, $type: MediaType) {
-      Media(id: $id, search: $search, type: $type) {
-        id
-        idMal
-        type
-        format
-        status
-        episodes
-        chapters
-        volumes
-        genres
-        averageScore
-        popularity
-        siteUrl
-        title {
-          romaji
-          english
-          native
-        }
-        synonyms
-        description(asHtml: false)
-        startDate {
-          year
-          month
-          day
-        }
-        coverImage {
-          extraLarge
-          large
-          medium
-        }
-      }
-    }
-  `;
-
-  const category = normalizeCategory(entity.category);
-  const mediaType = category === "manga" ? "MANGA" : "ANIME";
-
-  const response = await fetchWithTimeout(API_ENDPOINTS.ANILIST, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify({
-      query: graphqlQuery,
-      variables: {
-        id: anilistId ? Number(anilistId) : null,
-        search: anilistId ? null : title,
-        type: mediaType
-      }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`AniList details failed: ${response.status}`);
-  }
-
-  const payload = await response.json();
-
-  if (payload?.errors?.length) {
-    throw new Error(`AniList GraphQL error: ${payload.errors[0]?.message || "unknown"}`);
-  }
-
-  const media = payload?.data?.Media;
-  if (!media?.id) return null;
-
-  const cover =
-    cleanText(media?.coverImage?.extraLarge) ||
-    cleanText(media?.coverImage?.large) ||
-    cleanText(media?.coverImage?.medium);
-
-  const description = cleanText(media.description)
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return {
-    title_primary:
-      cleanText(media?.title?.native) ||
-      cleanText(media?.title?.english) ||
-      cleanText(media?.title?.romaji),
-    title_en:
-      cleanText(media?.title?.english) ||
-      cleanText(media?.title?.romaji),
-    original_title:
-      cleanText(media?.title?.romaji) ||
-      cleanText(media?.title?.native),
-    year: normalizeYear(media?.startDate?.year),
-    cover_url: cover,
-    description_en: description,
-    external_ids: {
-      anilist: String(media.id),
-      mal: media.idMal ? String(media.idMal) : null
-    },
-    meta: {
-      anilist_loaded: true,
-      anilist_format: media.format || "",
-      anilist_status: media.status || "",
-      anilist_genres: safeArray(media.genres),
-      anilist_synonyms: safeArray(media.synonyms),
-      anilist_site_url: media.siteUrl || "",
-      anilist_average_score: media.averageScore || null,
-      anilist_popularity: media.popularity || null,
-      cover_source: "anilist",
-      cover_confidence: 0.95
-    },
-    __source: "anilist",
-    __cover_source: "anilist"
-  };
-}
-
-async function fetchJikanDetails(entity = {}) {
-  const ids = normalizeJson(entity.external_ids, {});
-  const malId = cleanText(ids.mal);
-
-  if (!malId) return null;
-
-  const category = normalizeCategory(entity.category);
-  const endpointType = category === "manga" ? "manga" : "anime";
-
-  const payload = await fetchJson(`${API_ENDPOINTS.JIKAN}/${endpointType}/${encodeURIComponent(malId)}`, {
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  const item = payload?.data;
-  if (!item?.mal_id) return null;
-
-  const cover =
-    cleanText(item?.images?.jpg?.large_image_url) ||
-    cleanText(item?.images?.jpg?.image_url) ||
-    cleanText(item?.images?.webp?.large_image_url) ||
-    cleanText(item?.images?.webp?.image_url);
-
-  const year =
-    normalizeYear(item?.year) ||
-    normalizeYear(item?.aired?.prop?.from?.year) ||
-    normalizeYear(item?.published?.prop?.from?.year);
-
-  return {
-    title_primary: cleanText(item.title),
-    title_en: cleanText(item.title_english || item.title),
-    original_title: cleanText(item.title_japanese || item.title),
-    year,
-    cover_url: cover,
-    description_en: cleanText(item.synopsis),
-    external_ids: {
-      mal: String(item.mal_id)
-    },
-    meta: {
-      jikan_loaded: true,
-      jikan_url: cleanText(item.url),
-      jikan_type: cleanText(item.type),
-      jikan_status: cleanText(item.status),
-      jikan_genres: safeArray(item.genres).map((genre) => genre?.name).filter(Boolean),
-      cover_source: "jikan",
-      cover_confidence: 0.9
-    },
-    __source: "jikan",
-    __cover_source: "jikan"
-  };
-}
-
-async function runPatchPipeline(entity = {}) {
+async function collectPatches(entity = {}) {
   const category = normalizeCategory(entity.category);
   const patches = [];
 
-  async function tryPatch(fn) {
-    try {
-      const patch = await fn();
-      if (patch) patches.push(patch);
-    } catch (error) {
-      console.warn("metadata enrichment source skipped:", error);
-    }
-  }
-
   if (category === "movies" || category === "series") {
-    await tryPatch(() => fetchTmdbDetails(entity, "ru"));
-    await tryPatch(() => fetchTmdbDetails(entity, "en"));
-    await tryPatch(() => fetchTmdbFindByImdb(entity, "ru"));
-    await tryPatch(() => fetchTmdbFindByImdb(entity, "en"));
-    await tryPatch(() => fetchTmdbBySearch(entity, "ru"));
-    await tryPatch(() => fetchTmdbBySearch(entity, "en"));
-    await tryPatch(() => fetchWikidataPatch(entity));
-    await tryPatch(() => fetchWikipediaSummary(entity, "ru"));
-    await tryPatch(() => fetchWikipediaSummary(entity, "en"));
+    patches.push(await fetchTmdbPatch(entity, "ru").catch((error) => {
+      console.warn("TMDB RU patch skipped:", error);
+      return null;
+    }));
+
+    patches.push(await fetchTmdbPatch(entity, "en").catch((error) => {
+      console.warn("TMDB EN patch skipped:", error);
+      return null;
+    }));
   }
 
   if (category === "books") {
-    await tryPatch(() => fetchWikidataPatch(entity));
-    await tryPatch(() => fetchOpenLibraryWork(entity));
-    await tryPatch(() => fetchWikipediaSummary(entity, "ru"));
-    await tryPatch(() => fetchWikipediaSummary(entity, "en"));
+    patches.push(await fetchOpenLibraryPatch(entity).catch((error) => {
+      console.warn("Open Library patch skipped:", error);
+      return null;
+    }));
   }
 
-  if (category === "anime" || category === "manga") {
-    await tryPatch(() => fetchAniListDetails(entity));
-    await tryPatch(() => fetchJikanDetails(entity));
-    await tryPatch(() => fetchWikidataPatch(entity));
-    await tryPatch(() => fetchWikipediaSummary(entity, "ru"));
-    await tryPatch(() => fetchWikipediaSummary(entity, "en"));
-  }
+  patches.push(await fetchWikidataPatch(entity).catch((error) => {
+    console.warn("Wikidata patch skipped:", error);
+    return null;
+  }));
 
-  return patches;
+  patches.push(await fetchWikipediaSummary(entity, "ru").catch(() => null));
+  patches.push(await fetchWikipediaSummary(entity, "en").catch(() => null));
+
+  return patches.filter(Boolean);
 }
 
-async function fetchEntityById(entityId) {
-  const id = Number(entityId || 0);
-  if (!id) return null;
+function buildUpdatePayload(entity = {}) {
+  const meta = normalizeJson(entity.meta, {});
 
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select("*")
-      .eq("id", id)
-      .maybeSingle(),
-    "Загрузка карточки для обогащения",
-    READ_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-  return data || null;
-}
-
-async function updateEntityMetadata(entityId, entity, sources = []) {
-  const id = Number(entityId || 0);
-  if (!id) return null;
-
-  const missing = getMissingFields(entity);
-  const status = missing.length ? "partial" : "ready";
-  const quality = buildQuality(entity, sources);
-
-  const payload = {
+  return {
     title_primary: cleanText(entity.title_primary),
     title_ru: cleanText(entity.title_ru),
     title_en: cleanText(entity.title_en),
@@ -1268,245 +911,183 @@ async function updateEntityMetadata(entityId, entity, sources = []) {
     description_ru: cleanText(entity.description_ru),
     description_en: cleanText(entity.description_en),
     external_ids: normalizeJson(entity.external_ids, {}),
-    meta: normalizeJson(entity.meta, {}),
-    metadata_status: status,
-    metadata_quality: quality,
-    missing_fields: missing,
-    last_enriched_at: new Date().toISOString()
+    meta: {
+      ...meta,
+      metadata_status: getMetadataStatus(entity),
+      metadata_updated_at: new Date().toISOString()
+    }
   };
+}
+
+async function saveEntityMetadata(entity = {}) {
+  if (!entity?.id) return null;
 
   const supabase = getSupabaseClient();
+  const payload = buildUpdatePayload(entity);
 
   const { data, error } = await withTimeout(
     supabase
       .from(MEDIA_ENTITIES_TABLE)
       .update(payload)
-      .eq("id", id)
+      .eq("id", entity.id)
       .select("*")
       .maybeSingle(),
-    "Обновление метаданных карточки",
+    "Сохранение метаданных",
     WRITE_TIMEOUT_MS
   );
 
   if (error) throw error;
-  return data || null;
-}
-
-async function markEntityMetadataStatus(entityId, entity = {}, extraQuality = {}) {
-  const id = Number(entityId || 0);
-  if (!id) return null;
-
-  const missing = getMissingFields(entity);
-  const status = getMetadataStatus(entity);
-  const quality = buildQuality(entity, [], extraQuality);
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .update({
-        metadata_status: status,
-        metadata_quality: quality,
-        missing_fields: missing
-      })
-      .eq("id", id)
-      .select("*")
-      .maybeSingle(),
-    "Обновление статуса метаданных",
-    WRITE_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-  return data || null;
-}
-
-async function markInvalidMediaEntity(entity = {}) {
-  const id = Number(entity?.id || 0);
-  if (!id) return entity || null;
-
-  const supabase = getSupabaseClient();
-
-  const quality = buildQuality(entity, [], {
-    skipped: true,
-    skip_reason: "invalid_media_entity"
-  });
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .update({
-        metadata_status: "skipped",
-        metadata_quality: quality,
-        missing_fields: getMissingFields(entity),
-        last_enriched_at: new Date().toISOString()
-      })
-      .eq("id", id)
-      .select("*")
-      .maybeSingle(),
-    "Пропуск некорректной медиа-сущности",
-    WRITE_TIMEOUT_MS
-  );
-
-  if (error) {
-    console.warn("invalid media entity mark skipped:", error);
-    return entity;
-  }
 
   return data || entity;
 }
 
-export function analyzeEntityMetadata(entity = {}) {
-  const missing = getMissingFields(entity);
-
-  return {
-    status: getMetadataStatus(entity),
-    missing_fields: missing,
-    quality: buildQuality(entity, [])
-  };
-}
-
 export function shouldEnrichEntity(entity = {}) {
-  if (!entity || typeof entity !== "object") return false;
-  if (!isValidMediaEntity(entity)) return false;
+  if (!entity?.id) return false;
 
-  if (needsAuthoritativeMovieCoverRepair(entity)) return true;
+  const category = normalizeCategory(entity.category);
+  if (!category) return false;
 
-  const missing = getMissingFields(entity);
-  if (missing.length) return true;
+  const meta = normalizeJson(entity.meta, {});
+  const checkedAt = meta.metadata_checked_at || meta.metadata_updated_at || "";
+  const checkedTime = checkedAt ? new Date(checkedAt).getTime() : 0;
 
-  const status = cleanText(entity.metadata_status);
-  return status === "needs_enrichment" || status === "partial";
+  if (checkedTime && Date.now() - checkedTime < 1000 * 60 * 60 * 6) {
+    return getMissingFields(entity).length > 0 && meta.metadata_status !== "ready";
+  }
+
+  return getMissingFields(entity).length > 0;
 }
 
-export async function enrichMediaEntity(inputEntityOrId) {
-  const inputIsId =
-    typeof inputEntityOrId === "number" ||
-    (typeof inputEntityOrId === "string" && /^\d+$/.test(inputEntityOrId));
-
-  const entity = inputIsId
-    ? await fetchEntityById(inputEntityOrId)
-    : inputEntityOrId;
-
-  if (!entity?.id) return null;
-
-  if (!isValidMediaEntity(entity)) {
-    return markInvalidMediaEntity(entity);
-  }
+export async function enrichMediaEntity(entity = {}) {
+  if (!entity?.id) return entity || null;
 
   if (!shouldEnrichEntity(entity)) {
-    return markEntityMetadataStatus(entity.id, entity).catch(() => entity);
+    return entity;
   }
 
-  const patches = await runPatchPipeline(entity);
+  const patches = await collectPatches(entity);
+
+  if (!patches.length) {
+    const next = {
+      ...entity,
+      meta: {
+        ...normalizeJson(entity.meta, {}),
+        metadata_status: getMetadataStatus(entity),
+        metadata_checked_at: new Date().toISOString(),
+        metadata_sources_checked: true
+      }
+    };
+
+    return saveEntityMetadata(next).catch(() => next);
+  }
 
   let merged = { ...entity };
-  const sources = [];
 
   patches.forEach((patch) => {
     merged = mergeEntityMetadata(merged, patch);
-    if (patch.__source) sources.push(patch.__source);
   });
 
-  return updateEntityMetadata(entity.id, merged, sources);
+  merged.meta = {
+    ...normalizeJson(merged.meta, {}),
+    metadata_status: getMetadataStatus(merged),
+    metadata_sources_checked: true,
+    metadata_checked_at: new Date().toISOString()
+  };
+
+  return saveEntityMetadata(merged);
 }
 
-export function enrichMediaEntityInBackground(inputEntityOrId) {
-  const entityId =
-    typeof inputEntityOrId === "object"
-      ? Number(inputEntityOrId?.id || 0)
-      : Number(inputEntityOrId || 0);
+export function enrichMediaEntityInBackground(entity = {}) {
+  if (!entity?.id) return;
 
-  if (!entityId) return;
+  const key = String(entity.id);
 
-  if (pendingEnrichmentByEntityId.has(entityId)) return;
+  if (pendingEnrichmentByEntityId.has(key)) {
+    return pendingEnrichmentByEntityId.get(key);
+  }
 
-  const promise = enrichMediaEntity(inputEntityOrId)
+  const promise = enrichMediaEntity(entity)
     .catch((error) => {
-      console.warn("metadata enrichment skipped:", error);
+      console.warn("Background metadata enrichment skipped:", error);
       return null;
     })
     .finally(() => {
-      pendingEnrichmentByEntityId.delete(entityId);
+      pendingEnrichmentByEntityId.delete(key);
     });
 
-  pendingEnrichmentByEntityId.set(entityId, promise);
-}
-
-export async function repairMissingMetadata({ limit = 25, category = "" } = {}) {
-  if (pendingEnrichmentByEntityId.has(pendingRepairKey)) {
-    return pendingEnrichmentByEntityId.get(pendingRepairKey);
-  }
-
-  const promise = (async () => {
-    const supabase = getSupabaseClient();
-    const cleanCategory = normalizeCategory(category);
-
-    let query = supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select("*")
-      .or(
-        [
-          "cover_url.is.null",
-          "cover_url.eq.",
-          "description_ru.is.null",
-          "description_ru.eq.",
-          "description_en.is.null",
-          "description_en.eq.",
-          "metadata_status.eq.needs_enrichment",
-          "metadata_status.eq.partial",
-          "metadata_status.eq.repair_cover"
-        ].join(",")
-      )
-      .order("updated_at", { ascending: true })
-      .limit(Math.max(1, Math.min(Number(limit) || 25, 50)));
-
-    if (cleanCategory) query = query.eq("category", cleanCategory);
-
-    const { data, error } = await withTimeout(
-      query,
-      "Поиск карточек без метаданных",
-      READ_TIMEOUT_MS
-    );
-
-    if (error) throw error;
-
-    const rows = safeArray(data);
-    const updated = [];
-
-    for (const row of rows) {
-      try {
-        const result = await enrichMediaEntity(row);
-        if (result?.id) updated.push(result);
-      } catch (error) {
-        console.warn("repairMissingMetadata item skipped:", error);
-      }
-    }
-
-    return updated;
-  })().finally(() => {
-    pendingEnrichmentByEntityId.delete(pendingRepairKey);
-  });
-
-  pendingEnrichmentByEntityId.set(pendingRepairKey, promise);
+  pendingEnrichmentByEntityId.set(key, promise);
   return promise;
 }
 
-export function repairMissingMetadataInBackground(options = {}) {
-  if (pendingEnrichmentByEntityId.has(pendingRepairKey)) return;
+async function fetchEntitiesNeedingRepair({ category = "", limit = 25 } = {}) {
+  const cleanCategory = normalizeCategory(category);
+  const cleanLimit = Math.max(1, Math.min(Number(limit) || 25, 50));
 
-  repairMissingMetadata(options).catch((error) => {
-    console.warn("repairMissingMetadata skipped:", error);
-  });
+  const supabase = getSupabaseClient();
+
+  let query = supabase
+    .from(MEDIA_ENTITIES_TABLE)
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(cleanLimit * 4);
+
+  if (cleanCategory) {
+    query = query.eq("category", cleanCategory);
+  }
+
+  const { data, error } = await withTimeout(
+    query,
+    "Поиск карточек для обогащения",
+    READ_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return safeArray(data)
+    .filter((entity) => shouldEnrichEntity(entity))
+    .slice(0, cleanLimit);
 }
 
-export function prepareEntityMetadataPatch(entity = {}) {
-  const status = getMetadataStatus(entity);
-  const missing = getMissingFields(entity);
+export async function repairMissingMetadata({ category = "", limit = 25 } = {}) {
+  const cleanCategory = normalizeCategory(category) || "all";
+  const key = `${cleanCategory}:${Number(limit) || 25}`;
 
-  return {
-    metadata_status: status,
-    metadata_quality: buildQuality(entity, []),
-    missing_fields: missing
-  };
+  if (pendingRepairByCategory.has(key)) {
+    return pendingRepairByCategory.get(key);
+  }
+
+  const promise = (async () => {
+    const entities = await fetchEntitiesNeedingRepair({ category, limit });
+    const results = [];
+
+    for (const entity of entities) {
+      try {
+        const updated = await enrichMediaEntity(entity);
+        results.push({
+          id: entity.id,
+          ok: true,
+          entity: updated
+        });
+      } catch (error) {
+        console.warn("Metadata repair item skipped:", error);
+        results.push({
+          id: entity.id,
+          ok: false,
+          error
+        });
+      }
+    }
+
+    return {
+      category: cleanCategory,
+      checked: entities.length,
+      repaired: results.filter((row) => row.ok).length,
+      results
+    };
+  })().finally(() => {
+    pendingRepairByCategory.delete(key);
+  });
+
+  pendingRepairByCategory.set(key, promise);
+  return promise;
 }
