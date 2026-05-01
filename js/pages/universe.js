@@ -24,23 +24,28 @@ function getUniverseKey(params = {}) {
   return params.id || params.key || params.universeKey || "";
 }
 
+function getEntityId(link = {}) {
+  return Number(link.entity_id || link.media_entities?.id || 0);
+}
+
+function getOrder(link = {}, mode = "release") {
+  if (mode === "story") {
+    return link.story_order ?? link.release_order ?? link.branch_order ?? 9999;
+  }
+
+  if (mode === "branch") {
+    return link.branch_order ?? link.story_order ?? link.release_order ?? 9999;
+  }
+
+  return link.release_order ?? link.story_order ?? link.branch_order ?? 9999;
+}
+
 function sortLinks(items = [], mode = "release") {
   return [...safeArray(items)].sort((a, b) => {
-    const aOrder =
-      mode === "story"
-        ? a.story_order ?? a.release_order ?? a.branch_order ?? 9999
-        : mode === "branch"
-          ? a.branch_order ?? a.story_order ?? a.release_order ?? 9999
-          : a.release_order ?? a.story_order ?? a.branch_order ?? 9999;
+    const aOrder = Number(getOrder(a, mode));
+    const bOrder = Number(getOrder(b, mode));
 
-    const bOrder =
-      mode === "story"
-        ? b.story_order ?? b.release_order ?? b.branch_order ?? 9999
-        : mode === "branch"
-          ? b.branch_order ?? b.story_order ?? b.release_order ?? 9999
-          : b.release_order ?? b.story_order ?? b.branch_order ?? 9999;
-
-    if (Number(aOrder) !== Number(bOrder)) return Number(aOrder) - Number(bOrder);
+    if (aOrder !== bOrder) return aOrder - bOrder;
 
     const ay = Number(a.media_entities?.year || 0);
     const by = Number(b.media_entities?.year || 0);
@@ -50,18 +55,62 @@ function sortLinks(items = [], mode = "release") {
   });
 }
 
+function mergeEntityLinks(links = []) {
+  const byEntity = new Map();
+
+  sortLinks(links, "release").forEach((link) => {
+    const entityId = getEntityId(link);
+    if (!entityId) return;
+
+    if (!byEntity.has(entityId)) {
+      byEntity.set(entityId, {
+        ...link,
+        all_links: [link],
+        branch_titles: link.branch_title ? [link.branch_title] : [],
+        continuity_titles: link.continuity_title ? [link.continuity_title] : []
+      });
+      return;
+    }
+
+    const existing = byEntity.get(entityId);
+
+    existing.all_links.push(link);
+
+    if (link.branch_title && !existing.branch_titles.includes(link.branch_title)) {
+      existing.branch_titles.push(link.branch_title);
+    }
+
+    if (link.continuity_title && !existing.continuity_titles.includes(link.continuity_title)) {
+      existing.continuity_titles.push(link.continuity_title);
+    }
+
+    const existingRelease = Number(existing.release_order ?? 9999);
+    const nextRelease = Number(link.release_order ?? 9999);
+    if (nextRelease < existingRelease) existing.release_order = link.release_order;
+
+    const existingStory = Number(existing.story_order ?? 9999);
+    const nextStory = Number(link.story_order ?? 9999);
+    if (nextStory < existingStory) existing.story_order = link.story_order;
+  });
+
+  return Array.from(byEntity.values());
+}
+
 function groupLinks(links = [], view = "branch") {
-  const map = new Map();
   const list = safeArray(links);
 
   if (view === "release" || view === "story") {
+    const uniqueItems = mergeEntityLinks(list);
+
     return [
       {
         title: view === "story" ? "Хронология событий" : "Порядок выхода",
-        items: sortLinks(list, view)
+        items: sortLinks(uniqueItems, view)
       }
     ];
   }
+
+  const map = new Map();
 
   list.forEach((link) => {
     let key = "Общее";
@@ -75,7 +124,7 @@ function groupLinks(links = [], view = "branch") {
 
   return Array.from(map.entries()).map(([title, items]) => ({
     title,
-    items: sortLinks(items, view === "branch" ? "branch" : "release")
+    items: sortLinks(mergeEntityLinks(items), view === "branch" ? "branch" : "release")
   }));
 }
 
@@ -100,6 +149,16 @@ function renderCover(entity = {}) {
 function renderItem(link, index) {
   const entity = link.media_entities || {};
   const title = resolveTitle(entity);
+
+  const branchTitles = safeArray(link.branch_titles?.length ? link.branch_titles : [link.branch_title])
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const continuityTitles = safeArray(
+    link.continuity_titles?.length ? link.continuity_titles : [link.continuity_title]
+  )
+    .filter(Boolean)
+    .slice(0, 2);
 
   return `
     <button
@@ -126,8 +185,8 @@ function renderItem(link, index) {
         <div class="item-badges">
           <span>${escapeHtml(getCategoryLabel(state.language, entity.category || ""))}</span>
           ${entity.year ? `<span>${escapeHtml(String(entity.year))}</span>` : ""}
-          ${link.branch_title ? `<span>${escapeHtml(link.branch_title)}</span>` : ""}
-          ${link.continuity_title ? `<span>${escapeHtml(link.continuity_title)}</span>` : ""}
+          ${branchTitles.map((branch) => `<span>${escapeHtml(branch)}</span>`).join("")}
+          ${continuityTitles.map((continuity) => `<span>${escapeHtml(continuity)}</span>`).join("")}
         </div>
       </div>
     </button>
@@ -513,16 +572,14 @@ function bindItems(root) {
 
 function renderPage(root, { universe, links, view }) {
   const groups = groupLinks(links, view);
+  const uniqueItems = mergeEntityLinks(links);
+
   const cover =
     universe.cover_url ||
-    safeArray(links).find((link) => link.media_entities?.cover_url)?.media_entities?.cover_url ||
+    safeArray(uniqueItems).find((link) => link.media_entities?.cover_url)?.media_entities?.cover_url ||
     "";
 
-  const entityCount = new Set(
-    safeArray(links)
-      .map((link) => Number(link.entity_id || link.media_entities?.id || 0))
-      .filter(Boolean)
-  ).size;
+  const entityCount = uniqueItems.length;
 
   const branchCount = new Set(
     safeArray(links)
