@@ -6,7 +6,43 @@ const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 const USER_MEDIA_TABLE = "user_media";
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 10000;
+const READ_TIMEOUT_MS = 8000;
+const WRITE_TIMEOUT_MS = 12000;
+
+const USER_MEDIA_LIGHT_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at
+`;
+
+const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
+  id,
+  user_id,
+  entity_id,
+  category,
+  status,
+  folder_name,
+  created_at,
+  updated_at,
+  media_entities (
+    id,
+    canonical_key,
+    category,
+    title_primary,
+    title_ru,
+    title_en,
+    original_title,
+    year,
+    cover_url,
+    universe_key
+  )
+`;
 
 const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
@@ -427,7 +463,41 @@ export async function getEntityByCanonicalKey(canonicalKey) {
       .eq("canonical_key", key)
       .maybeSingle(),
     "Загрузка карточки из БД",
-    DEFAULT_TIMEOUT_MS
+    READ_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return data || null;
+}
+
+export async function getEntityLightByCanonicalKey(canonicalKey) {
+  const key = cleanText(canonicalKey).toLowerCase();
+
+  if (!key) return null;
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .select(`
+        id,
+        canonical_key,
+        category,
+        title_primary,
+        title_ru,
+        title_en,
+        original_title,
+        year,
+        cover_url,
+        universe_key,
+        relations_status
+      `)
+      .eq("canonical_key", key)
+      .maybeSingle(),
+    "Быстрая загрузка карточки из БД",
+    READ_TIMEOUT_MS
   );
 
   if (error) throw error;
@@ -449,7 +519,7 @@ async function findDuplicateEntity(entity = {}) {
       .in("canonical_key", keys)
       .limit(1),
     "Поиск дубля сущности",
-    DEFAULT_TIMEOUT_MS
+    READ_TIMEOUT_MS
   ).catch((error) => ({ data: [], error }));
 
   if (error) {
@@ -500,7 +570,7 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
       .upsert(rows, { onConflict: "entity_id,alias_normalized" })
       .select("*"),
     "Сохранение алиасов",
-    DEFAULT_TIMEOUT_MS
+    WRITE_TIMEOUT_MS
   ).catch((error) => ({ data: [], error }));
 
   if (error) {
@@ -536,7 +606,7 @@ export async function saveEntityIfMissing(inputEntity) {
       .select("*")
       .single(),
     "Сохранение сущности",
-    DEFAULT_TIMEOUT_MS
+    WRITE_TIMEOUT_MS
   );
 
   if (error) throw error;
@@ -548,7 +618,7 @@ export async function saveEntityIfMissing(inputEntity) {
   return data;
 }
 
-export async function getUserLibraryEntry(userId, entityId) {
+export async function getUserLibraryEntryLight(userId, entityId) {
   const cleanUserId = cleanText(userId);
 
   if (!cleanUserId || !entityId) return null;
@@ -558,12 +628,36 @@ export async function getUserLibraryEntry(userId, entityId) {
   const { data, error } = await withTimeout(
     supabase
       .from(USER_MEDIA_TABLE)
-      .select(USER_MEDIA_WITH_ENTITY_SELECT)
+      .select(USER_MEDIA_LIGHT_SELECT)
       .eq("user_id", cleanUserId)
       .eq("entity_id", entityId)
       .maybeSingle(),
-    "Проверка библиотеки",
-    DEFAULT_TIMEOUT_MS
+    "Быстрая проверка библиотеки",
+    READ_TIMEOUT_MS
+  );
+
+  if (error) throw error;
+
+  return data || null;
+}
+
+export async function getUserLibraryEntry(userId, entityId, { full = true } = {}) {
+  const cleanUserId = cleanText(userId);
+
+  if (!cleanUserId || !entityId) return null;
+
+  const supabase = getSupabaseClient();
+  const select = full ? USER_MEDIA_WITH_ENTITY_SELECT : USER_MEDIA_WITH_ENTITY_LIGHT_SELECT;
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(USER_MEDIA_TABLE)
+      .select(select)
+      .eq("user_id", cleanUserId)
+      .eq("entity_id", entityId)
+      .maybeSingle(),
+    full ? "Проверка библиотеки" : "Быстрая проверка библиотеки",
+    READ_TIMEOUT_MS
   );
 
   if (error) throw error;
@@ -572,7 +666,7 @@ export async function getUserLibraryEntry(userId, entityId) {
 }
 
 export async function isAlreadyInUserLibrary(userId, entityId) {
-  const existing = await getUserLibraryEntry(userId, entityId);
+  const existing = await getUserLibraryEntryLight(userId, entityId);
   return Boolean(existing);
 }
 
@@ -593,18 +687,25 @@ export async function addToUserLibrary({
   }
 
   const savedEntity = await saveEntityIfMissing(entity);
-  const existingEntry = await getUserLibraryEntry(cleanUserId, savedEntity.id);
+  const existingEntry = await getUserLibraryEntry(cleanUserId, savedEntity.id, {
+    full: false
+  });
 
   if (existingEntry) {
-    updateCachedLibraryItem(cleanUserId, existingEntry, {
+    const cachedEntry = {
+      ...existingEntry,
+      media_entities: savedEntity
+    };
+
+    updateCachedLibraryItem(cleanUserId, cachedEntry, {
       category: existingEntry.category || savedEntity.category
     });
 
     return {
       added: false,
       alreadyExists: true,
-      entity: existingEntry.media_entities || savedEntity,
-      userMedia: existingEntry
+      entity: savedEntity,
+      userMedia: cachedEntry
     };
   }
 
@@ -622,22 +723,27 @@ export async function addToUserLibrary({
     supabase
       .from(USER_MEDIA_TABLE)
       .insert(insertPayload)
-      .select(USER_MEDIA_WITH_ENTITY_SELECT)
+      .select(USER_MEDIA_WITH_ENTITY_LIGHT_SELECT)
       .single(),
     "Добавление в библиотеку",
-    DEFAULT_TIMEOUT_MS
+    WRITE_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  updateCachedLibraryItem(cleanUserId, data, {
-    category: data.category || savedEntity.category
+  const cachedEntry = {
+    ...data,
+    media_entities: data.media_entities || savedEntity
+  };
+
+  updateCachedLibraryItem(cleanUserId, cachedEntry, {
+    category: cachedEntry.category || savedEntity.category
   });
 
   return {
     added: true,
     alreadyExists: false,
-    entity: data.media_entities || savedEntity,
-    userMedia: data
+    entity: cachedEntry.media_entities || savedEntity,
+    userMedia: cachedEntry
   };
 }
