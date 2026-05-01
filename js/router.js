@@ -1,111 +1,131 @@
-import { ROUTES } from "./config.js";
-import { setRoute, state } from "./state.js";
+import { state, setRoute } from "./state.js";
 
-/* =========================
-   HELPERS
-========================= */
+const routes = new Map();
+let rootNode = null;
+let currentCleanup = null;
 
-function parseQuery(search = "") {
-  const params = {};
-  const urlParams = new URLSearchParams(search);
-
-  for (const [key, value] of urlParams.entries()) {
-    params[key] = value;
-  }
-
-  return params;
+function normalizePath(path = "/") {
+  if (!path.startsWith("/")) path = `/${path}`;
+  return path.replace(/\/+$/, "") || "/";
 }
 
-function buildQuery(params = {}) {
-  const urlParams = new URLSearchParams();
+function parseQuery(search = "") {
+  const params = new URLSearchParams(search || "");
+  const result = {};
+  for (const [key, value] of params.entries()) {
+    result[key] = value;
+  }
+  return result;
+}
 
-  Object.entries(params).forEach(([key, value]) => {
+function buildUrl(path = "/", params = {}) {
+  const cleanPath = normalizePath(path);
+  const url = new URL(window.location.origin + cleanPath);
+
+  Object.entries(params || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {
-      urlParams.set(key, value);
+      url.searchParams.set(key, String(value));
     }
   });
 
-  const queryString = urlParams.toString();
-  return queryString ? `?${queryString}` : "";
+  return url.pathname + (url.search ? `?${url.searchParams.toString()}` : "");
 }
 
-/* =========================
-   ROUTE MATCHING
-========================= */
-
-function resolveRoute(pathname) {
-  switch (pathname) {
-    case ROUTES.HOME:
-      return ROUTES.HOME;
-
-    case ROUTES.CATEGORIES:
-      return ROUTES.CATEGORIES;
-
-    case ROUTES.CATEGORY_LIBRARY:
-      return ROUTES.CATEGORY_LIBRARY;
-
-    case ROUTES.SEARCH:
-      return ROUTES.SEARCH;
-
-    case ROUTES.CARD:
-      return ROUTES.CARD;
-
-    case ROUTES.UNIVERSES:
-      return ROUTES.UNIVERSES;
-
-    case ROUTES.UNIVERSE_DETAILS:
-      return ROUTES.UNIVERSE_DETAILS;
-
-    case ROUTES.SETTINGS:
-      return ROUTES.SETTINGS;
-
-    case ROUTES.GUEST:
-      return ROUTES.GUEST;
-
-    default:
-      return ROUTES.HOME;
-  }
-}
-
-/* =========================
-   NAVIGATION
-========================= */
-
-export function navigate(route, params = {}) {
-  const path = route;
-  const query = buildQuery(params);
-  const url = `${path}${query}`;
-
-  if (window.location.pathname + window.location.search !== url) {
-    history.pushState({}, "", url);
-  }
-
-  setRoute(route, params);
-}
-
-/* =========================
-   INIT ROUTER
-========================= */
-
-export function initRouter() {
-  window.addEventListener("popstate", syncRouteFromLocation);
-  syncRouteFromLocation();
-}
-
-/* =========================
-   SYNC
-========================= */
-
-function syncRouteFromLocation() {
-  const { pathname, search } = window.location;
-
-  const route = resolveRoute(pathname);
+function resolveRoute(pathname = "/", search = "") {
+  const path = normalizePath(pathname);
   const params = parseQuery(search);
 
-  if (
-    state.route !== route ||
-    JSON.stringify(state.routeParams) !== JSON.stringify(params)
-  ) {
-    setRoute(route, params);
+  if (routes.has(path)) {
+    return {
+      path,
+      params,
+      handler: routes.get(path)
+    };
   }
+
+  // fallback: try dynamic patterns like /card or /universe already mapped
+  if (routes.has("*")) {
+    return {
+      path,
+      params,
+      handler: routes.get("*")
+    };
+  }
+
+  return null;
+}
+
+async function render(pathname, search) {
+  if (!rootNode) return;
+
+  const resolved = resolveRoute(pathname, search);
+
+  if (!resolved) {
+    rootNode.innerHTML = `<div style="padding:24px;">404</div>`;
+    return;
+  }
+
+  const { handler, params, path } = resolved;
+
+  // cleanup previous page
+  if (typeof currentCleanup === "function") {
+    try {
+      currentCleanup();
+    } catch (e) {
+      console.warn("route cleanup error:", e);
+    }
+    currentCleanup = null;
+  }
+
+  try {
+    setRoute(path, params);
+
+    const cleanup = await handler(rootNode, params);
+
+    if (typeof cleanup === "function") {
+      currentCleanup = cleanup;
+    }
+  } catch (error) {
+    console.warn("route render error:", error);
+    rootNode.innerHTML = `<div style="padding:24px;">Error</div>`;
+  }
+}
+
+function onPopState() {
+  render(window.location.pathname, window.location.search);
+}
+
+export function initRouter(root) {
+  rootNode = root;
+
+  window.addEventListener("popstate", onPopState);
+
+  render(window.location.pathname, window.location.search);
+}
+
+export function registerRoute(path, handler) {
+  routes.set(normalizePath(path), handler);
+}
+
+export function registerFallback(handler) {
+  routes.set("*", handler);
+}
+
+export function navigate(path = "/", params = {}, options = {}) {
+  const url = buildUrl(path, params);
+
+  if (options.replace) {
+    window.history.replaceState({}, "", url);
+  } else {
+    window.history.pushState({}, "", url);
+  }
+
+  render(window.location.pathname, window.location.search);
+}
+
+export function getCurrentRoute() {
+  return {
+    path: state.route,
+    params: state.routeParams || {}
+  };
 }
