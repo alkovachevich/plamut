@@ -1,118 +1,58 @@
-import { state, setRoute } from "./state.js";
-
-const routes = new Map();
-let rootNode = null;
-let currentCleanup = null;
+import { setRoute } from "./state.js";
 
 function normalizePath(path = "/") {
-  if (!path.startsWith("/")) path = `/${path}`;
-  return path.replace(/\/+$/, "") || "/";
+  const clean = String(path || "/").trim();
+  if (!clean.startsWith("/")) return `/${clean}`;
+  return clean.replace(/\/+$/, "") || "/";
 }
 
 function parseQuery(search = "") {
   const params = new URLSearchParams(search || "");
   const result = {};
+
   for (const [key, value] of params.entries()) {
     result[key] = value;
   }
+
   return result;
 }
 
 function buildUrl(path = "/", params = {}) {
   const cleanPath = normalizePath(path);
-  const url = new URL(window.location.origin + cleanPath);
+  const query = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, String(value));
+      query.set(key, String(value));
     }
   });
 
-  return url.pathname + (url.search ? `?${url.searchParams.toString()}` : "");
+  const queryString = query.toString();
+  return queryString ? `${cleanPath}?${queryString}` : cleanPath;
 }
 
-function resolveRoute(pathname = "/", search = "") {
-  const path = normalizePath(pathname);
-  const params = parseQuery(search);
+function syncRouteFromLocation() {
+  const path = normalizePath(window.location.pathname);
+  const params = parseQuery(window.location.search);
 
-  if (routes.has(path)) {
-    return {
-      path,
-      params,
-      handler: routes.get(path)
-    };
-  }
-
-  // fallback: try dynamic patterns like /card or /universe already mapped
-  if (routes.has("*")) {
-    return {
-      path,
-      params,
-      handler: routes.get("*")
-    };
-  }
-
-  return null;
+  setRoute(path, params);
 }
 
-async function render(pathname, search) {
-  if (!rootNode) return;
+export function initRouter() {
+  window.removeEventListener("popstate", syncRouteFromLocation);
+  window.addEventListener("popstate", syncRouteFromLocation);
 
-  const resolved = resolveRoute(pathname, search);
-
-  if (!resolved) {
-    rootNode.innerHTML = `<div style="padding:24px;">404</div>`;
-    return;
-  }
-
-  const { handler, params, path } = resolved;
-
-  // cleanup previous page
-  if (typeof currentCleanup === "function") {
-    try {
-      currentCleanup();
-    } catch (e) {
-      console.warn("route cleanup error:", e);
-    }
-    currentCleanup = null;
-  }
-
-  try {
-    setRoute(path, params);
-
-    const cleanup = await handler(rootNode, params);
-
-    if (typeof cleanup === "function") {
-      currentCleanup = cleanup;
-    }
-  } catch (error) {
-    console.warn("route render error:", error);
-    rootNode.innerHTML = `<div style="padding:24px;">Error</div>`;
-  }
-}
-
-function onPopState() {
-  render(window.location.pathname, window.location.search);
-}
-
-export function initRouter(root) {
-  rootNode = root;
-
-  window.addEventListener("popstate", onPopState);
-
-  render(window.location.pathname, window.location.search);
-}
-
-export function registerRoute(path, handler) {
-  routes.set(normalizePath(path), handler);
-}
-
-export function registerFallback(handler) {
-  routes.set("*", handler);
+  syncRouteFromLocation();
 }
 
 export function navigate(path = "/", params = {}, options = {}) {
   const url = buildUrl(path, params);
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+
+  if (url === currentUrl && !options.force) {
+    syncRouteFromLocation();
+    return;
+  }
 
   if (options.replace) {
     window.history.replaceState({}, "", url);
@@ -120,12 +60,16 @@ export function navigate(path = "/", params = {}, options = {}) {
     window.history.pushState({}, "", url);
   }
 
-  render(window.location.pathname, window.location.search);
+  syncRouteFromLocation();
+}
+
+export function replace(path = "/", params = {}) {
+  navigate(path, params, { replace: true });
 }
 
 export function getCurrentRoute() {
   return {
-    path: state.route,
-    params: state.routeParams || {}
+    path: normalizePath(window.location.pathname),
+    params: parseQuery(window.location.search)
   };
 }
