@@ -6,9 +6,15 @@ const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 const USER_MEDIA_TABLE = "user_media";
 
-const DEFAULT_TIMEOUT_MS = 10000;
 const READ_TIMEOUT_MS = 8000;
 const WRITE_TIMEOUT_MS = 12000;
+
+const entityCacheByCanonicalKey = new Map();
+const userMediaCacheByKey = new Map();
+const pendingEntitySaveByCanonicalKey = new Map();
+const pendingUserMediaByKey = new Map();
+
+const CACHE_TTL_MS = 1000 * 60 * 5;
 
 const USER_MEDIA_LIGHT_SELECT = `
   id,
@@ -78,6 +84,10 @@ function cleanText(value = "") {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
 }
 
+function cleanLower(value = "") {
+  return cleanText(value).toLowerCase();
+}
+
 function normalizeYear(value) {
   if (value === null || value === undefined || value === "") return null;
 
@@ -100,6 +110,68 @@ function normalizeArray(value) {
 
 function normalizeOpenLibraryWork(value = "") {
   return cleanText(value).replace("/works/", "");
+}
+
+function makeEntityCacheRow(entity) {
+  return {
+    value: entity || null,
+    ts: Date.now()
+  };
+}
+
+function getCachedEntity(canonicalKey = "") {
+  const key = cleanLower(canonicalKey);
+  if (!key) return null;
+
+  const row = entityCacheByCanonicalKey.get(key);
+  if (!row) return null;
+
+  if (Date.now() - Number(row.ts || 0) > CACHE_TTL_MS) {
+    entityCacheByCanonicalKey.delete(key);
+    return null;
+  }
+
+  return row.value || null;
+}
+
+function setCachedEntity(entity) {
+  const key = cleanLower(entity?.canonical_key);
+  if (!key || !entity?.id) return;
+
+  entityCacheByCanonicalKey.set(key, makeEntityCacheRow(entity));
+}
+
+function getUserMediaCacheKey(userId, entityId) {
+  const cleanUserId = cleanText(userId);
+  const cleanEntityId = Number(entityId || 0);
+
+  if (!cleanUserId || !cleanEntityId) return "";
+  return `${cleanUserId}:${cleanEntityId}`;
+}
+
+function getCachedUserMedia(userId, entityId) {
+  const key = getUserMediaCacheKey(userId, entityId);
+  if (!key) return null;
+
+  const row = userMediaCacheByKey.get(key);
+  if (!row) return null;
+
+  if (Date.now() - Number(row.ts || 0) > CACHE_TTL_MS) {
+    userMediaCacheByKey.delete(key);
+    return null;
+  }
+
+  return row.value || null;
+}
+
+function setCachedUserMedia(userId, entityId, value) {
+  const key = getUserMediaCacheKey(userId, entityId);
+  if (!key || !value) return;
+
+  userMediaCacheByKey.set(key, {
+    value,
+    ts: Date.now()
+  });
 }
 
 function extractPrimarySourceFromCanonicalKey(canonicalKey = "") {
@@ -173,8 +245,8 @@ function getBookAuthorForIdentity(entity = {}) {
 }
 
 function buildCanonicalKey(entity = {}) {
-  const existing = cleanText(entity.canonical_key).toLowerCase();
-  const category = cleanText(entity.category).toLowerCase();
+  const existing = cleanLower(entity.canonical_key);
+  const category = cleanLower(entity.category);
   const ids = buildExternalIds(entity);
 
   if (category === "books") {
@@ -198,7 +270,7 @@ function buildCanonicalKey(entity = {}) {
 
   if (existing) return existing;
 
-  const source = cleanText(entity.primary_source || entity.source || "").toLowerCase();
+  const source = cleanLower(entity.primary_source || entity.source || "");
 
   if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
   if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
@@ -244,7 +316,7 @@ export function normalizeEntity(entity = {}) {
   }
 
   const category =
-    cleanText(entity.category).toLowerCase() ||
+    cleanLower(entity.category) ||
     String(canonicalKey).split(":")[0] ||
     "";
 
@@ -305,56 +377,56 @@ function buildEntityPayload(entity) {
   };
 }
 
+function pickBetterText(a = "", b = "") {
+  const left = cleanText(a);
+  const right = cleanText(b);
+
+  if (!left) return right;
+  if (!right) return left;
+
+  return right.length > left.length ? right : left;
+}
+
+function pickBetterCover(a = "", b = "") {
+  const left = cleanText(a);
+  const right = cleanText(b);
+
+  if (!left) return right;
+  if (!right) return left;
+
+  return left;
+}
+
+function looksLikeScreenDescription(value = "") {
+  const text = cleanLower(value);
+
+  if (!text) return false;
+
+  return ["фильм", "film", "movie", "сериал", "tv series", "телесериал"].some((word) =>
+    text.includes(word)
+  );
+}
+
+function pickBookDescription(a = "", b = "") {
+  const left = cleanText(a);
+  const right = cleanText(b);
+
+  if (!left) return right;
+  if (!right) return left;
+
+  const leftNoise = looksLikeScreenDescription(left);
+  const rightNoise = looksLikeScreenDescription(right);
+
+  if (!leftNoise && rightNoise) return left;
+  if (leftNoise && !rightNoise) return right;
+
+  return right.length > left.length ? right : left;
+}
+
 function mergeEntityPayload(existing = {}, incoming = {}) {
-  const pickBetterText = (a = "", b = "") => {
-    const left = cleanText(a);
-    const right = cleanText(b);
-
-    if (!left) return right;
-    if (!right) return left;
-
-    return right.length > left.length ? right : left;
-  };
-
-  const pickBetterCover = (a = "", b = "") => {
-    const left = cleanText(a);
-    const right = cleanText(b);
-
-    if (!left) return right;
-    if (!right) return left;
-
-    return left;
-  };
-
-  const existingCategory = cleanText(existing.category).toLowerCase();
-  const incomingCategory = cleanText(incoming.category).toLowerCase();
+  const existingCategory = cleanLower(existing.category);
+  const incomingCategory = cleanLower(incoming.category);
   const isBookEntity = existingCategory === "books" || incomingCategory === "books";
-
-  const looksLikeScreenDescription = (value = "") => {
-    const text = cleanText(value).toLowerCase();
-
-    if (!text) return false;
-
-    return ["фильм", "film", "movie", "сериал", "tv series", "телесериал"].some((word) =>
-      text.includes(word)
-    );
-  };
-
-  const pickBookDescription = (a = "", b = "") => {
-    const left = cleanText(a);
-    const right = cleanText(b);
-
-    if (!left) return right;
-    if (!right) return left;
-
-    const leftNoise = looksLikeScreenDescription(left);
-    const rightNoise = looksLikeScreenDescription(right);
-
-    if (!leftNoise && rightNoise) return left;
-    if (leftNoise && !rightNoise) return right;
-
-    return right.length > left.length ? right : left;
-  };
 
   const existingIds = normalizeJson(existing.external_ids, {});
   const incomingIds = normalizeJson(incoming.external_ids, {});
@@ -372,6 +444,11 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
     ? "books"
     : existingCategory || incomingCategory || "";
 
+  const mergedMeta = {
+    ...normalizeJson(existing.meta, {}),
+    ...normalizeJson(incoming.meta, {})
+  };
+
   const resolvedCanonicalKey = isBookEntity
     ? buildCanonicalKey({
         ...existing,
@@ -382,10 +459,7 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
         title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
         title_en: pickBetterText(existing.title_en, incoming.title_en),
         original_title: pickBetterText(existing.original_title, incoming.original_title),
-        meta: {
-          ...normalizeJson(existing.meta, {}),
-          ...normalizeJson(incoming.meta, {})
-        }
+        meta: mergedMeta
       })
     : existing.canonical_key || incoming.canonical_key;
 
@@ -415,17 +489,13 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
       : pickBetterText(existing.description_en, incoming.description_en),
 
     external_ids: resolvedExternalIds,
-
-    meta: {
-      ...normalizeJson(existing.meta, {}),
-      ...normalizeJson(incoming.meta, {})
-    }
+    meta: mergedMeta
   };
 }
 
 function possibleCanonicalKeys(entity = {}) {
   const ids = entity.external_ids || {};
-  const category = cleanText(entity.category).toLowerCase();
+  const category = cleanLower(entity.category);
 
   return uniqueArray(
     [
@@ -444,15 +514,19 @@ function possibleCanonicalKeys(entity = {}) {
         ? `${category}:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`
         : ""
     ]
-      .map((key) => cleanText(key).toLowerCase())
+      .map((key) => cleanLower(key))
       .filter(Boolean)
   );
 }
 
-export async function getEntityByCanonicalKey(canonicalKey) {
-  const key = cleanText(canonicalKey).toLowerCase();
+async function getEntityByAnyCanonicalKey(keys = []) {
+  const cleanKeys = uniqueArray(safeArray(keys).map(cleanLower).filter(Boolean));
+  if (!cleanKeys.length) return null;
 
-  if (!key) return null;
+  for (const key of cleanKeys) {
+    const cached = getCachedEntity(key);
+    if (cached?.id) return cached;
+  }
 
   const supabase = getSupabaseClient();
 
@@ -460,21 +534,57 @@ export async function getEntityByCanonicalKey(canonicalKey) {
     supabase
       .from(MEDIA_ENTITIES_TABLE)
       .select("*")
-      .eq("canonical_key", key)
-      .maybeSingle(),
-    "Загрузка карточки из БД",
+      .in("canonical_key", cleanKeys)
+      .limit(1),
+    "Поиск сущности",
     READ_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  return data || null;
+  const entity = data?.[0] || null;
+
+  if (entity?.id) {
+    setCachedEntity(entity);
+  }
+
+  return entity;
+}
+
+export async function getEntityByCanonicalKey(canonicalKey) {
+  const key = cleanLower(canonicalKey);
+
+  if (!key) return null;
+
+  const cached = getCachedEntity(key);
+  if (cached?.id) return cached;
+
+  const entity = await getEntityByAnyCanonicalKey([key]);
+  return entity || null;
 }
 
 export async function getEntityLightByCanonicalKey(canonicalKey) {
-  const key = cleanText(canonicalKey).toLowerCase();
+  const key = cleanLower(canonicalKey);
 
   if (!key) return null;
+
+  const cached = getCachedEntity(key);
+
+  if (cached?.id) {
+    return {
+      id: cached.id,
+      canonical_key: cached.canonical_key,
+      category: cached.category,
+      title_primary: cached.title_primary,
+      title_ru: cached.title_ru,
+      title_en: cached.title_en,
+      original_title: cached.original_title,
+      year: cached.year,
+      cover_url: cached.cover_url,
+      universe_key: cached.universe_key,
+      relations_status: cached.relations_status
+    };
+  }
 
   const supabase = getSupabaseClient();
 
@@ -502,32 +612,23 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
 
   if (error) throw error;
 
+  if (data?.id) {
+    setCachedEntity(data);
+  }
+
   return data || null;
 }
 
 async function findDuplicateEntity(entity = {}) {
   const keys = possibleCanonicalKeys(entity);
-
   if (!keys.length) return null;
 
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select("*")
-      .in("canonical_key", keys)
-      .limit(1),
-    "Поиск дубля сущности",
-    READ_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
-
-  if (error) {
+  try {
+    return await getEntityByAnyCanonicalKey(keys);
+  } catch (error) {
     console.warn("findDuplicateEntity skipped:", error);
     return null;
   }
-
-  return data?.[0] || null;
 }
 
 function buildAliasRows(entityId, aliases = [], source = "entity") {
@@ -583,68 +684,110 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
 
 export async function saveEntityIfMissing(inputEntity) {
   const entity = normalizeEntity(inputEntity);
-  const supabase = getSupabaseClient();
+  const cacheKey = cleanLower(entity.canonical_key);
 
-  const existing =
-    (await getEntityByCanonicalKey(entity.canonical_key).catch(() => null)) ||
-    (await findDuplicateEntity(entity).catch(() => null));
+  const cached = getCachedEntity(cacheKey);
+  if (cached?.id) return cached;
 
-  const mergedPayload = existing
-    ? mergeEntityPayload(existing, entity)
-    : buildEntityPayload(entity);
+  if (pendingEntitySaveByCanonicalKey.has(cacheKey)) {
+    return pendingEntitySaveByCanonicalKey.get(cacheKey);
+  }
 
-  const payload = buildEntityPayload({
-    ...entity,
-    ...mergedPayload,
-    canonical_key: existing?.canonical_key || mergedPayload.canonical_key || entity.canonical_key
+  const promise = (async () => {
+    const existing = await findDuplicateEntity(entity).catch(() => null);
+
+    const mergedPayload = existing
+      ? mergeEntityPayload(existing, entity)
+      : buildEntityPayload(entity);
+
+    const payload = buildEntityPayload({
+      ...entity,
+      ...mergedPayload,
+      canonical_key: existing?.canonical_key || mergedPayload.canonical_key || entity.canonical_key
+    });
+
+    const supabase = getSupabaseClient();
+
+    const { data, error } = await withTimeout(
+      supabase
+        .from(MEDIA_ENTITIES_TABLE)
+        .upsert(payload, { onConflict: "canonical_key" })
+        .select("*")
+        .single(),
+      "Сохранение сущности",
+      WRITE_TIMEOUT_MS
+    );
+
+    if (error) throw error;
+
+    setCachedEntity(data);
+
+    saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
+      console.warn("saveEntityIfMissing aliases skipped:", error);
+    });
+
+    return data;
+  })().finally(() => {
+    pendingEntitySaveByCanonicalKey.delete(cacheKey);
   });
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .upsert(payload, { onConflict: "canonical_key" })
-      .select("*")
-      .single(),
-    "Сохранение сущности",
-    WRITE_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-
-  saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
-    console.warn("saveEntityIfMissing aliases skipped:", error);
-  });
-
-  return data;
+  pendingEntitySaveByCanonicalKey.set(cacheKey, promise);
+  return promise;
 }
 
 export async function getUserLibraryEntryLight(userId, entityId) {
   const cleanUserId = cleanText(userId);
+  const cleanEntityId = Number(entityId || 0);
 
-  if (!cleanUserId || !entityId) return null;
+  if (!cleanUserId || !cleanEntityId) return null;
 
-  const supabase = getSupabaseClient();
+  const cached = getCachedUserMedia(cleanUserId, cleanEntityId);
+  if (cached) return cached;
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from(USER_MEDIA_TABLE)
-      .select(USER_MEDIA_LIGHT_SELECT)
-      .eq("user_id", cleanUserId)
-      .eq("entity_id", entityId)
-      .maybeSingle(),
-    "Быстрая проверка библиотеки",
-    READ_TIMEOUT_MS
-  );
+  const cacheKey = getUserMediaCacheKey(cleanUserId, cleanEntityId);
 
-  if (error) throw error;
+  if (pendingUserMediaByKey.has(cacheKey)) {
+    return pendingUserMediaByKey.get(cacheKey);
+  }
 
-  return data || null;
+  const promise = (async () => {
+    const supabase = getSupabaseClient();
+
+    const { data, error } = await withTimeout(
+      supabase
+        .from(USER_MEDIA_TABLE)
+        .select(USER_MEDIA_LIGHT_SELECT)
+        .eq("user_id", cleanUserId)
+        .eq("entity_id", cleanEntityId)
+        .maybeSingle(),
+      "Быстрая проверка библиотеки",
+      READ_TIMEOUT_MS
+    );
+
+    if (error) throw error;
+
+    if (data) {
+      setCachedUserMedia(cleanUserId, cleanEntityId, data);
+    }
+
+    return data || null;
+  })().finally(() => {
+    pendingUserMediaByKey.delete(cacheKey);
+  });
+
+  pendingUserMediaByKey.set(cacheKey, promise);
+  return promise;
 }
 
 export async function getUserLibraryEntry(userId, entityId, { full = true } = {}) {
   const cleanUserId = cleanText(userId);
+  const cleanEntityId = Number(entityId || 0);
 
-  if (!cleanUserId || !entityId) return null;
+  if (!cleanUserId || !cleanEntityId) return null;
+
+  if (!full) {
+    return getUserLibraryEntryLight(cleanUserId, cleanEntityId);
+  }
 
   const supabase = getSupabaseClient();
   const select = full ? USER_MEDIA_WITH_ENTITY_SELECT : USER_MEDIA_WITH_ENTITY_LIGHT_SELECT;
@@ -654,13 +797,17 @@ export async function getUserLibraryEntry(userId, entityId, { full = true } = {}
       .from(USER_MEDIA_TABLE)
       .select(select)
       .eq("user_id", cleanUserId)
-      .eq("entity_id", entityId)
+      .eq("entity_id", cleanEntityId)
       .maybeSingle(),
     full ? "Проверка библиотеки" : "Быстрая проверка библиотеки",
     READ_TIMEOUT_MS
   );
 
   if (error) throw error;
+
+  if (data) {
+    setCachedUserMedia(cleanUserId, cleanEntityId, data);
+  }
 
   return data || null;
 }
@@ -687,15 +834,16 @@ export async function addToUserLibrary({
   }
 
   const savedEntity = await saveEntityIfMissing(entity);
-  const existingEntry = await getUserLibraryEntry(cleanUserId, savedEntity.id, {
-    full: false
-  });
+
+  const existingEntry = await getUserLibraryEntryLight(cleanUserId, savedEntity.id);
 
   if (existingEntry) {
     const cachedEntry = {
       ...existingEntry,
-      media_entities: savedEntity
+      media_entities: existingEntry.media_entities || savedEntity
     };
+
+    setCachedUserMedia(cleanUserId, savedEntity.id, cachedEntry);
 
     updateCachedLibraryItem(cleanUserId, cachedEntry, {
       category: existingEntry.category || savedEntity.category
@@ -735,6 +883,8 @@ export async function addToUserLibrary({
     ...data,
     media_entities: data.media_entities || savedEntity
   };
+
+  setCachedUserMedia(cleanUserId, savedEntity.id, cachedEntry);
 
   updateCachedLibraryItem(cleanUserId, cachedEntry, {
     category: cachedEntry.category || savedEntity.category
