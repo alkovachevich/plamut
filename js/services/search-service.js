@@ -11,10 +11,28 @@ import {
   runMangaSearch
 } from "./search/anilist-search.js";
 
-const SEARCH_CACHE_TTL_MS = 1000 * 60 * 3;
+const SEARCH_CACHE_TTL_MS = 1000 * 60 * 5;
+
 const searchCache = new Map();
+const pendingSearches = new Map();
 
 const VALID_CATEGORIES = ["books", "movies", "series", "anime", "manga"];
+
+function now() {
+  return Date.now();
+}
+
+function normalizeCategory(category = "") {
+  const normalized = String(category || "").trim().toLowerCase();
+  return VALID_CATEGORIES.includes(normalized) ? normalized : "";
+}
+
+function normalizeYear(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const year = Number(value);
+  return Number.isFinite(year) ? year : null;
+}
 
 function getSearchCacheKey(scope = "global", query = "", category = "") {
   return `${scope}:${String(query || "").trim().toLowerCase()}:${category}`;
@@ -25,7 +43,7 @@ function getCachedSearchResult(key = "") {
 
   if (!row) return null;
 
-  if (Date.now() - row.ts > SEARCH_CACHE_TTL_MS) {
+  if (now() - row.ts > SEARCH_CACHE_TTL_MS) {
     searchCache.delete(key);
     return null;
   }
@@ -35,7 +53,7 @@ function getCachedSearchResult(key = "") {
 
 function setCachedSearchResult(key = "", value = null) {
   if (!key) return;
-  searchCache.set(key, { ts: Date.now(), value });
+  searchCache.set(key, { ts: now(), value });
 }
 
 function getSystemLanguage() {
@@ -64,18 +82,6 @@ function emptyGroups() {
     anime: [],
     manga: []
   };
-}
-
-function normalizeCategory(category = "") {
-  const normalized = String(category || "").trim().toLowerCase();
-  return VALID_CATEGORIES.includes(normalized) ? normalized : "";
-}
-
-function normalizeYear(value) {
-  if (value === null || value === undefined || value === "") return null;
-
-  const year = Number(value);
-  return Number.isFinite(year) ? year : null;
 }
 
 function normalizeSearchItem(item = {}) {
@@ -216,6 +222,20 @@ async function runSearchForCategory(query = "", category = "", options = {}) {
   }
 }
 
+async function runWithDedupedPromise(key, fn) {
+  if (pendingSearches.has(key)) {
+    return pendingSearches.get(key);
+  }
+
+  const promise = fn()
+    .finally(() => {
+      pendingSearches.delete(key);
+    });
+
+  pendingSearches.set(key, promise);
+  return promise;
+}
+
 export async function runCategorySearch(query = "", category = "") {
   const cleanQuery = String(query || "").trim();
   const normalizedCategory = normalizeCategory(category);
@@ -225,29 +245,29 @@ export async function runCategorySearch(query = "", category = "") {
   const cacheKey = getSearchCacheKey("category", cleanQuery, normalizedCategory);
   const cached = getCachedSearchResult(cacheKey);
 
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
   const language = getSystemLanguage();
 
-  try {
-    const items = await runSearchForCategory(cleanQuery, normalizedCategory, {
-      language
-    });
+  return runWithDedupedPromise(cacheKey, async () => {
+    try {
+      const items = await runSearchForCategory(cleanQuery, normalizedCategory, {
+        language
+      });
 
-    const normalized = limitInternal(
-      sortByScoreInternal(dedupeByCanonical(items)),
-      SEARCH_LIMITS.CATEGORY_RESULTS
-    );
+      const normalized = limitInternal(
+        sortByScoreInternal(dedupeByCanonical(items)),
+        SEARCH_LIMITS.CATEGORY_RESULTS
+      );
 
-    setCachedSearchResult(cacheKey, normalized);
-    return normalized;
-  } catch (error) {
-    console.warn(`Category search failed (${normalizedCategory}):`, error);
-    setCachedSearchResult(cacheKey, []);
-    return [];
-  }
+      setCachedSearchResult(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      console.warn(`Category search failed (${normalizedCategory}):`, error);
+      setCachedSearchResult(cacheKey, []);
+      return [];
+    }
+  });
 }
 
 export async function runGlobalSearch(query = "") {
@@ -260,44 +280,44 @@ export async function runGlobalSearch(query = "") {
   const cacheKey = getSearchCacheKey("global", cleanQuery, "");
   const cached = getCachedSearchResult(cacheKey);
 
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
   const language = getSystemLanguage();
 
-  const results = await Promise.allSettled(
-    VALID_CATEGORIES.map(async (category) => {
-      const items = await runSearchForCategory(cleanQuery, category, {
-        language,
-        global: true
-      });
+  return runWithDedupedPromise(cacheKey, async () => {
+    const results = await Promise.allSettled(
+      VALID_CATEGORIES.map(async (category) => {
+        const items = await runSearchForCategory(cleanQuery, category, {
+          language,
+          global: true
+        });
 
-      return {
-        category,
-        items: limitInternal(
-          sortByScoreInternal(dedupeByCanonical(items)),
-          SEARCH_LIMITS.MODAL_RESULTS
-        )
-      };
-    })
-  );
+        return {
+          category,
+          items: limitInternal(
+            sortByScoreInternal(dedupeByCanonical(items)),
+            SEARCH_LIMITS.MODAL_RESULTS
+          )
+        };
+      })
+    );
 
-  const groups = emptyGroups();
+    const groups = emptyGroups();
 
-  results.forEach((result) => {
-    if (result.status !== "fulfilled") return;
+    results.forEach((result) => {
+      if (result.status !== "fulfilled") return;
 
-    const category = result.value?.category;
-    const items = result.value?.items || [];
+      const category = result.value?.category;
+      const items = result.value?.items || [];
 
-    if (groups[category]) {
-      groups[category] = items;
-    }
+      if (groups[category]) {
+        groups[category] = items;
+      }
+    });
+
+    setCachedSearchResult(cacheKey, groups);
+    return groups;
   });
-
-  setCachedSearchResult(cacheKey, groups);
-  return groups;
 }
 
 export function flattenResults(groupedResults = {}) {
