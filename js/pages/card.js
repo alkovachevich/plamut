@@ -27,11 +27,13 @@ import {
 import {
   getCachedLibraryItem,
   updateCachedLibraryItem,
-  removeCachedLibraryItem
+  removeCachedLibraryItem,
+  loadUserLibrary
 } from "../services/library-cache.js";
 
 const CARD_TIMEOUT_MS = 8000;
 const MUTATION_TIMEOUT_MS = 8000;
+const EMPTY_FOLDERS_KEY = "plamut_empty_folders_by_category_v1";
 
 const USER_MEDIA_SELECT = `
   id,
@@ -67,12 +69,153 @@ const USER_MEDIA_WITH_ENTITY_LIGHT_SELECT = `
   )
 `;
 
+const I18N = {
+  ru: {
+    loadingCard: "Загрузка карточки…",
+    cardNotFound: "Карточка не найдена.",
+    unavailableTitle: "Карточка временно недоступна",
+    unavailableDescription: "Не удалось быстро загрузить данные из базы. Если карточка была открыта из библиотеки, данные появятся после фоновой загрузки.",
+    menu: "Меню карточки",
+    actions: "Действия",
+    addToLibrary: "Добавить в библиотеку",
+    addedToLibrary: "Добавлено в библиотеку",
+    alreadyInLibrary: "Уже есть в библиотеке",
+    cardNotReady: "Карточка ещё не загружена. Попробуй через несколько секунд.",
+    status: "Статус",
+    folder: "Папка",
+    folders: "Папки",
+    createFolder: "Создать папку",
+    newFolderName: "Название новой папки",
+    removeFolder: "Убрать из папки",
+    delete: "Удалить",
+    deleteFromLibrary: "Удалить из библиотеки",
+    confirmDeleteTitle: "Удалить карточку?",
+    confirmDeleteText: "Карточка будет удалена из твоей библиотеки.",
+    cancel: "Отмена",
+    yes: "Да",
+    close: "Закрыть",
+    description: "Описание",
+    noDescription: "Описание отсутствует",
+    related: "Связанные",
+    universes: "Вселенные",
+    universe: "Вселенная",
+    continuity: "Линия",
+    branch: "Ветка",
+    series: "Серия",
+    previous: "Предыдущая часть",
+    next: "Следующая часть",
+    adaptations: "Экранизации",
+    planned: "Запланировано",
+    in_progress: "В процессе",
+    done: "Завершено",
+    dropped: "Брошено",
+    saved: "Сохранено",
+    deleted: "Удалено из библиотеки",
+    folderUpdated: "Папка обновлена",
+    statusUpdated: "Статус обновлён"
+  },
+  en: {
+    loadingCard: "Loading card…",
+    cardNotFound: "Card not found.",
+    unavailableTitle: "Card is temporarily unavailable",
+    unavailableDescription: "Could not quickly load data from the database. If this card was opened from your library, the data will appear after background loading.",
+    menu: "Card menu",
+    actions: "Actions",
+    addToLibrary: "Add to library",
+    addedToLibrary: "Added to library",
+    alreadyInLibrary: "Already in library",
+    cardNotReady: "The card is not loaded yet. Try again in a few seconds.",
+    status: "Status",
+    folder: "Folder",
+    folders: "Folders",
+    createFolder: "Create folder",
+    newFolderName: "New folder name",
+    removeFolder: "Remove from folder",
+    delete: "Delete",
+    deleteFromLibrary: "Delete from library",
+    confirmDeleteTitle: "Delete card?",
+    confirmDeleteText: "This card will be removed from your library.",
+    cancel: "Cancel",
+    yes: "Yes",
+    close: "Close",
+    description: "Description",
+    noDescription: "No description",
+    related: "Related",
+    universes: "Universes",
+    universe: "Universe",
+    continuity: "Continuity",
+    branch: "Branch",
+    series: "Series",
+    previous: "Previous part",
+    next: "Next part",
+    adaptations: "Adaptations",
+    planned: "Planned",
+    in_progress: "In progress",
+    done: "Done",
+    dropped: "Dropped",
+    saved: "Saved",
+    deleted: "Removed from library",
+    folderUpdated: "Folder updated",
+    statusUpdated: "Status updated"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
 function clean(value = "") {
   return String(value || "").trim();
 }
 
 function normalizeKey(value = "") {
   return clean(value).toLowerCase();
+}
+
+function normalizeFolderName(value = "") {
+  return clean(value).replace(/\s+/g, " ").slice(0, 48);
+}
+
+function readEmptyFolders() {
+  try {
+    const raw = localStorage.getItem(EMPTY_FOLDERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeEmptyFolders(value) {
+  try {
+    localStorage.setItem(EMPTY_FOLDERS_KEY, JSON.stringify(value || {}));
+  } catch (error) {
+    console.warn("empty folders save skipped:", error);
+  }
+}
+
+function getEmptyFolders(category = "") {
+  const data = readEmptyFolders();
+  return safeArray(data[category]).map(normalizeFolderName).filter(Boolean);
+}
+
+function addEmptyFolder(category = "", folderName = "") {
+  const cleanCategory = clean(category);
+  const cleanFolder = normalizeFolderName(folderName);
+
+  if (!cleanCategory || !cleanFolder) return [];
+
+  const data = readEmptyFolders();
+  const current = new Set(safeArray(data[cleanCategory]).map(normalizeFolderName).filter(Boolean));
+  current.add(cleanFolder);
+
+  data[cleanCategory] = [...current].sort((a, b) =>
+    a.localeCompare(b, state.language === "en" ? "en" : "ru")
+  );
+
+  writeEmptyFolders(data);
+  return data[cleanCategory];
 }
 
 function isFallbackEntity(entity = {}) {
@@ -94,7 +237,7 @@ function resolveTitle(entity = {}) {
         entity.title_ru ||
         entity.original_title ||
         entity.title ||
-        "Без названия"
+        t("unavailableTitle")
       );
     }
 
@@ -104,7 +247,7 @@ function resolveTitle(entity = {}) {
       entity.title_en ||
       entity.original_title ||
       entity.title ||
-      "Без названия"
+      t("unavailableTitle")
     );
   }
 
@@ -114,7 +257,7 @@ function resolveTitle(entity = {}) {
     entity.title_en ||
     entity.original_title ||
     entity.title ||
-    "Без названия"
+    t("unavailableTitle")
   );
 }
 
@@ -201,15 +344,14 @@ function buildFallbackEntity(params = {}) {
     id: null,
     canonical_key: key,
     category,
-    title_primary: "Карточка временно недоступна",
+    title_primary: t("unavailableTitle"),
     title_ru: "",
     title_en: "",
     original_title: key,
     year: null,
     cover_url: "",
-    description_ru:
-      "Не удалось быстро загрузить данные из базы. Если карточка была открыта из библиотеки, данные появятся после фоновой загрузки.",
-    description_en: "",
+    description_ru: t("unavailableDescription"),
+    description_en: t("unavailableDescription"),
     external_ids: {},
     meta: {},
     relations_status: "unknown",
@@ -305,6 +447,31 @@ async function deleteUserMedia(userMediaId) {
   return true;
 }
 
+async function loadCategoryFolders(userId, category = "") {
+  const cleanCategory = clean(category);
+  if (!userId || !cleanCategory) return getEmptyFolders(cleanCategory);
+
+  const libraryItems = await loadUserLibrary(userId, {
+    mode: "list",
+    category: cleanCategory,
+    allowStale: true,
+    backgroundRefresh: false
+  }).catch(() => []);
+
+  const fromItems = safeArray(libraryItems)
+    .map((item) => item.folder_name || "")
+    .map(normalizeFolderName)
+    .filter(Boolean);
+
+  return [...new Set([...fromItems, ...getEmptyFolders(cleanCategory)])]
+    .sort((a, b) => a.localeCompare(b, state.language === "en" ? "en" : "ru"));
+}
+
+function getStatusLabel(status = "") {
+  const key = clean(status);
+  return t(key) || STATUS_LABELS[key] || key || t("planned");
+}
+
 function renderCover(entity = {}) {
   const title = resolveTitle(entity);
   const cover = getCover(entity);
@@ -326,8 +493,7 @@ function renderCover(entity = {}) {
 
 function renderStatusBadge(userMedia) {
   if (!userMedia?.status) return "";
-  const label = STATUS_LABELS[userMedia.status] || userMedia.status;
-  return `<span class="card-badge" data-user-status>${escapeHtml(label)}</span>`;
+  return `<span class="card-badge" data-user-status>${escapeHtml(getStatusLabel(userMedia.status))}</span>`;
 }
 
 function renderFolderBadge(userMedia) {
@@ -339,10 +505,10 @@ function renderRelatedFallbackFromMeta(entity = {}) {
   const relations = entity?.meta?.wikidata_relations || {};
 
   const lines = [
-    { key: "series", label: "Серия" },
-    { key: "previous", label: "Предыдущая часть" },
-    { key: "next", label: "Следующая часть" },
-    { key: "adaptations", label: "Экранизации" }
+    { key: "series", label: t("series") },
+    { key: "previous", label: t("previous") },
+    { key: "next", label: t("next") },
+    { key: "adaptations", label: t("adaptations") }
   ]
     .map(({ key, label }) => {
       const values = safeArray(relations?.[key]).filter(Boolean);
@@ -391,7 +557,7 @@ function groupUniverseLinks(links = []) {
     if (!grouped.has(universeKey)) {
       grouped.set(universeKey, {
         universe_key: universeKey,
-        universe_title: link.universe_title || "Вселенная",
+        universe_title: link.universe_title || t("universe"),
         continuities: new Map()
       });
     }
@@ -401,7 +567,7 @@ function groupUniverseLinks(links = []) {
     if (!universe.continuities.has(continuityKey)) {
       universe.continuities.set(continuityKey, {
         continuity_key: continuityKey,
-        continuity_title: link.continuity_title || "Линия",
+        continuity_title: link.continuity_title || t("continuity"),
         continuity_type: link.continuity_type || "",
         branches: new Map()
       });
@@ -412,7 +578,7 @@ function groupUniverseLinks(links = []) {
     if (!continuity.branches.has(branchKey)) {
       continuity.branches.set(branchKey, {
         branch_key: branchKey,
-        branch_title: link.branch_title || "Ветка",
+        branch_title: link.branch_title || t("branch"),
         branch_type: link.branch_type || "",
         links: []
       });
@@ -437,7 +603,7 @@ function renderUniverseLinks(links = []) {
 
   return `
     <div class="card-section" data-universe-links-section>
-      <div class="card-section__title">Вселенные</div>
+      <div class="card-section__title">${escapeHtml(t("universes"))}</div>
       <div class="universe-links">
         ${grouped.map((universe) => `
           <button class="universe-link" type="button" data-universe-key="${escapeHtml(universe.universe_key)}">
@@ -454,6 +620,105 @@ function renderUniverseLinks(links = []) {
             `).join("")}
           </button>
         `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderActionModal({ userMedia = null, folders = [] } = {}) {
+  const currentStatus = userMedia?.status || "";
+  const currentFolder = userMedia?.folder_name || "";
+
+  if (!userMedia?.id) {
+    return `
+      <div class="card-action-backdrop" data-action="close-action-modal">
+        <div class="card-action-modal" role="dialog" aria-modal="true">
+          <div class="card-action-modal__header">
+            <div class="card-action-modal__title">${escapeHtml(t("actions"))}</div>
+            <button class="card-action-modal__close" type="button" data-action="close-action-modal">×</button>
+          </div>
+
+          <section class="card-action-modal__group">
+            <button class="card-action-modal__primary" type="button" data-action="modal-add">
+              ${escapeHtml(t("addToLibrary"))}
+            </button>
+          </section>
+        </div>
+      </div>
+    `;
+  }
+
+  const statusButtons = ["planned", "in_progress", "done", "dropped"]
+    .map((status) => `
+      <button
+        class="card-action-modal__option ${currentStatus === status ? "active" : ""}"
+        type="button"
+        data-action="modal-set-status"
+        data-value="${status}"
+      >
+        ${escapeHtml(t(status))}
+      </button>
+    `)
+    .join("");
+
+  const folderButtons = safeArray(folders)
+    .map((folder) => `
+      <button
+        class="card-action-modal__option ${currentFolder === folder ? "active" : ""}"
+        type="button"
+        data-action="modal-set-folder"
+        data-value="${escapeHtml(folder)}"
+      >
+        ${escapeHtml(folder)}
+      </button>
+    `)
+    .join("");
+
+  return `
+    <div class="card-action-backdrop" data-action="close-action-modal">
+      <div class="card-action-modal" role="dialog" aria-modal="true">
+        <div class="card-action-modal__header">
+          <div class="card-action-modal__title">${escapeHtml(t("actions"))}</div>
+          <button class="card-action-modal__close" type="button" data-action="close-action-modal">×</button>
+        </div>
+
+        <section class="card-action-modal__group">
+          <div class="card-action-modal__group-title">${escapeHtml(t("status"))}</div>
+          <div class="card-action-modal__options">
+            ${statusButtons}
+          </div>
+        </section>
+
+        <section class="card-action-modal__group">
+          <div class="card-action-modal__group-title">${escapeHtml(t("folder"))}</div>
+          <div class="card-action-modal__options">
+            ${folderButtons}
+            ${currentFolder ? `
+              <button class="card-action-modal__option muted" type="button" data-action="modal-remove-folder">
+                ${escapeHtml(t("removeFolder"))}
+              </button>
+            ` : ""}
+          </div>
+
+          <form class="card-action-modal__folder-form" data-action="modal-create-folder">
+            <input
+              class="card-action-modal__input"
+              type="text"
+              maxlength="48"
+              placeholder="${escapeHtml(t("newFolderName"))}"
+              data-folder-input
+            />
+            <button class="card-action-modal__small-btn" type="submit">
+              ${escapeHtml(t("createFolder"))}
+            </button>
+          </form>
+        </section>
+
+        <section class="card-action-modal__group danger">
+          <button class="card-action-modal__delete" type="button" data-action="modal-delete">
+            ${escapeHtml(t("deleteFromLibrary"))}
+          </button>
+        </section>
       </div>
     </div>
   `;
@@ -478,12 +743,6 @@ function renderStyles() {
 
       .card-menu-wrap { position:absolute; top:14px; right:14px; z-index:10; }
       .card-menu-btn { width:38px; height:38px; display:grid; place-items:center; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-size:22px; line-height:1; }
-      .card-menu { position:absolute; top:calc(100% + 8px); right:0; width:220px; display:none; flex-direction:column; gap:4px; padding:6px; border-radius:16px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); }
-      .card-menu.is-open { display:flex; }
-      .card-menu button { text-align:left; background:transparent; color:var(--text); padding:10px 12px; border-radius:11px; font-size:14px; }
-      .card-menu button:hover { background:var(--bg-soft); }
-      .card-menu button.danger { color:var(--danger); }
-      .card-menu button:disabled { opacity:.55; cursor:default; }
 
       .card-status { min-height:20px; font-size:13px; color:var(--text-soft); }
       .card-section { padding:16px; border-radius:18px; border:1px solid var(--border-soft); background:var(--surface); }
@@ -509,15 +768,135 @@ function renderStyles() {
 
       .card-empty { padding:20px; border-radius:18px; background:var(--surface); border:1px solid var(--border-soft); color:var(--text-soft); }
 
-      .card-dialog-backdrop { position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:18px; background:rgba(5,10,20,.58); }
-      .card-dialog { width:min(420px, 100%); border-radius:20px; border:1px solid var(--border); background:var(--bg-elevated); box-shadow:var(--shadow); padding:16px; display:flex; flex-direction:column; gap:12px; }
-      .card-dialog__title { font-size:18px; font-weight:850; color:var(--text); }
-      .card-dialog__text { color:var(--text-soft); font-size:14px; line-height:1.45; }
-      .card-dialog__input { min-height:46px; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); padding:0 12px; outline:none; }
-      .card-dialog__actions { display:flex; justify-content:flex-end; gap:8px; }
-      .card-dialog__btn { min-height:40px; padding:0 13px; border-radius:999px; border:1px solid var(--border); background:var(--surface-strong); color:var(--text); font-weight:750; }
-      .card-dialog__btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
-      .card-dialog__btn.danger { background:var(--danger); color:#fff; border-color:transparent; }
+      .card-action-backdrop {
+        position:fixed;
+        inset:0;
+        z-index:120;
+        display:grid;
+        place-items:center;
+        padding:18px;
+        background:rgba(5,10,20,.58);
+      }
+
+      .card-action-modal {
+        width:min(100%, 440px);
+        max-height:min(86vh, 720px);
+        overflow:auto;
+        border-radius:24px;
+        border:1px solid var(--border);
+        background:var(--bg-elevated);
+        box-shadow:var(--shadow);
+        padding:18px;
+        color:var(--text);
+      }
+
+      .card-action-modal__header {
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:14px;
+        margin-bottom:16px;
+      }
+
+      .card-action-modal__title {
+        font-size:18px;
+        font-weight:850;
+        line-height:1.35;
+      }
+
+      .card-action-modal__close {
+        width:34px;
+        height:34px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:var(--surface);
+        color:var(--text);
+        font-size:22px;
+        line-height:1;
+      }
+
+      .card-action-modal__group {
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+        padding:14px 0;
+        border-top:1px solid var(--border-soft);
+      }
+
+      .card-action-modal__group-title {
+        font-size:13px;
+        font-weight:850;
+        color:var(--text-soft);
+        text-transform:uppercase;
+        letter-spacing:.04em;
+      }
+
+      .card-action-modal__options {
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+      }
+
+      .card-action-modal__option {
+        padding:10px 12px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:var(--surface);
+        color:var(--text);
+        font-weight:700;
+      }
+
+      .card-action-modal__option.active {
+        background:var(--accent);
+        border-color:transparent;
+        color:#fff;
+      }
+
+      .card-action-modal__option.muted {
+        color:var(--text-soft);
+      }
+
+      .card-action-modal__folder-form {
+        display:flex;
+        gap:8px;
+      }
+
+      .card-action-modal__input {
+        flex:1;
+        min-width:0;
+        min-height:42px;
+        border-radius:14px;
+        border:1px solid var(--border);
+        background:var(--surface);
+        color:var(--text);
+        padding:0 12px;
+      }
+
+      .card-action-modal__small-btn,
+      .card-action-modal__primary {
+        min-height:42px;
+        border-radius:14px;
+        background:var(--accent-soft);
+        color:var(--text);
+        padding:0 12px;
+        font-weight:800;
+      }
+
+      .card-action-modal__primary {
+        width:100%;
+        background:var(--accent);
+        color:#fff;
+      }
+
+      .card-action-modal__delete {
+        width:100%;
+        min-height:44px;
+        border-radius:14px;
+        background:transparent;
+        color:var(--danger);
+        border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+        font-weight:850;
+      }
 
       @media (max-width:640px) {
         .card-shell { grid-template-columns:104px 1fr; gap:12px; padding:12px; border-radius:18px; }
@@ -525,6 +904,7 @@ function renderStyles() {
         .card-main { padding-right:38px; }
         .card-title { font-size:20px; }
         .related-grid { grid-template-columns:1fr; }
+        .card-action-modal__folder-form { flex-direction:column; }
       }
     </style>
   `;
@@ -533,40 +913,21 @@ function renderStyles() {
 function renderLoading(root) {
   root.innerHTML = `
     ${renderStyles()}
-    <div class="card-empty">Загрузка карточки…</div>
+    <div class="card-empty">${escapeHtml(t("loadingCard"))}</div>
   `;
 }
 
 function renderNotFound(root) {
   root.innerHTML = `
     ${renderStyles()}
-    <div class="card-empty">Карточка не найдена.</div>
+    <div class="card-empty">${escapeHtml(t("cardNotFound"))}</div>
   `;
 }
 
-function renderMenu(userMedia) {
-  if (userMedia?.id) {
-    return `
-      <div class="card-menu-wrap">
-        <button class="card-menu-btn" type="button" data-action="toggle-menu" aria-label="Меню карточки">⋯</button>
-        <div class="card-menu" data-card-menu>
-          <button type="button" data-action="set-status" data-value="planned">Planned</button>
-          <button type="button" data-action="set-status" data-value="in_progress">In progress</button>
-          <button type="button" data-action="set-status" data-value="done">Done</button>
-          <button type="button" data-action="set-status" data-value="dropped">Dropped</button>
-          <button type="button" data-action="set-folder">Папка</button>
-          <button type="button" class="danger" data-action="remove">Удалить из библиотеки</button>
-        </div>
-      </div>
-    `;
-  }
-
+function renderMenu() {
   return `
     <div class="card-menu-wrap">
-      <button class="card-menu-btn" type="button" data-action="toggle-menu" aria-label="Меню карточки">⋯</button>
-      <div class="card-menu" data-card-menu>
-        <button type="button" data-action="add">Добавить в библиотеку</button>
-      </div>
+      <button class="card-menu-btn" type="button" data-action="open-action-modal" aria-label="${escapeHtml(t("menu"))}">⋯</button>
     </div>
   `;
 }
@@ -588,7 +949,7 @@ function renderCard(root, { entity, userMedia, relatedItems = [], universeLinks 
 
     <section class="card-page">
       <div class="card-shell">
-        ${renderMenu(userMedia)}
+        ${renderMenu()}
 
         <div class="card-cover">
           ${renderCover(entity)}
@@ -612,9 +973,9 @@ function renderCard(root, { entity, userMedia, relatedItems = [], universeLinks 
       </div>
 
       <div class="card-section">
-        <div class="card-section__title">Описание</div>
+        <div class="card-section__title">${escapeHtml(t("description"))}</div>
         <div class="card-description" data-card-description>
-          ${description ? escapeHtml(description) : "Описание отсутствует"}
+          ${description ? escapeHtml(description) : escapeHtml(t("noDescription"))}
         </div>
       </div>
 
@@ -623,11 +984,13 @@ function renderCard(root, { entity, userMedia, relatedItems = [], universeLinks 
       </div>
 
       <div class="card-section" data-related-section ${hasRelatedContent ? "" : "hidden"}>
-        <div class="card-section__title">Связанные</div>
+        <div class="card-section__title">${escapeHtml(t("related"))}</div>
         <div class="related-grid" data-related-grid>
           ${relatedItems.length ? relatedItems.map(renderRelatedItem).join("") : relatedFallbackHtml}
         </div>
       </div>
+
+      <div data-action-modal-root></div>
     </section>
   `;
 }
@@ -654,7 +1017,7 @@ function updateDescriptionUI(root, entity) {
   if (!descriptionNode) return;
 
   const description = resolveDescription(entity);
-  descriptionNode.textContent = description || "Описание отсутствует";
+  descriptionNode.textContent = description || t("noDescription");
 }
 
 function setStatus(root, message = "") {
@@ -662,78 +1025,28 @@ function setStatus(root, message = "") {
   if (statusNode) statusNode.textContent = message;
 }
 
-function closeMenu(root) {
-  root.querySelector("[data-card-menu]")?.classList.remove("is-open");
+function closeActionModal(root) {
+  const modalRoot = root.querySelector("[data-action-modal-root]");
+  if (modalRoot) modalRoot.innerHTML = "";
 }
 
-function openFolderDialog(currentFolder = "") {
-  return new Promise((resolve) => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "card-dialog-backdrop";
+async function openActionModal(root, userMedia, entity) {
+  const modalRoot = root.querySelector("[data-action-modal-root]");
+  if (!modalRoot) return;
 
-    backdrop.innerHTML = `
-      <div class="card-dialog" role="dialog" aria-modal="true">
-        <div class="card-dialog__title">Папка</div>
-        <div class="card-dialog__text">Введи название папки. Оставь пустым, чтобы убрать папку.</div>
-        <input class="card-dialog__input" data-folder-input value="${escapeHtml(currentFolder)}" placeholder="Например: Любимое" />
-        <div class="card-dialog__actions">
-          <button class="card-dialog__btn" type="button" data-dialog-cancel>Отмена</button>
-          <button class="card-dialog__btn primary" type="button" data-dialog-save>Сохранить</button>
-        </div>
-      </div>
-    `;
+  const folders = await loadCategoryFolders(
+    state.user?.id || "",
+    entity?.category || userMedia?.category || ""
+  );
 
-    document.body.appendChild(backdrop);
-
-    const input = backdrop.querySelector("[data-folder-input]");
-
-    const cleanup = (value) => {
-      backdrop.remove();
-      resolve(value);
-    };
-
-    backdrop.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => cleanup(null));
-    backdrop.querySelector("[data-dialog-save]")?.addEventListener("click", () => cleanup(input.value || ""));
-
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) cleanup(null);
-    });
-
-    input?.focus();
-    input?.select();
+  modalRoot.innerHTML = renderActionModal({
+    userMedia,
+    folders
   });
 }
 
-function openConfirmDialog({ title = "Подтверждение", text = "", danger = false } = {}) {
-  return new Promise((resolve) => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "card-dialog-backdrop";
-
-    backdrop.innerHTML = `
-      <div class="card-dialog" role="dialog" aria-modal="true">
-        <div class="card-dialog__title">${escapeHtml(title)}</div>
-        ${text ? `<div class="card-dialog__text">${escapeHtml(text)}</div>` : ""}
-        <div class="card-dialog__actions">
-          <button class="card-dialog__btn" type="button" data-dialog-cancel>Отмена</button>
-          <button class="card-dialog__btn ${danger ? "danger" : "primary"}" type="button" data-dialog-confirm>Да</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(backdrop);
-
-    const cleanup = (value) => {
-      backdrop.remove();
-      resolve(value);
-    };
-
-    backdrop.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => cleanup(false));
-    backdrop.querySelector("[data-dialog-confirm]")?.addEventListener("click", () => cleanup(true));
-
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) cleanup(false);
-    });
-  });
+async function openConfirmDialog() {
+  return window.confirm(`${t("confirmDeleteTitle")}\n${t("confirmDeleteText")}`);
 }
 
 function renderRelated(root, relatedItems = [], entity = {}) {
@@ -783,372 +1096,373 @@ function bindCardEvents(root, getContext, setContext) {
     }
 
     const actionButton = event.target.closest("[data-action]");
-    if (!actionButton) {
-      if (!event.target.closest(".card-menu-wrap")) closeMenu(root);
-      return;
-    }
+    if (!actionButton) return;
 
     const action = actionButton.dataset.action || "";
     const context = getContext();
     let { entity, userMedia } = context;
 
-    if (action === "toggle-menu") {
-      const menu = root.querySelector("[data-card-menu]");
-      menu?.classList.toggle("is-open");
+    if (action === "open-action-modal") {
+      await openActionModal(root, userMedia, entity);
       return;
     }
 
-    if (action === "add") {
-      closeMenu(root);
+    if (action === "close-action-modal") {
+      if (event.target === actionButton || actionButton.classList.contains("card-action-modal__close")) {
+        closeActionModal(root);
+      }
+      return;
+    }
 
+    if (action === "modal-add") {
       if (!state.user?.id) {
+        closeActionModal(root);
         openAuthModal("login");
         return;
       }
 
       if (!isPersistableEntity(entity)) {
-        setStatus(root, "Карточка ещё не загружена. Попробуй через несколько секунд.");
+        setStatus(root, t("cardNotReady"));
         return;
       }
 
       try {
         actionButton.disabled = true;
-        setStatus(root, "Добавляем в библиотеку…");
+        setStatus(root, t("loadingCard"));
 
         const result = await addToUserLibrary({
           userId: state.user.id,
-          entity,
-          status: "planned"
+          entity
         });
 
         userMedia = result.userMedia || null;
-        entity = result.entity || entity;
+
+        if (userMedia?.id) {
+          setContext({
+            entity: result.entity || entity,
+            userMedia
+          });
+
+          updateCachedLibraryItem(state.user.id, {
+            ...userMedia,
+            media_entities: result.entity || entity
+          }, {
+            category: userMedia.category || entity.category
+          });
+
+          updateUserMediaUI(root, userMedia);
+        }
+
+        closeActionModal(root);
+        setStatus(root, result.alreadyExists ? t("alreadyInLibrary") : t("addedToLibrary"));
+      } catch (error) {
+        console.warn("Add to library error:", error);
+        setStatus(root, error?.message || "Error");
+      }
+
+      return;
+    }
+
+    if (action === "modal-set-status") {
+      const newStatus = actionButton.dataset.value || "";
+
+      if (!userMedia?.id || !newStatus) return;
+
+      try {
+        actionButton.disabled = true;
+        setStatus(root, t("loadingCard"));
+
+        const updated = await updateUserMedia(userMedia.id, {
+          status: newStatus
+        });
+
+        if (!updated) return;
+
+        userMedia = {
+          id: updated.id,
+          user_id: updated.user_id,
+          entity_id: updated.entity_id,
+          category: updated.category,
+          status: updated.status,
+          folder_name: updated.folder_name,
+          created_at: updated.created_at,
+          updated_at: updated.updated_at
+        };
 
         setContext({ entity, userMedia });
-        renderCard(root, { entity, userMedia });
-        bindCardEvents(root, getContext, setContext);
 
-        setStatus(root, result.alreadyExists ? "Уже есть в библиотеке." : "Добавлено в библиотеку.");
+        updateCachedLibraryItem(state.user.id, updated, {
+          category: updated.category || entity.category
+        });
+
+        updateUserMediaUI(root, userMedia);
+        closeActionModal(root);
+        setStatus(root, t("statusUpdated"));
       } catch (error) {
-        console.warn("CARD: add failed", error);
-        setStatus(root, "Не удалось добавить карточку.");
-        actionButton.disabled = false;
+        console.warn("Update status error:", error);
+        setStatus(root, error?.message || "Error");
       }
 
       return;
     }
 
-    if (action === "set-status") {
-      closeMenu(root);
+    if (action === "modal-set-folder" || action === "modal-remove-folder") {
+      const folderName = action === "modal-remove-folder"
+        ? ""
+        : normalizeFolderName(actionButton.dataset.value || "");
 
       if (!userMedia?.id) return;
-
-      const nextStatus = actionButton.dataset.value || "";
-      if (!nextStatus) return;
 
       try {
         actionButton.disabled = true;
-        setStatus(root, "Обновляем статус…");
+        setStatus(root, t("loadingCard"));
 
         const updated = await updateUserMedia(userMedia.id, {
-          status: nextStatus
+          folder_name: folderName || null
         });
 
-        if (updated?.id) {
-          userMedia = {
-            id: updated.id,
-            user_id: updated.user_id,
-            entity_id: updated.entity_id,
-            category: updated.category,
-            status: updated.status,
-            folder_name: updated.folder_name,
-            created_at: updated.created_at,
-            updated_at: updated.updated_at
-          };
+        if (!updated) return;
 
-          const cachedEntry = {
-            ...updated,
-            media_entities: updated.media_entities || entity
-          };
+        userMedia = {
+          id: updated.id,
+          user_id: updated.user_id,
+          entity_id: updated.entity_id,
+          category: updated.category,
+          status: updated.status,
+          folder_name: updated.folder_name,
+          created_at: updated.created_at,
+          updated_at: updated.updated_at
+        };
 
-          updateCachedLibraryItem(state.user?.id, cachedEntry, {
-            category: updated.category || entity.category
-          });
-
-          setContext({ entity, userMedia });
-          updateUserMediaUI(root, userMedia);
-          setStatus(root, "Статус обновлён.");
+        if (folderName) {
+          addEmptyFolder(updated.category || entity.category, folderName);
         }
+
+        setContext({ entity, userMedia });
+
+        updateCachedLibraryItem(state.user.id, updated, {
+          category: updated.category || entity.category
+        });
+
+        updateUserMediaUI(root, userMedia);
+        closeActionModal(root);
+        setStatus(root, t("folderUpdated"));
       } catch (error) {
-        console.warn("CARD: status update failed", error);
-        setStatus(root, "Не удалось обновить статус.");
-      } finally {
-        actionButton.disabled = false;
+        console.warn("Update folder error:", error);
+        setStatus(root, error?.message || "Error");
       }
 
       return;
     }
 
-    if (action === "set-folder") {
-      closeMenu(root);
-
-      if (!userMedia?.id) return;
-
-      const folderName = await openFolderDialog(userMedia.folder_name || "");
-      if (folderName === null) return;
-
-      const cleanFolder = clean(folderName);
-
-      try {
-        actionButton.disabled = true;
-        setStatus(root, "Обновляем папку…");
-
-        const updated = await updateUserMedia(userMedia.id, {
-          folder_name: cleanFolder || null
-        });
-
-        if (updated?.id) {
-          userMedia = {
-            id: updated.id,
-            user_id: updated.user_id,
-            entity_id: updated.entity_id,
-            category: updated.category,
-            status: updated.status,
-            folder_name: updated.folder_name,
-            created_at: updated.created_at,
-            updated_at: updated.updated_at
-          };
-
-          const cachedEntry = {
-            ...updated,
-            media_entities: updated.media_entities || entity
-          };
-
-          updateCachedLibraryItem(state.user?.id, cachedEntry, {
-            category: updated.category || entity.category
-          });
-
-          setContext({ entity, userMedia });
-          updateUserMediaUI(root, userMedia);
-          setStatus(root, "Папка обновлена.");
-        }
-      } catch (error) {
-        console.warn("CARD: folder update failed", error);
-        setStatus(root, "Не удалось обновить папку.");
-      } finally {
-        actionButton.disabled = false;
-      }
-
+    if (action === "modal-create-folder") {
       return;
     }
 
-    if (action === "remove") {
-      closeMenu(root);
-
+    if (action === "modal-delete") {
       if (!userMedia?.id) return;
 
-      const confirmed = await openConfirmDialog({
-        title: "Удалить из библиотеки?",
-        text: "Карточка исчезнет из твоей библиотеки, но сама сущность останется в базе.",
-        danger: true
-      });
-
+      const confirmed = await openConfirmDialog();
       if (!confirmed) return;
 
       try {
         actionButton.disabled = true;
-        setStatus(root, "Удаляем из библиотеки…");
+        setStatus(root, t("loadingCard"));
 
         await deleteUserMedia(userMedia.id);
 
-        removeCachedLibraryItem(state.user?.id, userMedia.id, {
+        removeCachedLibraryItem(state.user.id, userMedia.id, {
           category: userMedia.category || entity.category
         });
 
         userMedia = null;
         setContext({ entity, userMedia });
 
-        renderCard(root, { entity, userMedia });
-        bindCardEvents(root, getContext, setContext);
-
-        setStatus(root, "Удалено из библиотеки.");
+        updateUserMediaUI(root, null);
+        closeActionModal(root);
+        setStatus(root, t("deleted"));
       } catch (error) {
-        console.warn("CARD: remove failed", error);
-        setStatus(root, "Не удалось удалить карточку.");
-        actionButton.disabled = false;
+        console.warn("Delete user media error:", error);
+        setStatus(root, error?.message || "Error");
       }
+    }
+  });
+
+  root.addEventListener("submit", async (event) => {
+    const form = event.target.closest('[data-action="modal-create-folder"]');
+    if (!form) return;
+
+    event.preventDefault();
+
+    const context = getContext();
+    const { entity, userMedia } = context;
+    const input = form.querySelector("[data-folder-input]");
+    const folderName = normalizeFolderName(input?.value || "");
+
+    if (!folderName || !userMedia?.id) return;
+
+    const button = form.querySelector("button[type='submit']");
+
+    try {
+      if (button) button.disabled = true;
+
+      addEmptyFolder(userMedia.category || entity.category, folderName);
+
+      const updated = await updateUserMedia(userMedia.id, {
+        folder_name: folderName
+      });
+
+      if (!updated) return;
+
+      const nextUserMedia = {
+        id: updated.id,
+        user_id: updated.user_id,
+        entity_id: updated.entity_id,
+        category: updated.category,
+        status: updated.status,
+        folder_name: updated.folder_name,
+        created_at: updated.created_at,
+        updated_at: updated.updated_at
+      };
+
+      setContext({
+        entity,
+        userMedia: nextUserMedia
+      });
+
+      updateCachedLibraryItem(state.user.id, updated, {
+        category: updated.category || entity.category
+      });
+
+      updateUserMediaUI(root, nextUserMedia);
+      closeActionModal(root);
+      setStatus(root, t("folderUpdated"));
+    } catch (error) {
+      console.warn("Create folder error:", error);
+      setStatus(root, error?.message || "Error");
+    } finally {
+      if (button) button.disabled = false;
     }
   });
 }
 
-async function hydrateUserMediaState(root, userId, entity, setContext) {
-  if (!userId || !entity?.id) return null;
-
-  const cached = getCachedUserMedia(userId, entity);
-
-  if (cached?.id) {
-    updateUserMediaUI(root, cached);
-    setContext({ userMedia: cached });
-    return cached;
-  }
-
-  try {
-    const loaded = await loadUserMedia(userId, entity.id);
-
-    if (loaded?.id) {
-      updateCachedLibraryItem(userId, {
-        ...loaded,
-        media_entities: entity
-      }, {
-        category: loaded.category || entity.category
-      });
-
-      updateUserMediaUI(root, loaded);
-      setContext({ userMedia: loaded });
-    }
-
-    return loaded || null;
-  } catch (error) {
-    const message = String(error?.message || "").toLowerCase();
-
-    if (message.includes("превышено время ожидания")) {
-      console.info("CARD: user media load timeout, using fallback state");
-    } else {
-      console.warn("CARD: user media load skipped", error);
-    }
-
-    return null;
-  }
-}
-
-async function hydrateUniverseLinks(root, entity) {
-  if (!entity?.id) return [];
-
-  try {
-    const universeLinks = await getEntityUniverseLinksFromDb({
-      entityId: entity.id
-    });
-
-    renderUniverse(root, universeLinks);
-    return universeLinks;
-  } catch (error) {
-    console.warn("CARD: universe links skipped", error);
-    return [];
-  }
-}
-
-async function hydrateRelatedItems(root, entity) {
-  if (!entity?.id) return [];
-
-  try {
-    const relatedItems = await getRelatedItemsForEntityFromDb({
-      entityId: entity.id
-    });
-
-    renderRelated(root, relatedItems, entity);
-    return relatedItems;
-  } catch (error) {
-    console.warn("CARD: related items skipped", error);
-    renderRelated(root, [], entity);
-    return [];
-  }
-}
-
 export async function renderCardPage(root, params = {}) {
-  const key = normalizeKey(params.key || params.id || "");
-  const userId = state.user?.id || "";
-  let isDestroyed = false;
+  const key = normalizeKey(params.key || "");
+  const fastEntity = loadFastEntity(params) || buildFallbackEntity(params);
 
-  let entity = loadFastEntity(params) || buildFallbackEntity(params);
-  let userMedia = getCachedUserMedia(userId, entity);
-
-  function getContext() {
-    return { entity, userMedia };
-  }
-
-  function setContext(next = {}) {
-    if (next.entity) entity = next.entity;
-    if ("userMedia" in next) userMedia = next.userMedia;
-  }
-
-  if (!key && !entity) {
+  if (!key && !fastEntity) {
     renderNotFound(root);
-    return () => {
-      isDestroyed = true;
-    };
+    return () => {};
   }
 
-  if (entity) {
+  let context = {
+    entity: fastEntity,
+    userMedia: getCachedUserMedia(state.user?.id, fastEntity || {}) || null
+  };
+
+  if (context.entity) {
     renderCard(root, {
-      entity,
-      userMedia,
+      entity: context.entity,
+      userMedia: context.userMedia,
       relatedItems: [],
       universeLinks: []
     });
-
-    bindCardEvents(root, getContext, setContext);
-
-    if (isFallbackEntity(entity)) {
-      setStatus(root, "Пробуем загрузить карточку из базы…");
-    }
   } else {
     renderLoading(root);
   }
 
-  Promise.resolve()
-    .then(async () => {
-      const dbEntity = await loadEntityFromDb(key || entity?.canonical_key);
+  let destroyed = false;
 
-      if (isDestroyed || !dbEntity?.canonical_key) return;
+  bindCardEvents(
+    root,
+    () => context,
+    (nextContext) => {
+      context = {
+        ...context,
+        ...nextContext
+      };
+    }
+  );
 
-      entity = normalizeStoredEntity(dbEntity) || dbEntity;
-      setTemporaryCardItem(entity);
+  try {
+    const dbEntity = await loadEntityFromDb(key);
 
-      const cachedMedia = getCachedUserMedia(userId, entity);
-      if (cachedMedia?.id) {
-        userMedia = cachedMedia;
-      }
+    if (destroyed) return () => {};
+
+    if (!dbEntity && !context.entity) {
+      renderNotFound(root);
+      return () => {};
+    }
+
+    if (dbEntity?.canonical_key) {
+      context.entity = normalizeStoredEntity(dbEntity) || dbEntity;
+      setTemporaryCardItem(context.entity);
+
+      context.userMedia =
+        getCachedUserMedia(state.user?.id, context.entity) ||
+        context.userMedia;
 
       renderCard(root, {
-        entity,
-        userMedia,
+        entity: context.entity,
+        userMedia: context.userMedia,
         relatedItems: [],
         universeLinks: []
       });
 
-      bindCardEvents(root, getContext, setContext);
-      updateDescriptionUI(root, entity);
-      setStatus(root, "");
+      bindCardEvents(
+        root,
+        () => context,
+        (nextContext) => {
+          context = {
+            ...context,
+            ...nextContext
+          };
+        }
+      );
 
-      hydrateUserMediaState(root, userId, entity, setContext);
-      hydrateRelatedItems(root, entity);
-      hydrateUniverseLinks(root, entity);
-    })
-    .catch((error) => {
-      if (isDestroyed) return;
+      updateDescriptionUI(root, context.entity);
+    }
 
-      const message = String(error?.message || "").toLowerCase();
+    if (state.user?.id && context.entity?.id) {
+      const freshUserMedia = await loadUserMedia(state.user.id, context.entity.id).catch((error) => {
+        console.warn("Card user media load skipped:", error);
+        return null;
+      });
 
-      if (message.includes("превышено время ожидания")) {
-        console.info("CARD: full entity timeout, keeping fast card");
-        setStatus(root, isFallbackEntity(entity) ? "База отвечает медленно. Показан временный вариант." : "");
-        return;
+      if (destroyed) return () => {};
+
+      if (freshUserMedia?.id) {
+        context.userMedia = freshUserMedia;
+        updateUserMediaUI(root, context.userMedia);
       }
+    }
 
-      console.warn("CARD: full entity load skipped", error);
+    if (context.entity?.id) {
+      Promise.allSettled([
+        getRelatedItemsForEntityFromDb(context.entity.id),
+        getEntityUniverseLinksFromDb(context.entity.id)
+      ]).then((results) => {
+        if (destroyed) return;
 
-      if (!entity || isFallbackEntity(entity)) {
-        renderNotFound(root);
-      }
-    });
+        const relatedItems = results[0]?.status === "fulfilled" ? safeArray(results[0].value) : [];
+        const universeLinks = results[1]?.status === "fulfilled" ? safeArray(results[1].value) : [];
 
-  if (entity?.id && !isFallbackEntity(entity)) {
-    hydrateUserMediaState(root, userId, entity, setContext);
-    hydrateRelatedItems(root, entity);
-    hydrateUniverseLinks(root, entity);
+        renderRelated(root, relatedItems, context.entity);
+        renderUniverse(root, universeLinks);
+      });
+    }
+  } catch (error) {
+    console.warn("Card load error:", error);
+
+    if (!context.entity || isFallbackEntity(context.entity)) {
+      renderNotFound(root);
+    } else {
+      setStatus(root, error?.message || "Error");
+    }
   }
 
   return () => {
-    isDestroyed = true;
+    destroyed = true;
+    closeActionModal(root);
   };
 }
