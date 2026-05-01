@@ -8,7 +8,7 @@ import {
   openAuthModal
 } from "../state.js";
 import { escapeHtml, getInitials } from "../utils.js";
-import { ROUTES } from "../config.js";
+import { ROUTES, normalizeLanguage, normalizeTheme } from "../config.js";
 import {
   signOut,
   upsertUserProfile
@@ -25,8 +25,9 @@ const I18N = {
     loggingOut: "Выход…",
     login: "Войти",
     register: "Регистрация",
-    dark: "Dark",
-    light: "Light"
+    dark: "Темная",
+    light: "Светлая",
+    system: "Как в системе"
   },
   en: {
     guest: "Guest",
@@ -39,7 +40,8 @@ const I18N = {
     login: "Sign in",
     register: "Create account",
     dark: "Dark",
-    light: "Light"
+    light: "Light",
+    system: "System"
   }
 };
 
@@ -92,6 +94,8 @@ export function renderSidebar(root) {
   const user = state.user || {};
   const loggedIn = isLoggedIn(user);
   const isOpen = state.sidebarOpen;
+  const currentTheme = normalizeTheme(state.theme);
+  const currentLanguage = normalizeLanguage(state.language);
 
   root.innerHTML = `
     <style>
@@ -279,16 +283,17 @@ export function renderSidebar(root) {
         <div class="setting-row">
           <span>${escapeHtml(t("language"))}</span>
           <div class="segmented">
-            <button type="button" data-lang="ru" class="${state.language === "ru" ? "active" : ""}">RU</button>
-            <button type="button" data-lang="en" class="${state.language === "en" ? "active" : ""}">EN</button>
+            <button type="button" data-lang="ru" class="${currentLanguage === "ru" ? "active" : ""}">RU</button>
+            <button type="button" data-lang="en" class="${currentLanguage === "en" ? "active" : ""}">EN</button>
           </div>
         </div>
 
         <div class="setting-row">
           <span>${escapeHtml(t("theme"))}</span>
           <div class="segmented">
-            <button type="button" data-theme="dark" class="${state.theme === "dark" ? "active" : ""}">${escapeHtml(t("dark"))}</button>
-            <button type="button" data-theme="light" class="${state.theme === "light" ? "active" : ""}">${escapeHtml(t("light"))}</button>
+            <button type="button" data-theme="dark" class="${currentTheme === "dark" ? "active" : ""}">${escapeHtml(t("dark"))}</button>
+            <button type="button" data-theme="light" class="${currentTheme === "light" ? "active" : ""}">${escapeHtml(t("light"))}</button>
+            <button type="button" data-theme="system" class="${currentTheme === "system" ? "active" : ""}">${escapeHtml(t("system"))}</button>
           </div>
         </div>
 
@@ -329,7 +334,7 @@ export function renderSidebar(root) {
 
   root.querySelectorAll("[data-lang]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const language = button.dataset.lang || "ru";
+      const language = normalizeLanguage(button.dataset.lang || "ru");
 
       try {
         button.disabled = true;
@@ -345,7 +350,7 @@ export function renderSidebar(root) {
 
   root.querySelectorAll("[data-theme]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const theme = button.dataset.theme || "dark";
+      const theme = normalizeTheme(button.dataset.theme || "dark");
 
       try {
         button.disabled = true;
