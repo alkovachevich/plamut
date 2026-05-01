@@ -1,4 +1,4 @@
-import { STATUS_LABELS, getCategoryLabel } from "../config.js";
+import { STATUS_LABELS, getCategoryLabel, ROUTES } from "../config.js";
 import { navigate } from "../router.js";
 import {
   openAuthModal,
@@ -18,7 +18,7 @@ import {
   removeCachedLibraryItem
 } from "../services/library-cache.js";
 
-const USER_MEDIA_UPDATE_TIMEOUT_MS = 8000;
+const USER_MEDIA_UPDATE_TIMEOUT_MS = 9000;
 const EMPTY_FOLDERS_KEY = "plamut_empty_folders_by_category_v1";
 
 const USER_MEDIA_UPDATE_SELECT = `
@@ -34,13 +34,20 @@ const USER_MEDIA_UPDATE_SELECT = `
     id,
     canonical_key,
     category,
+    primary_source,
     title_primary,
     title_ru,
     title_en,
     original_title,
     year,
     cover_url,
-    universe_key
+    description_ru,
+    description_en,
+    external_ids,
+    meta,
+    universe_key,
+    relations_built_at,
+    relations_status
   )
 `;
 
@@ -51,12 +58,10 @@ const I18N = {
     folders: "Папки",
     createFolder: "Создать папку",
     newFolderName: "Название новой папки",
-    folderName: "Название папки",
     removeFolder: "Убрать из папки",
     status: "Статус",
     folder: "Папка",
     delete: "Удалить",
-    close: "Закрыть",
     empty: "Здесь пока ничего нет",
     emptyText: "Добавь первый элемент в раздел",
     loading: "Загрузка…",
@@ -79,12 +84,10 @@ const I18N = {
     folders: "Folders",
     createFolder: "Create folder",
     newFolderName: "New folder name",
-    folderName: "Folder name",
     removeFolder: "Remove from folder",
     status: "Status",
     folder: "Folder",
     delete: "Delete",
-    close: "Close",
     empty: "Nothing here yet",
     emptyText: "Add the first item to",
     loading: "Loading…",
@@ -149,13 +152,15 @@ function addEmptyFolder(category = "", folderName = "") {
   const current = new Set(safeArray(data[cleanCategory]).map(normalizeFolderName).filter(Boolean));
   current.add(cleanFolder);
 
-  data[cleanCategory] = [...current].sort((a, b) => a.localeCompare(b, state.language === "en" ? "en" : "ru"));
-  writeEmptyFolders(data);
+  data[cleanCategory] = [...current].sort((a, b) =>
+    a.localeCompare(b, state.language === "en" ? "en" : "ru")
+  );
 
+  writeEmptyFolders(data);
   return data[cleanCategory];
 }
 
-function removeEmptyFolderIfUsed(category = "", folderName = "", items = []) {
+function removeEmptyFolderIfUnused(category = "", folderName = "", items = []) {
   const cleanCategory = cleanText(category);
   const cleanFolder = normalizeFolderName(folderName);
 
@@ -242,7 +247,10 @@ function sortItems(items = [], sort = "recent") {
 
   if (sort === "title") {
     return result.sort((a, b) =>
-      resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), state.language === "en" ? "en" : "ru")
+      resolveTitle(a.media_entities).localeCompare(
+        resolveTitle(b.media_entities),
+        state.language === "en" ? "en" : "ru"
+      )
     );
   }
 
@@ -264,6 +272,11 @@ function sortItems(items = [], sort = "recent") {
 function filterItems(items = [], activeFolder = "all") {
   if (activeFolder === "all") return safeArray(items);
   return safeArray(items).filter((item) => (item.folder_name || "") === activeFolder);
+}
+
+function getStatusLabel(status = "") {
+  const key = cleanText(status);
+  return t(key) || STATUS_LABELS[key] || key || t("planned");
 }
 
 function renderCover(entity = {}) {
@@ -303,11 +316,6 @@ function renderFolderTabs(folders = [], activeFolder = "all") {
     .join("");
 
   return all + rest;
-}
-
-function getStatusLabel(status = "") {
-  const key = cleanText(status);
-  return t(key) || STATUS_LABELS[key] || key || t("planned");
 }
 
 function renderLibraryCard(item) {
@@ -444,8 +452,6 @@ function renderActionModal({ item = null, folders = [], category = "" } = {}) {
     `)
     .join("");
 
-  const showDelete = Boolean(item?.id);
-
   return `
     <div class="action-modal-backdrop" data-action="close-action-modal">
       <div class="action-modal" role="dialog" aria-modal="true" data-modal-card="${item?.id || ""}" data-modal-category="${escapeHtml(category)}">
@@ -457,9 +463,7 @@ function renderActionModal({ item = null, folders = [], category = "" } = {}) {
         ${item ? `
           <section class="action-modal__group">
             <div class="action-modal__group-title">${escapeHtml(t("status"))}</div>
-            <div class="action-modal__options">
-              ${statusButtons}
-            </div>
+            <div class="action-modal__options">${statusButtons}</div>
           </section>
         ` : ""}
 
@@ -488,7 +492,7 @@ function renderActionModal({ item = null, folders = [], category = "" } = {}) {
           </form>
         </section>
 
-        ${showDelete ? `
+        ${item ? `
           <section class="action-modal__group danger">
             <button class="action-modal__delete" type="button" data-action="modal-delete">
               ${escapeHtml(t("delete"))}
@@ -503,424 +507,65 @@ function renderActionModal({ item = null, folders = [], category = "" } = {}) {
 function renderStyles() {
   return `
     <style>
-      .page {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-      }
-
-      .page-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        flex-wrap: wrap;
-      }
-
-      .page-title {
-        font-size: 28px;
-        font-weight: 800;
-        color: var(--text);
-      }
-
-      .page-actions {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .sort-select {
-        min-height: 44px;
-        border-radius: 14px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
-        padding: 0 12px;
-      }
-
-      .add-btn,
-      .folder-action-btn {
-        padding: 11px 16px;
-        border-radius: 999px;
-        font-weight: 700;
-      }
-
-      .add-btn {
-        background: var(--accent);
-        color: #fff;
-      }
-
-      .folder-action-btn {
-        background: var(--surface);
-        color: var(--text);
-        border: 1px solid var(--border);
-      }
-
-      .folder-row {
-        display: flex;
-        gap: 10px;
-        overflow-x: auto;
-        padding-bottom: 4px;
-      }
-
-      .folder-chip {
-        white-space: nowrap;
-        padding: 9px 13px;
-        border-radius: 999px;
-        background: var(--surface);
-        border: 1px solid var(--border-soft);
-        color: var(--text-soft);
-      }
-
-      .folder-chip.active {
-        background: var(--accent-soft);
-        color: var(--text);
-        border-color: transparent;
-      }
-
-      .library-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 18px;
-        align-items: start;
-      }
-
-      .library-card {
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        overflow: visible;
-        cursor: pointer;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-soft);
-        border-radius: 22px;
-        padding: 10px;
-        transition: transform .18s ease, border-color .18s ease, background .18s ease, opacity .18s ease;
-      }
-
-      .library-card:hover {
-        transform: translateY(-2px);
-        border-color: var(--border);
-      }
-
-      .library-card.is-busy {
-        pointer-events: none;
-        opacity: .72;
-      }
-
-      .library-card__cover {
-        position: relative;
-        width: 100%;
-        aspect-ratio: 2 / 3;
-        border-radius: 16px;
-        overflow: hidden;
-        background: var(--surface);
-        border: 1px solid var(--border-soft);
-      }
-
-      .library-card__cover img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-
-      .library-card--books .library-card__cover img,
-      .library-card--manga .library-card__cover img {
-        object-fit: contain;
-        background: var(--bg-soft);
-      }
-
-      .library-card__cover.is-empty-cover {
-        display: grid;
-        place-items: center;
-      }
-
-      .library-card__cover.is-empty-cover::after {
-        content: "?";
-        color: var(--text-soft);
-        font-weight: 800;
-      }
-
-      .library-card__cover-fallback {
-        width: 100%;
-        height: 100%;
-        display: grid;
-        place-items: center;
-        color: var(--text-soft);
-      }
-
-      .library-card__menu-btn {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        z-index: 3;
-        width: 34px;
-        height: 34px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-        color: var(--text);
-        font-size: 20px;
-        line-height: 1;
-        box-shadow: var(--shadow);
-      }
-
-      .library-card__body {
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
-        padding: 12px 4px 4px;
-      }
-
-      .library-card__badges {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-
-      .library-badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 24px;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        font-size: 12px;
-        color: var(--text);
-      }
-
-      .library-badge.folder {
-        background: var(--bg-soft);
-      }
-
-      .library-card__title {
-        font-size: 15px;
-        font-weight: 750;
-        line-height: 1.35;
-        color: var(--text);
-      }
-
-      .library-card__subtitle,
-      .library-card__meta {
-        font-size: 13px;
-        color: var(--text-soft);
-        line-height: 1.4;
-      }
-
-      .empty-state {
-        padding: 40px 20px;
-        text-align: center;
-        color: var(--text-soft);
-        border: 1px solid var(--border-soft);
-        border-radius: 18px;
-        background: var(--surface);
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .empty-state__title {
-        color: var(--text);
-        font-size: 18px;
-        font-weight: 700;
-      }
-
-      .category-guest {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-
-      .category-guest__title {
-        font-size: 28px;
-        font-weight: 800;
-        color: var(--text);
-      }
-
-      .category-guest__card {
-        border: 1px solid var(--border-soft);
-        background: var(--surface);
-        border-radius: 20px;
-        padding: 20px;
-      }
-
-      .category-guest__text {
-        color: var(--text-soft);
-        line-height: 1.6;
-        margin-bottom: 14px;
-      }
-
-      .category-guest__button {
-        padding: 10px 16px;
-        border-radius: 999px;
-        background: var(--accent);
-        color: #fff;
-        font-weight: 700;
-      }
-
-      .action-modal-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 1000;
-        display: grid;
-        place-items: center;
-        padding: 18px;
-        background: rgba(0, 0, 0, .48);
-      }
-
-      .action-modal {
-        width: min(100%, 440px);
-        max-height: min(86vh, 720px);
-        overflow: auto;
-        border-radius: 24px;
-        border: 1px solid var(--border);
-        background: var(--bg-elevated);
-        box-shadow: var(--shadow);
-        padding: 18px;
-        color: var(--text);
-      }
-
-      .action-modal__header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 14px;
-        margin-bottom: 16px;
-      }
-
-      .action-modal__title {
-        font-size: 18px;
-        font-weight: 800;
-        line-height: 1.35;
-      }
-
-      .action-modal__close {
-        width: 34px;
-        height: 34px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
-        font-size: 22px;
-        line-height: 1;
-      }
-
-      .action-modal__group {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        padding: 14px 0;
-        border-top: 1px solid var(--border-soft);
-      }
-
-      .action-modal__group-title {
-        font-size: 13px;
-        font-weight: 800;
-        color: var(--text-soft);
-        text-transform: uppercase;
-        letter-spacing: .04em;
-      }
-
-      .action-modal__options {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .action-modal__option {
-        padding: 10px 12px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
-        font-weight: 650;
-      }
-
-      .action-modal__option.active {
-        background: var(--accent);
-        border-color: transparent;
-        color: #fff;
-      }
-
-      .action-modal__option.muted {
-        color: var(--text-soft);
-      }
-
-      .action-modal__folder-form {
-        display: flex;
-        gap: 8px;
-      }
-
-      .action-modal__input {
-        flex: 1;
-        min-width: 0;
-        min-height: 42px;
-        border-radius: 14px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
-        padding: 0 12px;
-      }
-
-      .action-modal__small-btn {
-        min-height: 42px;
-        border-radius: 14px;
-        background: var(--accent-soft);
-        color: var(--text);
-        padding: 0 12px;
-        font-weight: 750;
-      }
-
-      .action-modal__delete {
-        width: 100%;
-        min-height: 44px;
-        border-radius: 14px;
-        background: transparent;
-        color: var(--danger);
-        border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-        font-weight: 800;
-      }
-
-      .action-modal__hint {
-        color: var(--text-soft);
-        font-size: 14px;
-      }
-
-      @media (max-width: 640px) {
-        .library-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-        }
-
-        .page-header {
-          align-items: stretch;
-        }
-
-        .page-actions {
-          width: 100%;
-          flex-wrap: wrap;
-        }
-
-        .sort-select,
-        .add-btn,
-        .folder-action-btn {
-          flex: 1;
-        }
-
-        .library-card {
-          border-radius: 18px;
-          padding: 8px;
-        }
-
-        .action-modal {
-          border-radius: 22px;
-          padding: 16px;
-        }
-
-        .action-modal__folder-form {
-          flex-direction: column;
-        }
+      .page{display:flex;flex-direction:column;gap:20px}
+      .page-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+      .page-title{font-size:28px;font-weight:800;color:var(--text)}
+      .page-actions{display:flex;align-items:center;gap:10px}
+      .sort-select{min-height:44px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px}
+      .add-btn,.folder-action-btn{padding:11px 16px;border-radius:999px;font-weight:700}
+      .add-btn{background:var(--accent);color:#fff}
+      .folder-action-btn{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+      .folder-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+      .folder-chip{white-space:nowrap;padding:9px 13px;border-radius:999px;background:var(--surface);border:1px solid var(--border-soft);color:var(--text-soft)}
+      .folder-chip.active{background:var(--accent-soft);color:var(--text);border-color:transparent}
+      .library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px;align-items:start}
+      .library-card{position:relative;display:flex;flex-direction:column;overflow:visible;cursor:pointer;background:var(--bg-elevated);border:1px solid var(--border-soft);border-radius:22px;padding:10px;transition:transform .18s ease,border-color .18s ease,background .18s ease,opacity .18s ease}
+      .library-card:hover{transform:translateY(-2px);border-color:var(--border)}
+      .library-card.is-busy{pointer-events:none;opacity:.72}
+      .library-card__cover{position:relative;width:100%;aspect-ratio:2/3;border-radius:16px;overflow:hidden;background:var(--surface);border:1px solid var(--border-soft)}
+      .library-card__cover img{width:100%;height:100%;object-fit:cover;display:block}
+      .library-card--books .library-card__cover img,.library-card--manga .library-card__cover img{object-fit:contain;background:var(--bg-soft)}
+      .library-card__cover.is-empty-cover{display:grid;place-items:center}
+      .library-card__cover.is-empty-cover::after{content:"?";color:var(--text-soft);font-weight:800}
+      .library-card__cover-fallback{width:100%;height:100%;display:grid;place-items:center;color:var(--text-soft)}
+      .library-card__menu-btn{position:absolute;top:8px;right:8px;z-index:3;width:34px;height:34px;border-radius:999px;border:1px solid var(--border);background:color-mix(in srgb,var(--bg-elevated) 88%,transparent);color:var(--text);font-size:20px;line-height:1;box-shadow:var(--shadow)}
+      .library-card__body{display:flex;flex-direction:column;gap:7px;padding:12px 4px 4px}
+      .library-card__badges{display:flex;flex-wrap:wrap;gap:6px}
+      .library-badge{display:inline-flex;align-items:center;min-height:24px;padding:4px 8px;border-radius:999px;background:var(--accent-soft);font-size:12px;color:var(--text)}
+      .library-badge.folder{background:var(--bg-soft)}
+      .library-card__title{font-size:15px;font-weight:750;line-height:1.35;color:var(--text)}
+      .library-card__subtitle,.library-card__meta{font-size:13px;color:var(--text-soft);line-height:1.4}
+      .empty-state{padding:40px 20px;text-align:center;color:var(--text-soft);border:1px solid var(--border-soft);border-radius:18px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
+      .empty-state__title{color:var(--text);font-size:18px;font-weight:700}
+      .category-guest{display:flex;flex-direction:column;gap:16px}
+      .category-guest__title{font-size:28px;font-weight:800;color:var(--text)}
+      .category-guest__card{border:1px solid var(--border-soft);background:var(--surface);border-radius:20px;padding:20px}
+      .category-guest__text{color:var(--text-soft);line-height:1.6;margin-bottom:14px}
+      .category-guest__button{padding:10px 16px;border-radius:999px;background:var(--accent);color:#fff;font-weight:700}
+      .action-modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.48)}
+      .action-modal{width:min(100%,440px);max-height:min(86vh,720px);overflow:auto;border-radius:24px;border:1px solid var(--border);background:var(--bg-elevated);box-shadow:var(--shadow);padding:18px;color:var(--text)}
+      .action-modal__header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
+      .action-modal__title{font-size:18px;font-weight:800;line-height:1.35}
+      .action-modal__close{width:34px;height:34px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:22px;line-height:1}
+      .action-modal__group{display:flex;flex-direction:column;gap:10px;padding:14px 0;border-top:1px solid var(--border-soft)}
+      .action-modal__group-title{font-size:13px;font-weight:800;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em}
+      .action-modal__options{display:flex;flex-wrap:wrap;gap:8px}
+      .action-modal__option{padding:10px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:650}
+      .action-modal__option.active{background:var(--accent);border-color:transparent;color:#fff}
+      .action-modal__option.muted{color:var(--text-soft)}
+      .action-modal__folder-form{display:flex;gap:8px}
+      .action-modal__input{flex:1;min-width:0;min-height:42px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px}
+      .action-modal__small-btn{min-height:42px;border-radius:14px;background:var(--accent-soft);color:var(--text);padding:0 12px;font-weight:750}
+      .action-modal__delete{width:100%;min-height:44px;border-radius:14px;background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);font-weight:800}
+      .action-modal__hint{color:var(--text-soft);font-size:14px}
+      @media (max-width:640px){
+        .library-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+        .page-header{align-items:stretch}
+        .page-actions{width:100%;flex-wrap:wrap}
+        .sort-select,.add-btn,.folder-action-btn{flex:1}
+        .library-card{border-radius:18px;padding:8px}
+        .action-modal{border-radius:22px;padding:16px}
+        .action-modal__folder-form{flex-direction:column}
       }
     </style>
   `;
@@ -940,6 +585,8 @@ function sameItemList(a = [], b = []) {
       entity_id: item?.entity_id || null,
       title: item?.media_entities?.title_primary || "",
       cover: item?.media_entities?.cover_url || "",
+      description_ru: item?.media_entities?.description_ru || "",
+      description_en: item?.media_entities?.description_en || "",
       year: item?.media_entities?.year || null
     }) === JSON.stringify({
       id: other?.id || null,
@@ -949,6 +596,8 @@ function sameItemList(a = [], b = []) {
       entity_id: other?.entity_id || null,
       title: other?.media_entities?.title_primary || "",
       cover: other?.media_entities?.cover_url || "",
+      description_ru: other?.media_entities?.description_ru || "",
+      description_en: other?.media_entities?.description_en || "",
       year: other?.media_entities?.year || null
     });
   });
@@ -959,6 +608,8 @@ export async function renderCategoryPage(root, params = {}) {
   const title = getCategoryLabel(state.language, category);
   const userId = state.user?.id;
   const authStatus = state.authStatus;
+
+  setCurrentCategory(category);
 
   if (!userId && authStatus === "restoring") {
     root.innerHTML = `
@@ -1016,372 +667,339 @@ export async function renderCategoryPage(root, params = {}) {
     </section>
   `;
 
+  const sortSelect = root.querySelector("[data-sort]");
   const foldersRoot = root.querySelector("[data-folders]");
   const contentRoot = root.querySelector("[data-content]");
-  const sortSelect = root.querySelector("[data-sort]");
   const modalRoot = root.querySelector("[data-action-modal-root]");
 
   if (sortSelect) {
     sortSelect.value = activeSort;
   }
 
-  setCurrentCategory(category);
-
-  function findItemById(userMediaId) {
-    return items.find((item) => Number(item.id) === Number(userMediaId)) || null;
-  }
-
-  function persistViewState() {
-    setCategoryViewState(category, {
-      folder: activeFolder,
-      sort: activeSort
-    });
-  }
-
-  function normalizeActiveFolder() {
-    const existingFolders = new Set(uniqueFolders(items, category));
-
-    if (activeFolder !== "all" && !existingFolders.has(activeFolder)) {
-      activeFolder = "all";
-    }
+  function getCurrentFolders() {
+    return uniqueFolders(items, category);
   }
 
   function getVisibleItems() {
     return sortItems(filterItems(items, activeFolder), activeSort);
   }
 
-  function buildListSignature() {
-    const visibleItems = getVisibleItems();
-
-    return JSON.stringify({
-      folders: uniqueFolders(items, category),
-      activeFolder,
-      activeSort,
-      ids: visibleItems.map((item) => ({
-        id: item.id,
-        status: item.status,
-        folder: item.folder_name || "",
-        updated: item.updated_at || "",
-        title: item.media_entities?.title_primary || "",
-        cover: item.media_entities?.cover_url || ""
-      }))
-    });
-  }
-
   function renderList({ force = false } = {}) {
-    if (isDestroyed || !foldersRoot || !contentRoot) return;
+    if (isDestroyed) return;
 
-    normalizeActiveFolder();
+    const folders = getCurrentFolders();
 
-    const nextSignature = buildListSignature();
-
-    if (!force && nextSignature === lastListSignature) {
-      return;
+    if (activeFolder !== "all" && !folders.includes(activeFolder)) {
+      activeFolder = "all";
+      setCategoryViewState(category, { folder: activeFolder });
     }
-
-    lastListSignature = nextSignature;
-
-    const folders = uniqueFolders(items, category);
-    const visibleItems = getVisibleItems();
 
     foldersRoot.innerHTML = renderFolderTabs(folders, activeFolder);
 
+    const visibleItems = getVisibleItems();
+    const signature = JSON.stringify({
+      activeFolder,
+      activeSort,
+      items: visibleItems.map((item) => ({
+        id: item.id,
+        status: item.status,
+        folder_name: item.folder_name || "",
+        updated_at: item.updated_at || "",
+        title: item.media_entities?.title_primary || "",
+        cover: item.media_entities?.cover_url || "",
+        description_ru: item.media_entities?.description_ru || "",
+        description_en: item.media_entities?.description_en || ""
+      }))
+    });
+
+    if (!force && signature === lastListSignature) return;
+
+    lastListSignature = signature;
+
     contentRoot.innerHTML = visibleItems.length
-      ? `
-        <div class="library-grid">
-          ${visibleItems.map(renderLibraryCard).join("")}
-        </div>
-      `
+      ? `<div class="library-grid">${visibleItems.map(renderLibraryCard).join("")}</div>`
       : renderEmptyState(title);
   }
 
-  function applyItems(nextItems = [], { force = false } = {}) {
-    const normalized = safeArray(nextItems);
-
-    if (!force && sameItemList(items, normalized)) {
-      return;
-    }
-
-    items = normalized;
-    persistViewState();
-    renderList({ force });
+  function closeActionModal() {
+    activeModalItemId = null;
+    modalRoot.innerHTML = "";
   }
 
-  function setCardBusy(userMediaId, busy = true) {
-    const card = contentRoot?.querySelector(`[data-user-media-id="${userMediaId}"]`);
-    if (!card) return;
-    card.classList.toggle("is-busy", Boolean(busy));
-  }
+  function openItemModal(itemId) {
+    const cleanId = Number(itemId || 0);
+    const item = items.find((row) => Number(row.id) === cleanId);
+    if (!item) return;
 
-  function updateItemInMemory(updated) {
-    if (!updated?.id) return;
-
-    items = items.map((item) =>
-      Number(item.id) === Number(updated.id) ? updated : item
-    );
-  }
-
-  function removeItemFromMemory(userMediaId) {
-    items = items.filter((item) => Number(item.id) !== Number(userMediaId));
-  }
-
-  function openItemModal(userMediaId) {
-    activeModalItemId = Number(userMediaId);
-    const item = findItemById(activeModalItemId);
-    if (!item || !modalRoot) return;
-
+    activeModalItemId = cleanId;
     modalRoot.innerHTML = renderActionModal({
       item,
-      folders: uniqueFolders(items, category),
+      folders: getCurrentFolders(),
       category
     });
   }
 
   function openCategoryFolderModal() {
     activeModalItemId = null;
-
-    if (!modalRoot) return;
-
     modalRoot.innerHTML = renderActionModal({
       item: null,
-      folders: uniqueFolders(items, category),
+      folders: getCurrentFolders(),
       category
     });
   }
 
-  function closeActionModal() {
-    activeModalItemId = null;
-    if (modalRoot) modalRoot.innerHTML = "";
+  function patchLocalItem(userMediaId, patch = {}) {
+    const cleanId = Number(userMediaId || 0);
+
+    items = items.map((item) => {
+      if (Number(item.id) !== cleanId) return item;
+
+      return {
+        ...item,
+        ...patch,
+        media_entities: patch.media_entities || item.media_entities
+      };
+    });
   }
 
-  async function assignFolderToActiveItem(folderName = "") {
-    const userMediaId = Number(activeModalItemId || 0);
-    if (!userMediaId) return;
+  async function setItemBusy(userMediaId, busy = true) {
+    const card = root.querySelector(`[data-user-media-id="${CSS.escape(String(userMediaId))}"]`);
+    if (!card) return;
 
-    const cleanFolder = normalizeFolderName(folderName);
-
-    setCardBusy(userMediaId, true);
-
-    const updated = await updateUserMedia(userMediaId, {
-      folder_name: cleanFolder || null
-    });
-
-    if (!updated) return;
-
-    updateItemInMemory(updated);
-
-    updateCachedLibraryItem(userId, updated, {
-      category: updated.category || category
-    });
-
-    if (cleanFolder) {
-      addEmptyFolder(category, cleanFolder);
-    } else {
-      removeEmptyFolderIfUsed(category, findItemById(userMediaId)?.folder_name || "", items);
-    }
-
-    if (activeFolder !== "all" && activeFolder !== cleanFolder) {
-      activeFolder = "all";
-    }
-
-    renderList({ force: true });
-    closeActionModal();
+    card.classList.toggle("is-busy", Boolean(busy));
   }
 
-  async function refreshVisibleListInBackground() {
-    if (isDestroyed || isRefreshing) return;
+  async function handleStatusChange(userMediaId, nextStatus) {
+    const cleanId = Number(userMediaId || 0);
+    const cleanStatus = cleanText(nextStatus) || "planned";
+    const previous = items.find((item) => Number(item.id) === cleanId);
 
-    isRefreshing = true;
+    if (!cleanId || !previous) return;
+
+    await setItemBusy(cleanId, true);
 
     try {
-      const fresh = await refreshUserLibrary(userId, {
+      const updated = await updateUserMedia(cleanId, {
+        status: cleanStatus
+      });
+
+      const nextItem = updated || {
+        ...previous,
+        status: cleanStatus,
+        updated_at: new Date().toISOString()
+      };
+
+      patchLocalItem(cleanId, nextItem);
+      updateCachedLibraryItem(userId, nextItem, { category });
+
+      renderList({ force: true });
+      openItemModal(cleanId);
+    } catch (error) {
+      console.warn("Status update skipped:", error);
+    } finally {
+      await setItemBusy(cleanId, false);
+    }
+  }
+
+  async function handleFolderChange(userMediaId, nextFolder) {
+    const cleanId = Number(userMediaId || 0);
+    const cleanFolder = normalizeFolderName(nextFolder);
+    const previous = items.find((item) => Number(item.id) === cleanId);
+
+    if (!cleanId || !previous) return;
+
+    await setItemBusy(cleanId, true);
+
+    try {
+      if (cleanFolder) {
+        addEmptyFolder(category, cleanFolder);
+      }
+
+      const updated = await updateUserMedia(cleanId, {
+        folder_name: cleanFolder || null
+      });
+
+      const nextItem = updated || {
+        ...previous,
+        folder_name: cleanFolder || null,
+        updated_at: new Date().toISOString()
+      };
+
+      patchLocalItem(cleanId, nextItem);
+      updateCachedLibraryItem(userId, nextItem, { category });
+
+      removeEmptyFolderIfUnused(category, previous.folder_name, items);
+
+      renderList({ force: true });
+      openItemModal(cleanId);
+    } catch (error) {
+      console.warn("Folder update skipped:", error);
+    } finally {
+      await setItemBusy(cleanId, false);
+    }
+  }
+
+  async function handleDelete(userMediaId) {
+    const cleanId = Number(userMediaId || 0);
+    const previous = items.find((item) => Number(item.id) === cleanId);
+
+    if (!cleanId || !previous) return;
+    if (!window.confirm(t("confirmDelete"))) return;
+
+    await setItemBusy(cleanId, true);
+
+    try {
+      await removeFromLibrary(cleanId);
+
+      items = items.filter((item) => Number(item.id) !== cleanId);
+      removeCachedLibraryItem(userId, cleanId, { category });
+      removeEmptyFolderIfUnused(category, previous.folder_name, items);
+
+      closeActionModal();
+      renderList({ force: true });
+    } catch (error) {
+      console.warn("Delete skipped:", error);
+    } finally {
+      await setItemBusy(cleanId, false);
+    }
+  }
+
+  async function loadInitialItems() {
+    try {
+      const loaded = await loadUserLibrary(userId, {
+        mode: "list",
         category,
-        mode: "list"
+        allowStale: true,
+        backgroundRefresh: true
       });
 
       if (isDestroyed) return;
-      applyItems(fresh);
+
+      items = safeArray(loaded);
+      renderList({ force: true });
+
+      if (!isRefreshing) {
+        isRefreshing = true;
+
+        refreshUserLibrary(userId, {
+          mode: "list",
+          category,
+          force: true
+        })
+          .then((freshItems) => {
+            if (isDestroyed) return;
+
+            const normalizedFreshItems = safeArray(freshItems);
+
+            if (!sameItemList(items, normalizedFreshItems)) {
+              items = normalizedFreshItems;
+              renderList({ force: true });
+            }
+          })
+          .catch((error) => {
+            console.warn("Category refresh skipped:", error);
+
+            if (!items.length) {
+              contentRoot.innerHTML = renderErrorState(false);
+            }
+          })
+          .finally(() => {
+            isRefreshing = false;
+          });
+      }
     } catch (error) {
-      console.warn("Category background refresh skipped:", error);
-    } finally {
-      isRefreshing = false;
+      console.warn("Category load skipped:", error);
+
+      if (!isDestroyed) {
+        contentRoot.innerHTML = renderErrorState(items.length > 0);
+      }
     }
   }
 
-  root.querySelector('[data-action="add"]')?.addEventListener("click", () => {
-    openSearchModal("", { category });
-  });
+  function handleRootClick(event) {
+    const target = event.target;
+    const actionTarget = target.closest("[data-action]");
+    const folderTarget = target.closest("[data-folder]");
 
-  root.querySelector('[data-action="open-category-folder-menu"]')?.addEventListener("click", () => {
-    openCategoryFolderModal();
-  });
+    if (folderTarget) {
+      activeFolder = folderTarget.getAttribute("data-folder") || "all";
+      setCategoryViewState(category, { folder: activeFolder });
+      renderList({ force: true });
+      return;
+    }
 
-  sortSelect?.addEventListener("change", () => {
-    activeSort = sortSelect.value || "recent";
-    persistViewState();
-    renderList({ force: true });
-  });
+    if (!actionTarget) return;
 
-  foldersRoot?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-folder]");
-    if (!button) return;
+    const action = actionTarget.getAttribute("data-action");
 
-    activeFolder = button.dataset.folder || "all";
-    persistViewState();
-    renderList({ force: true });
-  });
+    if (action === "add") {
+      openSearchModal("", { category });
+      return;
+    }
 
-  contentRoot?.addEventListener("click", (event) => {
-    const actionNode = event.target.closest("[data-action]");
-    const cardNode = event.target.closest(".library-card");
-
-    if (!actionNode && !cardNode) return;
-
-    const action = actionNode?.dataset?.action || cardNode?.dataset?.action || "";
+    if (action === "open-category-folder-menu") {
+      openCategoryFolderModal();
+      return;
+    }
 
     if (action === "open-item-menu") {
       event.preventDefault();
       event.stopPropagation();
-      openItemModal(actionNode.dataset.userMediaId);
+      openItemModal(actionTarget.getAttribute("data-user-media-id"));
       return;
     }
 
     if (action === "open-card") {
-      const card = cardNode || actionNode.closest(".library-card");
-      if (!card) return;
-
-      const key = card.dataset.key || "";
-      const itemCategory = card.dataset.category || category;
-      const userMediaId = Number(card.dataset.userMediaId);
-      const item = findItemById(userMediaId);
-
-      if (!key) return;
+      const key = actionTarget.getAttribute("data-key") || "";
+      const cardCategory = actionTarget.getAttribute("data-category") || category;
+      const userMediaId = Number(actionTarget.getAttribute("data-user-media-id") || 0);
+      const item = items.find((row) => Number(row.id) === userMediaId);
 
       if (item?.media_entities) {
         setTemporaryCardItem(item.media_entities);
       }
 
-      navigate("/card", {
-        key,
-        category: itemCategory
-      });
+      if (key) {
+        navigate(ROUTES.CARD, {
+          key,
+          category: cardCategory
+        });
+      }
+
+      return;
     }
-  });
-
-  modalRoot?.addEventListener("click", async (event) => {
-    const actionNode = event.target.closest("[data-action]");
-    if (!actionNode) return;
-
-    const action = actionNode.dataset.action || "";
 
     if (action === "close-action-modal") {
-      if (event.target === actionNode || actionNode.classList.contains("action-modal__close")) {
+      if (event.target === actionTarget || actionTarget.classList.contains("action-modal__close")) {
         closeActionModal();
       }
       return;
     }
 
+    const modal = target.closest(".action-modal");
+    const modalCardId = Number(modal?.getAttribute("data-modal-card") || activeModalItemId || 0);
+
     if (action === "modal-set-status") {
-      event.preventDefault();
-
-      const userMediaId = Number(activeModalItemId || 0);
-      const newStatus = actionNode.dataset.value || "";
-      if (!userMediaId || !newStatus) return;
-
-      try {
-        actionNode.disabled = true;
-        setCardBusy(userMediaId, true);
-
-        const updated = await updateUserMedia(userMediaId, {
-          status: newStatus
-        });
-
-        if (!updated) return;
-
-        updateItemInMemory(updated);
-
-        updateCachedLibraryItem(userId, updated, {
-          category: updated.category || category
-        });
-
-        renderList({ force: true });
-        closeActionModal();
-      } catch (error) {
-        console.warn("Update status error:", error);
-        actionNode.disabled = false;
-        setCardBusy(userMediaId, false);
-      }
-
+      handleStatusChange(modalCardId, actionTarget.getAttribute("data-value"));
       return;
     }
 
     if (action === "modal-set-folder") {
-      event.preventDefault();
-
-      try {
-        actionNode.disabled = true;
-        await assignFolderToActiveItem(actionNode.dataset.value || "");
-      } catch (error) {
-        console.warn("Update folder error:", error);
-        actionNode.disabled = false;
-        if (activeModalItemId) setCardBusy(activeModalItemId, false);
-      }
-
+      handleFolderChange(modalCardId, actionTarget.getAttribute("data-value"));
       return;
     }
 
     if (action === "modal-remove-folder") {
-      event.preventDefault();
-
-      try {
-        actionNode.disabled = true;
-        await assignFolderToActiveItem("");
-      } catch (error) {
-        console.warn("Remove folder error:", error);
-        actionNode.disabled = false;
-        if (activeModalItemId) setCardBusy(activeModalItemId, false);
-      }
-
+      handleFolderChange(modalCardId, "");
       return;
     }
 
     if (action === "modal-delete") {
-      event.preventDefault();
-
-      const userMediaId = Number(activeModalItemId || 0);
-      if (!userMediaId) return;
-
-      const confirmed = window.confirm(t("confirmDelete"));
-      if (!confirmed) return;
-
-      try {
-        actionNode.disabled = true;
-        setCardBusy(userMediaId, true);
-
-        await removeFromLibrary(userMediaId);
-
-        const removed = findItemById(userMediaId);
-        removeItemFromMemory(userMediaId);
-
-        if (removed?.folder_name) {
-          removeEmptyFolderIfUsed(category, removed.folder_name, items);
-        }
-
-        removeCachedLibraryItem(userId, userMediaId, {
-          category
-        });
-
-        renderList({ force: true });
-        closeActionModal();
-      } catch (error) {
-        console.warn("Remove from library error:", error);
-        actionNode.disabled = false;
-        setCardBusy(userMediaId, false);
-      }
+      handleDelete(modalCardId);
     }
-  });
+  }
 
-  modalRoot?.addEventListener("submit", async (event) => {
+  function handleRootSubmit(event) {
     const form = event.target.closest('[data-action="modal-create-folder"]');
     if (!form) return;
 
@@ -1391,47 +1009,36 @@ export async function renderCategoryPage(root, params = {}) {
     const folderName = normalizeFolderName(input?.value || "");
     if (!folderName) return;
 
-    const button = form.querySelector("button[type='submit']");
-    if (button) button.disabled = true;
+    addEmptyFolder(category, folderName);
 
-    try {
-      addEmptyFolder(category, folderName);
-
-      if (activeModalItemId) {
-        await assignFolderToActiveItem(folderName);
-      } else {
-        renderList({ force: true });
-        openCategoryFolderModal();
-      }
-    } catch (error) {
-      console.warn("Create folder error:", error);
-    } finally {
-      if (button) button.disabled = false;
+    if (activeModalItemId) {
+      handleFolderChange(activeModalItemId, folderName);
+      return;
     }
-  });
 
-  try {
-    const cachedItems = await loadUserLibrary(userId, {
-      category,
-      mode: "list",
-      allowStale: true,
-      backgroundRefresh: true
-    });
-
-    if (isDestroyed) return;
-
-    applyItems(cachedItems, { force: true });
-    refreshVisibleListInBackground();
-  } catch (error) {
-    console.warn("Category library load error:", error);
-
-    if (contentRoot) {
-      contentRoot.innerHTML = renderErrorState(items.length > 0);
-    }
+    if (input) input.value = "";
+    openCategoryFolderModal();
+    renderList({ force: true });
   }
+
+  function handleSortChange(event) {
+    if (event.target !== sortSelect) return;
+
+    activeSort = sortSelect.value || "recent";
+    setCategoryViewState(category, { sort: activeSort });
+    renderList({ force: true });
+  }
+
+  root.addEventListener("click", handleRootClick);
+  root.addEventListener("submit", handleRootSubmit);
+  sortSelect?.addEventListener("change", handleSortChange);
+
+  await loadInitialItems();
 
   return () => {
     isDestroyed = true;
-    closeActionModal();
+    root.removeEventListener("click", handleRootClick);
+    root.removeEventListener("submit", handleRootSubmit);
+    sortSelect?.removeEventListener("change", handleSortChange);
   };
 }
