@@ -1,6 +1,6 @@
 import { TMDB_API_KEY, API_ENDPOINTS } from "../config.js";
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
-import { normalizeString, safeArray, uniqueArray } from "../utils.js";
+import { safeArray, uniqueArray } from "../utils.js";
 
 const MEDIA_ENTITIES_TABLE = "media_entities";
 
@@ -614,55 +614,6 @@ async function fetchOpenLibraryWork(entity = {}) {
   };
 }
 
-async function fetchGoogleBooks(entity = {}) {
-  const title = getBestTitle(entity);
-  if (!title) return null;
-
-  const url = new URL("https://www.googleapis.com/books/v1/volumes");
-
-  url.searchParams.set("q", title);
-  url.searchParams.set("maxResults", "1");
-  url.searchParams.set("printType", "books");
-
-  const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  const item = safeArray(payload?.items)[0];
-  const volume = item?.volumeInfo || {};
-
-  if (!volume || !Object.keys(volume).length) return null;
-
-  const imageLinks = normalizeJson(volume.imageLinks, {});
-  const cover =
-    cleanText(imageLinks.extraLarge) ||
-    cleanText(imageLinks.large) ||
-    cleanText(imageLinks.medium) ||
-    cleanText(imageLinks.thumbnail) ||
-    "";
-
-  const publishedYear = cleanText(volume.publishedDate).slice(0, 4);
-
-  return {
-    title_primary: cleanText(volume.title),
-    title_en: cleanText(volume.title),
-    original_title: cleanText(volume.title),
-    year: normalizeYear(publishedYear),
-    cover_url: cover.replace(/^http:\/\//i, "https://"),
-    description_en: cleanText(volume.description),
-    meta: {
-      google_books_loaded: true,
-      google_books_id: cleanText(item.id),
-      google_books_authors: safeArray(volume.authors).map(cleanText).filter(Boolean),
-      google_books_publisher: cleanText(volume.publisher),
-      google_books_categories: safeArray(volume.categories).map(cleanText).filter(Boolean)
-    },
-    __source: "google_books"
-  };
-}
-
 async function fetchAniListDetails(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
   const anilistId = cleanText(ids.anilist);
@@ -856,7 +807,6 @@ async function runPatchPipeline(entity = {}) {
   if (category === "books") {
     await tryPatch(() => fetchWikidataPatch(entity));
     await tryPatch(() => fetchOpenLibraryWork(entity));
-    await tryPatch(() => fetchGoogleBooks(entity));
     await tryPatch(() => fetchWikipediaSummary(entity, "ru"));
     await tryPatch(() => fetchWikipediaSummary(entity, "en"));
   }
