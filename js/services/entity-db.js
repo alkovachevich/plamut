@@ -77,7 +77,9 @@ const USER_MEDIA_WITH_ENTITY_SELECT = `
     meta,
     universe_key,
     relations_built_at,
-    relations_status
+    relations_status,
+    manual_locked,
+    manual_verified
   )
 `;
 
@@ -131,6 +133,34 @@ function normalizeExternalIdsMap(value = {}) {
     normalized.openlibrary_work = normalizeOpenLibraryWork(normalized.openlibrary_work);
   }
 
+  if (normalized.openlibrary) {
+    normalized.openlibrary = normalizeOpenLibraryWork(normalized.openlibrary);
+  }
+
+  if (normalized.tmdb && !normalized.tmdb_id) {
+    normalized.tmdb_id = cleanText(normalized.tmdb);
+  }
+
+  if (normalized.tmdb_id && !normalized.tmdb) {
+    normalized.tmdb = cleanText(normalized.tmdb_id);
+  }
+
+  if (normalized.imdb && !normalized.imdb_id) {
+    normalized.imdb_id = cleanText(normalized.imdb);
+  }
+
+  if (normalized.imdb_id && !normalized.imdb) {
+    normalized.imdb = cleanText(normalized.imdb_id);
+  }
+
+  if (normalized.wikidata && !normalized.wikidata_id) {
+    normalized.wikidata_id = cleanText(normalized.wikidata);
+  }
+
+  if (normalized.wikidata_id && !normalized.wikidata) {
+    normalized.wikidata = cleanText(normalized.wikidata_id);
+  }
+
   return normalized;
 }
 
@@ -178,11 +208,34 @@ function hasCategoryConflict(existing = {}, incoming = {}) {
   return true;
 }
 
+function isTruthyFlag(value) {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function isHardLockedEntity(entity = {}) {
+  const canonicalKey = cleanLower(entity.canonical_key);
+  const universeKey = cleanLower(entity.universe_key);
+  const meta = normalizeJson(entity.meta, {});
+
+  return (
+    isTruthyFlag(entity.manual_locked) ||
+    isTruthyFlag(meta.manual_locked) ||
+    isTruthyFlag(meta.seed_locked) ||
+    isTruthyFlag(meta.seed_final) ||
+    isTruthyFlag(meta.manual_reference) ||
+    universeKey === "marvel" ||
+    canonicalKey.startsWith("marvel:") ||
+    canonicalKey.startsWith("seed:") ||
+    canonicalKey.startsWith("manual:")
+  );
+}
+
 function isAuthoritativeEntity(entity = {}) {
   const canonicalKey = cleanLower(entity.canonical_key);
   const meta = normalizeJson(entity.meta, {});
 
   return (
+    isHardLockedEntity(entity) ||
     AUTHORITATIVE_CANONICAL_PREFIXES.some((prefix) => canonicalKey.startsWith(prefix)) ||
     cleanLower(meta.franchise) === "marvel" ||
     Boolean(meta.seed_version) ||
@@ -192,6 +245,10 @@ function isAuthoritativeEntity(entity = {}) {
 
 function canMergeEntities(existing = {}, incoming = {}) {
   if (!existing?.id && !existing?.canonical_key) return true;
+
+  if (isHardLockedEntity(existing)) {
+    return false;
+  }
 
   const existingKey = cleanLower(existing.canonical_key);
   const incomingKey = cleanLower(incoming.canonical_key);
@@ -345,6 +402,7 @@ function getBookAuthorForIdentity(entity = {}) {
 
   return (
     cleanText(safeArray(meta.author_names)[0]) ||
+    cleanText(safeArray(meta.authors)[0]) ||
     cleanText(safeArray(entity.author_names)[0]) ||
     cleanText(safeArray(entity.authors)[0]) ||
     ""
@@ -441,6 +499,9 @@ export function normalizeEntity(entity = {}) {
     throw new Error("У сущности нет названия");
   }
 
+  const externalIds = buildExternalIds(entity);
+  const meta = normalizeJson(entity.meta, {});
+
   return {
     canonical_key: canonicalKey,
     category,
@@ -459,8 +520,8 @@ export function normalizeEntity(entity = {}) {
     description_ru: cleanText(entity.description_ru || entity.description || ""),
     description_en: cleanText(entity.description_en || ""),
 
-    external_ids: buildExternalIds(entity),
-    meta: normalizeJson(entity.meta, {}),
+    external_ids: externalIds,
+    meta,
 
     aliases: buildAliasList(entity)
   };
@@ -486,6 +547,101 @@ function buildEntityPayload(entity) {
     external_ids: entity.external_ids,
     meta: entity.meta
   };
+}
+
+function hasUsefulCover(value = "") {
+  const cover = cleanText(value);
+
+  if (!cover) return false;
+  if (cover === "undefined" || cover === "null") return false;
+  if (cover.includes("/placeholder")) return false;
+
+  return /^https?:\/\//i.test(cover) || cover.startsWith("/");
+}
+
+function hasUsefulDescription(entity = {}) {
+  return (
+    cleanText(entity.description_ru).length >= 80 ||
+    cleanText(entity.description_en).length >= 80
+  );
+}
+
+function hasUsefulTitle(entity = {}) {
+  return Boolean(
+    cleanText(entity.title_primary) ||
+    cleanText(entity.title_ru) ||
+    cleanText(entity.title_en) ||
+    cleanText(entity.original_title) ||
+    cleanText(entity.title)
+  );
+}
+
+function hasUsefulBookAuthor(entity = {}) {
+  if (entity.category !== "books") return true;
+
+  const meta = normalizeJson(entity.meta, {});
+  return Boolean(
+    cleanText(safeArray(meta.author_names)[0]) ||
+    cleanText(safeArray(meta.authors)[0]) ||
+    cleanText(safeArray(entity.author_names)[0]) ||
+    cleanText(safeArray(entity.authors)[0])
+  );
+}
+
+export function getEntityCompleteness(entity = {}) {
+  const normalized = (() => {
+    try {
+      return normalizeEntity(entity);
+    } catch {
+      return {
+        ...entity,
+        category: cleanLower(entity.category),
+        external_ids: buildExternalIds(entity),
+        meta: normalizeJson(entity.meta, {})
+      };
+    }
+  })();
+
+  const missing = [];
+
+  if (!cleanText(normalized.canonical_key)) missing.push("canonical_key");
+  if (!cleanText(normalized.category)) missing.push("category");
+  if (!hasUsefulTitle(normalized)) missing.push("title");
+  if (!hasUsefulCover(normalized.cover_url)) missing.push("cover_url");
+  if (!hasUsefulDescription(normalized)) missing.push("description");
+  if (!hasHardIdentity(normalized)) missing.push("external_ids");
+
+  if (normalized.category !== "books" && !normalizeYear(normalized.year)) {
+    missing.push("year");
+  }
+
+  if (normalized.category === "books" && !hasUsefulBookAuthor(normalized)) {
+    missing.push("author");
+  }
+
+  return {
+    complete: missing.length === 0,
+    missing,
+    entity: normalized
+  };
+}
+
+export function isCompleteEntity(entity = {}) {
+  return getEntityCompleteness(entity).complete;
+}
+
+function assertCompleteEntityForCatalog(entity = {}) {
+  const completeness = getEntityCompleteness(entity);
+
+  if (completeness.complete) {
+    return completeness.entity;
+  }
+
+  const missingText = completeness.missing.join(", ");
+
+  throw new Error(
+    `Карточка неполная и не может быть сохранена в каталог. Не хватает: ${missingText}`
+  );
 }
 
 function pickBetterText(a = "", b = "") {
@@ -556,14 +712,10 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
   const existingIds = normalizeJson(existing.external_ids, {});
   const incomingIds = normalizeJson(incoming.external_ids, {});
 
-  const resolvedExternalIds = {
+  const resolvedExternalIds = normalizeExternalIdsMap({
     ...existingIds,
     ...incomingIds
-  };
-
-  if (resolvedExternalIds.openlibrary_work) {
-    resolvedExternalIds.openlibrary_work = normalizeOpenLibraryWork(resolvedExternalIds.openlibrary_work);
-  }
+  });
 
   const resolvedCategory = isBookEntity
     ? "books"
@@ -598,7 +750,7 @@ function mergeEntityPayload(existing = {}, incoming = {}) {
 
   if (existingAuthoritative && !incomingAuthoritative) {
     return {
-      canonical_key: resolvedCanonicalKey,
+      canonical_key: existing.canonical_key || resolvedCanonicalKey,
       category: existing.category || resolvedCategory,
       primary_source: existing.primary_source || resolvedPrimarySource,
 
@@ -766,7 +918,9 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
         meta,
         universe_key,
         relations_built_at,
-        relations_status
+        relations_status,
+        manual_locked,
+        manual_verified
       `)
       .eq("canonical_key", key)
       .maybeSingle(),
@@ -870,7 +1024,7 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
 function scheduleEntityEnrichment(entity = {}) {
   if (!entity?.id) return;
 
-  if (isAuthoritativeEntity(entity)) {
+  if (isHardLockedEntity(entity) || isAuthoritativeEntity(entity)) {
     return;
   }
 
@@ -898,29 +1052,24 @@ export async function saveEntityIfMissing(inputEntity) {
   const promise = (async () => {
     const existing = await findDuplicateEntity(entity).catch(() => null);
 
-    const canMerge = existing ? canMergeEntities(existing, entity) : false;
+    if (existing?.id) {
+      setCachedEntity(existing);
+      scheduleEntityEnrichment(existing);
+      return existing;
+    }
 
-    const mergedPayload = existing && canMerge
-      ? mergeEntityPayload(existing, entity)
-      : buildEntityPayload(entity);
-
-    const payload = buildEntityPayload({
-      ...entity,
-      ...mergedPayload,
-      canonical_key: existing && canMerge
-        ? existing.canonical_key || mergedPayload.canonical_key || entity.canonical_key
-        : entity.canonical_key
-    });
+    const completeEntity = assertCompleteEntityForCatalog(entity);
+    const payload = buildEntityPayload(completeEntity);
 
     const supabase = getSupabaseClient();
 
     const { data, error } = await withTimeout(
       supabase
         .from(MEDIA_ENTITIES_TABLE)
-        .upsert(payload, { onConflict: "canonical_key" })
+        .insert(payload)
         .select("*")
         .single(),
-      "Сохранение сущности",
+      "Сохранение полной сущности",
       WRITE_TIMEOUT_MS
     );
 
@@ -928,7 +1077,7 @@ export async function saveEntityIfMissing(inputEntity) {
 
     setCachedEntity(data);
 
-    saveAliases(data.id, entity.aliases, entity.primary_source).catch((error) => {
+    saveAliases(data.id, completeEntity.aliases, completeEntity.primary_source).catch((error) => {
       console.warn("saveEntityIfMissing aliases skipped:", error);
     });
 
