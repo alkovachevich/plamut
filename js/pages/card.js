@@ -1,17 +1,17 @@
 import { escapeHtml, clampText, safeArray } from "../utils.js";
-import { getCategoryLabel, STATUS_LABELS, ROUTES } from "../config.js";
+import { getCategoryLabel, STATUS_LABELS } from "../config.js";
 import { navigate } from "../router.js";
 import {
   state,
   openAuthModal,
   getTemporaryCardItem,
-  getStoredCardItemByKey,
-  setTemporaryCardItem
+  getStoredCardItemByKey
 } from "../state.js";
 
 import {
   getEntityByCanonicalKey,
-  addToUserLibrary
+  addToUserLibrary,
+  getEntityCompleteness
 } from "../services/entity-db.js";
 
 import {
@@ -30,11 +30,6 @@ import {
   removeCachedLibraryItem,
   loadUserLibrary
 } from "../services/library-cache.js";
-
-import {
-  enrichMediaEntityInBackground,
-  shouldEnrichEntity
-} from "../services/metadata-enrichment.js";
 
 const CARD_TIMEOUT_MS = 9000;
 const MUTATION_TIMEOUT_MS = 9000;
@@ -66,7 +61,9 @@ const USER_MEDIA_WITH_ENTITY_SELECT = `
     meta,
     universe_key,
     relations_built_at,
-    relations_status
+    relations_status,
+    manual_locked,
+    manual_verified
   )
 `;
 
@@ -75,11 +72,15 @@ const I18N = {
     loadingCard: "Загрузка карточки…",
     cardNotFound: "Карточка не найдена.",
     unavailableTitle: "Карточка временно недоступна",
-    unavailableDescription: "Не удалось быстро загрузить данные из базы. Если карточка была открыта из библиотеки, данные появятся после фоновой загрузки.",
+    unavailableDescription: "Не удалось быстро загрузить данные из базы.",
     actions: "Действия",
     addToLibrary: "Добавить в библиотеку",
+    adding: "Добавляем…",
     alreadyInLibrary: "Уже есть в библиотеке",
-    cardNotReady: "Карточка ещё не загружена. Попробуй через несколько секунд.",
+    cardPreparing: "Карточка подготавливается",
+    cardPreparingText: "Эту preview-карточку пока нельзя сохранить: не хватает данных.",
+    missingFields: "Не хватает",
+    cardNotReady: "Карточка пока не готова к сохранению.",
     status: "Статус",
     folder: "Папка",
     createFolder: "Создать папку",
@@ -89,7 +90,6 @@ const I18N = {
     confirmDeleteText: "Карточка будет удалена из твоей библиотеки.",
     description: "Описание",
     noDescription: "Описание пока уточняется",
-    metadataUpdating: "Данные обновляются…",
     related: "Связанные",
     universes: "Вселенные",
     universe: "Вселенная",
@@ -103,17 +103,26 @@ const I18N = {
     deleted: "Удалено из библиотеки",
     folderUpdated: "Папка обновлена",
     statusUpdated: "Статус обновлён",
-    signIn: "Войти"
+    signIn: "Войти",
+    preview: "Preview",
+    fromDb: "Из базы",
+    category: "Категория",
+    year: "Год",
+    originalTitle: "Оригинальное название"
   },
   en: {
     loadingCard: "Loading card…",
     cardNotFound: "Card not found.",
     unavailableTitle: "Card is temporarily unavailable",
-    unavailableDescription: "Could not quickly load data from the database. If this card was opened from your library, the data will appear after background loading.",
+    unavailableDescription: "Could not quickly load data from the database.",
     actions: "Actions",
     addToLibrary: "Add to library",
+    adding: "Adding…",
     alreadyInLibrary: "Already in library",
-    cardNotReady: "The card is not loaded yet. Try again in a few seconds.",
+    cardPreparing: "Card is being prepared",
+    cardPreparingText: "This preview card cannot be saved yet: it needs more data.",
+    missingFields: "Missing",
+    cardNotReady: "The card is not ready to save yet.",
     status: "Status",
     folder: "Folder",
     createFolder: "Create folder",
@@ -123,7 +132,6 @@ const I18N = {
     confirmDeleteText: "This card will be removed from your library.",
     description: "Description",
     noDescription: "Description is being updated",
-    metadataUpdating: "Updating metadata…",
     related: "Related",
     universes: "Universes",
     universe: "Universe",
@@ -137,7 +145,12 @@ const I18N = {
     deleted: "Removed from library",
     folderUpdated: "Folder updated",
     statusUpdated: "Status updated",
-    signIn: "Sign in"
+    signIn: "Sign in",
+    preview: "Preview",
+    fromDb: "From database",
+    category: "Category",
+    year: "Year",
+    originalTitle: "Original title"
   }
 };
 
@@ -199,76 +212,64 @@ function addEmptyFolder(category = "", folderName = "") {
   return data[cleanCategory];
 }
 
+function isTempMode(params = {}) {
+  return clean(params.mode) === "temp";
+}
+
 function isFallbackEntity(entity = {}) {
   return Boolean(entity?.__fallback);
 }
 
-function isPersistableEntity(entity = {}) {
-  return Boolean(entity?.canonical_key && !isFallbackEntity(entity));
+function isPreviewEntity(entity = {}) {
+  return Boolean(entity?.__mode === "temp" || entity?.meta?.search_preview || entity?.__source === "search");
 }
 
-function hasUsefulDescription(entity = {}) {
-  return clean(entity.description_ru || entity.description_en || entity.description).length >= 40;
-}
-
-function hasUsefulCover(entity = {}) {
-  const cover = clean(entity.cover_url);
-  return Boolean(cover && cover !== "undefined" && cover !== "null" && !cover.includes("/placeholder"));
-}
-
-function isIncompleteEntity(entity = {}) {
-  if (!entity?.canonical_key || isFallbackEntity(entity)) return true;
-  return !hasUsefulCover(entity) || !hasUsefulDescription(entity);
-}
-
-function mergeEntityStable(current = {}, incoming = {}) {
-  const left = current && typeof current === "object" ? current : {};
-  const right = incoming && typeof incoming === "object" ? incoming : {};
+function normalizeEntityForView(item = {}) {
+  if (!item || typeof item !== "object") return null;
 
   return {
-    ...left,
-    ...right,
-    id: right.id || left.id || null,
-    canonical_key: clean(right.canonical_key) || clean(left.canonical_key),
-    category: clean(right.category) || clean(left.category),
-    primary_source: clean(right.primary_source) || clean(left.primary_source),
-    title_primary: clean(right.title_primary) || clean(left.title_primary),
-    title_ru: clean(right.title_ru) || clean(left.title_ru),
-    title_en: clean(right.title_en) || clean(left.title_en),
-    original_title: clean(right.original_title) || clean(left.original_title),
-    year: right.year || left.year || null,
-    cover_url: clean(right.cover_url) || clean(left.cover_url),
-    description_ru: clean(right.description_ru) || clean(left.description_ru) || clean(left.description),
-    description_en: clean(right.description_en) || clean(left.description_en),
-    external_ids: {
-      ...(left.external_ids && typeof left.external_ids === "object" ? left.external_ids : {}),
-      ...(right.external_ids && typeof right.external_ids === "object" ? right.external_ids : {})
-    },
-    meta: {
-      ...(left.meta && typeof left.meta === "object" ? left.meta : {}),
-      ...(right.meta && typeof right.meta === "object" ? right.meta : {})
-    },
-    universe_key: clean(right.universe_key) || clean(left.universe_key),
-    relations_built_at: right.relations_built_at || left.relations_built_at || null,
-    relations_status: clean(right.relations_status) || clean(left.relations_status)
+    ...item,
+    canonical_key: clean(item.canonical_key),
+    category: clean(item.category),
+    primary_source: clean(item.primary_source || item.source || ""),
+    title_primary: clean(item.title_primary || item.title || item.title_ru || item.title_en || item.original_title || ""),
+    title_ru: clean(item.title_ru),
+    title_en: clean(item.title_en),
+    original_title: clean(item.original_title || item.title_en || item.title || ""),
+    year: item.year || null,
+    cover_url: clean(item.cover_url),
+    description_ru: clean(item.description_ru || item.description || ""),
+    description_en: clean(item.description_en || ""),
+    external_ids: item.external_ids && typeof item.external_ids === "object" ? item.external_ids : {},
+    meta: item.meta && typeof item.meta === "object" ? item.meta : {},
+    universe_key: clean(item.universe_key),
+    relations_built_at: item.relations_built_at || null,
+    relations_status: clean(item.relations_status || "")
   };
 }
 
 function resolveTitle(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
 
-  if ((entity.category || "") === "books") {
-    return lang === "en"
-      ? entity.title_en || entity.title_primary || entity.title_ru || entity.original_title || entity.title || t("unavailableTitle")
-      : entity.title_ru || entity.title_primary || entity.title_en || entity.original_title || entity.title || t("unavailableTitle");
+  if (lang === "en") {
+    return (
+      clean(entity.display_title) ||
+      clean(entity.title_en) ||
+      clean(entity.title_primary) ||
+      clean(entity.title_ru) ||
+      clean(entity.original_title) ||
+      clean(entity.title) ||
+      t("unavailableTitle")
+    );
   }
 
   return (
-    entity.title_primary ||
-    entity.title_ru ||
-    entity.title_en ||
-    entity.original_title ||
-    entity.title ||
+    clean(entity.display_title) ||
+    clean(entity.title_ru) ||
+    clean(entity.title_primary) ||
+    clean(entity.title_en) ||
+    clean(entity.original_title) ||
+    clean(entity.title) ||
     t("unavailableTitle")
   );
 }
@@ -276,43 +277,43 @@ function resolveTitle(entity = {}) {
 function resolveDescription(entity = {}) {
   const lang = state.language === "en" ? "en" : "ru";
 
-  if ((entity.category || "") === "books") {
-    return lang === "en"
-      ? entity.description_en || entity.description_ru || entity.description || ""
-      : entity.description_ru || entity.description_en || entity.description || "";
+  if (lang === "en") {
+    return clean(entity.description_en || entity.description_ru || entity.description || "");
   }
 
-  return entity.description_ru || entity.description_en || entity.description || "";
+  return clean(entity.description_ru || entity.description_en || entity.description || "");
 }
 
 function getCover(entity = {}) {
   const cover = clean(entity.cover_url);
-  if (!cover || cover === "undefined" || cover === "null") return "";
+  if (!cover || cover === "undefined" || cover === "null" || cover.includes("/placeholder")) return "";
   return cover;
 }
 
-function normalizeStoredEntity(item = {}) {
-  if (!item || typeof item !== "object" || !item.canonical_key || item.__fallback) {
-    return null;
-  }
+function getStatusLabel(status = "") {
+  const key = clean(status);
+  return t(key) || STATUS_LABELS[key] || key || t("planned");
+}
 
-  return {
-    ...item,
-    title_primary:
-      item.title_primary ||
-      item.title ||
-      item.title_ru ||
-      item.title_en ||
-      item.original_title ||
-      "",
-    title_ru: item.title_ru || "",
-    title_en: item.title_en || "",
-    original_title: item.original_title || item.title || "",
-    description_ru: item.description_ru || item.description || "",
-    description_en: item.description_en || "",
-    external_ids: item.external_ids || {},
-    meta: item.meta || {}
-  };
+function getCompleteness(entity = {}) {
+  try {
+    return getEntityCompleteness(entity);
+  } catch {
+    return {
+      complete: false,
+      missing: ["unknown"],
+      entity
+    };
+  }
+}
+
+function isEntityReadyToSave(entity = {}) {
+  return Boolean(getCompleteness(entity).complete);
+}
+
+function getMissingText(entity = {}) {
+  const missing = safeArray(getCompleteness(entity).missing).filter(Boolean);
+  return missing.length ? `${t("missingFields")}: ${missing.join(", ")}` : t("cardNotReady");
 }
 
 function getCachedEntityByKey(userId, key) {
@@ -322,7 +323,7 @@ function getCachedEntityByKey(userId, key) {
     getCachedLibraryItem(userId, key, { mode: "full", allowExpired: true }) ||
     getCachedLibraryItem(userId, key, { mode: "list", allowExpired: true });
 
-  return cached?.media_entities || null;
+  return normalizeEntityForView(cached?.media_entities || null);
 }
 
 function getCachedUserMedia(userId, entity = {}) {
@@ -375,11 +376,19 @@ function loadFastEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
 
-  const cachedEntity = normalizeStoredEntity(getCachedEntityByKey(userId, key));
-  const temp = normalizeStoredEntity(getTemporaryCardItem());
-  const stored = normalizeStoredEntity(getStoredCardItemByKey(key));
+  const cachedEntity = getCachedEntityByKey(userId, key);
+  const temp = normalizeEntityForView(getTemporaryCardItem());
+  const stored = normalizeEntityForView(getStoredCardItemByKey(key));
 
-  const candidates = [cachedEntity, temp, stored].filter(Boolean);
+  if (isTempMode(params)) {
+    const tempMatch = [temp, stored].find((item) =>
+      item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key)
+    );
+
+    return tempMatch || cachedEntity || null;
+  }
+
+  const candidates = [cachedEntity, stored, temp].filter(Boolean);
   const matching = candidates.find((item) =>
     item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key)
   );
@@ -396,25 +405,7 @@ async function loadEntityFromDb(key) {
     CARD_TIMEOUT_MS
   ).catch(() => null);
 
-  if (entityFromService && !isIncompleteEntity(entityFromService)) {
-    return entityFromService;
-  }
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from("media_entities")
-      .select("*")
-      .eq("canonical_key", key)
-      .maybeSingle(),
-    "Полная загрузка карточки",
-    CARD_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-
-  return data || entityFromService || null;
+  return normalizeEntityForView(entityFromService);
 }
 
 async function loadUserMedia(userId, entityId) {
@@ -491,11 +482,6 @@ async function loadCategoryFolders(userId, category = "") {
 
   return [...new Set([...fromItems, ...getEmptyFolders(cleanCategory)])]
     .sort((a, b) => a.localeCompare(b, state.language === "en" ? "en" : "ru"));
-}
-
-function getStatusLabel(status = "") {
-  const key = clean(status);
-  return t(key) || STATUS_LABELS[key] || key || t("planned");
 }
 
 function renderCover(entity = {}) {
@@ -613,7 +599,7 @@ function renderUniverseLinks(links = []) {
   `;
 }
 
-function renderActionModal({ userMedia = null, folders = [] } = {}) {
+function renderActionModal({ userMedia = null, folders = [], canAdd = true } = {}) {
   const currentStatus = userMedia?.status || "";
   const currentFolder = userMedia?.folder_name || "";
 
@@ -627,8 +613,12 @@ function renderActionModal({ userMedia = null, folders = [] } = {}) {
           </div>
 
           <section class="card-action-modal__group">
-            <button class="card-action-modal__primary" type="button" data-action="modal-add">
-              ${escapeHtml(t("addToLibrary"))}
+            <button
+              class="card-action-modal__primary ${canAdd ? "" : "is-muted"}"
+              type="button"
+              data-action="modal-add"
+            >
+              ${escapeHtml(canAdd ? t("addToLibrary") : t("cardPreparing"))}
             </button>
           </section>
         </div>
@@ -715,6 +705,7 @@ function renderStyles() {
     <style>
       .card-page{display:flex;flex-direction:column;gap:18px}
       .card-shell{position:relative;display:grid;grid-template-columns:132px 1fr;gap:16px;padding:16px;border-radius:22px;border:1px solid var(--border-soft);background:var(--bg-elevated)}
+      .card-shell.is-preview{border-color:color-mix(in srgb,var(--accent) 42%,var(--border-soft))}
       .card-cover{width:132px;aspect-ratio:2/3;overflow:hidden;border-radius:16px;border:1px solid var(--border-soft);background:var(--surface)}
       .card-cover img{width:100%;height:100%;object-fit:cover}
       .card-cover.is-empty{display:grid;place-items:center}
@@ -727,12 +718,15 @@ function renderStyles() {
       .card-badge{display:inline-flex;align-items:center;min-height:26px;padding:5px 9px;border-radius:999px;background:var(--accent-soft);color:var(--text);font-size:12px}
       .card-badge.folder{background:var(--bg-soft)}
       .card-badge.muted{background:var(--surface);color:var(--text-soft);border:1px solid var(--border-soft)}
+      .card-badge.warning{background:color-mix(in srgb,var(--danger) 12%,var(--surface));color:var(--danger)}
       .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:10}
       .card-menu-btn{width:38px;height:38px;display:grid;place-items:center;border-radius:999px;border:1px solid var(--border);background:var(--surface-strong);color:var(--text);font-size:22px;line-height:1}
       .card-status{min-height:20px;font-size:13px;color:var(--text-soft)}
       .card-section{padding:16px;border-radius:18px;border:1px solid var(--border-soft);background:var(--surface)}
       .card-section__title{font-size:17px;font-weight:850;color:var(--text);margin-bottom:10px}
       .card-description{color:var(--text-soft);font-size:15px;line-height:1.55;white-space:pre-line}
+      .card-preparing{display:flex;flex-direction:column;gap:7px;padding:13px;border-radius:16px;border:1px solid color-mix(in srgb,var(--danger) 28%,var(--border-soft));background:color-mix(in srgb,var(--danger) 7%,var(--surface));color:var(--text-soft);font-size:14px;line-height:1.45}
+      .card-preparing__title{color:var(--text);font-weight:850}
       .related-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
       .related-card{display:grid;grid-template-columns:54px 1fr;gap:10px;align-items:center;padding:8px;border-radius:14px;border:1px solid var(--border-soft);background:var(--bg-elevated);color:var(--text);text-align:left}
       .related-card__cover{width:54px;height:76px;border-radius:10px;overflow:hidden;background:var(--surface);border:1px solid var(--border-soft)}
@@ -761,12 +755,14 @@ function renderStyles() {
       .card-action-modal__input{flex:1;min-width:0;min-height:42px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px}
       .card-action-modal__small-btn,.card-action-modal__primary{min-height:42px;border-radius:14px;background:var(--accent-soft);color:var(--text);padding:0 12px;font-weight:750}
       .card-action-modal__primary{width:100%;background:var(--accent);color:#fff}
+      .card-action-modal__primary.is-muted{background:var(--accent-soft);color:var(--text-soft)}
       .card-action-modal__delete{width:100%;min-height:44px;border-radius:14px;background:transparent;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);font-weight:800}
+      .empty-card{padding:24px;border-radius:18px;border:1px solid var(--border-soft);background:var(--surface);color:var(--text-soft)}
       @media(max-width:640px){
-        .card-shell{grid-template-columns:96px 1fr;padding:12px;border-radius:18px}
+        .card-shell{grid-template-columns:96px 1fr;gap:12px;padding:12px;border-radius:18px}
         .card-cover{width:96px;border-radius:13px}
         .card-title{font-size:20px}
-        .card-main{padding-right:40px}
+        .card-main{padding-right:38px}
         .related-grid{grid-template-columns:1fr}
         .card-action-modal__folder-form{flex-direction:column}
       }
@@ -774,52 +770,83 @@ function renderStyles() {
   `;
 }
 
-function renderPage({ entity, userMedia = null, relatedItems = [], universeLinks = [], statusText = "" } = {}) {
-  const title = resolveTitle(entity);
-  const description = resolveDescription(entity);
-  const categoryLabel = getCategoryLabel(state.language, entity.category || "");
-  const originalTitle = entity.original_title && entity.original_title !== title ? entity.original_title : "";
+function renderLoading(root) {
+  root.innerHTML = `
+    ${renderStyles()}
+    <div class="empty-card">${escapeHtml(t("loadingCard"))}</div>
+  `;
+}
 
-  const statusBadge = userMedia?.status
-    ? `<span class="card-badge" data-user-status>${escapeHtml(getStatusLabel(userMedia.status))}</span>`
-    : "";
+function renderNotFound(root) {
+  root.innerHTML = `
+    ${renderStyles()}
+    <div class="empty-card">${escapeHtml(t("cardNotFound"))}</div>
+  `;
+}
 
-  const folderBadge = userMedia?.folder_name
-    ? `<span class="card-badge folder" data-user-folder>${escapeHtml(userMedia.folder_name)}</span>`
-    : "";
-
-  const metadataBadge = isIncompleteEntity(entity)
-    ? `<span class="card-badge muted">${escapeHtml(t("metadataUpdating"))}</span>`
-    : "";
+function renderPreparing(entity = {}) {
+  if (isEntityReadyToSave(entity)) return "";
 
   return `
+    <div class="card-preparing">
+      <div class="card-preparing__title">${escapeHtml(t("cardPreparing"))}</div>
+      <div>${escapeHtml(t("cardPreparingText"))}</div>
+      <div>${escapeHtml(getMissingText(entity))}</div>
+    </div>
+  `;
+}
+
+function renderPage(root, viewState) {
+  const {
+    entity,
+    userMedia,
+    folders,
+    relatedItems,
+    universeLinks,
+    actionModalOpen,
+    statusText,
+    preview
+  } = viewState;
+
+  const title = resolveTitle(entity);
+  const description = resolveDescription(entity);
+  const originalTitle = clean(entity.original_title);
+  const canAdd = isEntityReadyToSave(entity) && !isFallbackEntity(entity);
+  const categoryLabel = getCategoryLabel(state.language, entity.category || "");
+
+  root.innerHTML = `
     ${renderStyles()}
 
     <section class="card-page">
-      <article class="card-shell">
+      <article class="card-shell ${preview ? "is-preview" : ""}">
         <div class="card-cover">
           ${renderCover(entity)}
         </div>
 
         <div class="card-main">
+          <div class="card-title">${escapeHtml(title)}</div>
+
+          ${
+            originalTitle && originalTitle !== title
+              ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>`
+              : ""
+          }
+
           <div class="card-badges">
-            <span class="card-badge muted">${escapeHtml(categoryLabel)}</span>
+            ${categoryLabel ? `<span class="card-badge">${escapeHtml(categoryLabel)}</span>` : ""}
             ${entity.year ? `<span class="card-badge muted">${escapeHtml(String(entity.year))}</span>` : ""}
-            ${statusBadge}
-            ${folderBadge}
-            ${metadataBadge}
+            ${userMedia?.status ? `<span class="card-badge">${escapeHtml(getStatusLabel(userMedia.status))}</span>` : ""}
+            ${userMedia?.folder_name ? `<span class="card-badge folder">${escapeHtml(userMedia.folder_name)}</span>` : ""}
+            ${preview ? `<span class="card-badge warning">${escapeHtml(t("preview"))}</span>` : ""}
           </div>
 
-          <div>
-            <div class="card-title">${escapeHtml(title)}</div>
-            ${originalTitle ? `<div class="card-subtitle">${escapeHtml(originalTitle)}</div>` : ""}
-          </div>
+          ${renderPreparing(entity)}
 
-          <div class="card-status" data-card-status-text>${escapeHtml(statusText || "")}</div>
+          <div class="card-status" data-card-status>${escapeHtml(statusText || "")}</div>
         </div>
 
         <div class="card-menu-wrap">
-          <button class="card-menu-btn" type="button" data-action="open-action-modal">⋯</button>
+          <button class="card-menu-btn" type="button" data-action="open-action-modal" aria-label="${escapeHtml(t("actions"))}">⋯</button>
         </div>
       </article>
 
@@ -845,374 +872,319 @@ function renderPage({ entity, userMedia = null, relatedItems = [], universeLinks
           : ""
       }
 
-      <div data-card-action-modal-root></div>
+      ${actionModalOpen ? renderActionModal({ userMedia, folders, canAdd }) : ""}
     </section>
   `;
 }
 
+function bindRelated(root) {
+  root.querySelectorAll("[data-related]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.related || "";
+      if (!key) return;
+
+      navigate("/card", {
+        key
+      });
+    });
+  });
+
+  root.querySelectorAll("[data-universe-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const universeKey = button.dataset.universeKey || "";
+      if (!universeKey) return;
+
+      navigate("/universe", {
+        key: universeKey
+      });
+    });
+  });
+}
+
+function setStatus(root, message = "") {
+  const target = root.querySelector("[data-card-status]");
+  if (target) target.textContent = message;
+}
+
 export async function renderCardPage(root, params = {}) {
   const key = normalizeKey(params.key || "");
-  const category = clean(params.category || "");
   const userId = state.user?.id || "";
+  const previewMode = isTempMode(params);
 
-  let isDestroyed = false;
-  let entity = loadFastEntity(params) || buildFallbackEntity({ key, category });
-  let userMedia = entity ? getCachedUserMedia(userId, entity) : null;
+  if (!key) {
+    renderNotFound(root);
+    return;
+  }
+
+  let entity =
+    loadFastEntity(params) ||
+    buildFallbackEntity(params);
+
+  if (!entity) {
+    renderNotFound(root);
+    return;
+  }
+
+  let userMedia = null;
   let folders = [];
   let relatedItems = [];
   let universeLinks = [];
-  let statusText = entity ? "" : t("loadingCard");
+  let actionModalOpen = false;
+  let statusText = "";
+  let destroyed = false;
 
-  function scheduleEnrichmentIfNeeded(currentEntity) {
-    if (!currentEntity?.id || isFallbackEntity(currentEntity)) return;
+  const getPreviewFlag = () => previewMode || isPreviewEntity(entity) || !entity.id;
 
-    if (shouldEnrichEntity(currentEntity)) {
-      enrichMediaEntityInBackground(currentEntity);
-    }
-  }
+  const rerender = () => {
+    if (destroyed) return;
 
-  function setStatusText(text = "") {
-    statusText = text;
-    const node = root.querySelector("[data-card-status-text]");
-    if (node) node.textContent = text;
-  }
-
-  function rerender() {
-    if (isDestroyed) return;
-
-    root.innerHTML = renderPage({
+    renderPage(root, {
       entity,
       userMedia,
+      folders,
       relatedItems,
       universeLinks,
-      statusText
+      actionModalOpen,
+      statusText,
+      preview: getPreviewFlag()
     });
-  }
 
-  function closeActionModal() {
-    root.querySelector("[data-card-action-modal-root]")?.replaceChildren();
-  }
+    bind();
+  };
 
-  async function openActionModal() {
-    if (!entity) return;
+  const refreshFolders = async () => {
+    folders = await loadCategoryFolders(userId, entity.category).catch(() => getEmptyFolders(entity.category));
+  };
 
-    folders = await loadCategoryFolders(userId, entity.category || category).catch(() => getEmptyFolders(entity.category || category));
-
-    const modalRoot = root.querySelector("[data-card-action-modal-root]");
-    if (!modalRoot) return;
-
-    modalRoot.innerHTML = renderActionModal({
-      userMedia,
-      folders
-    });
-  }
-
-  async function refreshUserMedia() {
+  const refreshUserMedia = async () => {
     if (!userId || !entity?.id) {
       userMedia = null;
       return;
     }
 
-    const row = await loadUserMedia(userId, entity.id).catch(() => null);
+    userMedia =
+      getCachedUserMedia(userId, entity) ||
+      await loadUserMedia(userId, entity.id).catch(() => null);
+  };
 
-    if (row?.id) {
-      userMedia = {
-        id: row.id,
-        user_id: row.user_id,
-        entity_id: row.entity_id,
-        category: row.category,
-        status: row.status,
-        folder_name: row.folder_name,
-        created_at: row.created_at,
-        updated_at: row.updated_at
-      };
-
-      if (row.media_entities) {
-        entity = mergeEntityStable(entity, row.media_entities);
-        updateCachedLibraryItem(userId, row, { category: row.category || entity.category });
-      }
-    } else {
-      userMedia = null;
+  const refreshRelations = async () => {
+    if (!entity?.id) {
+      relatedItems = [];
+      universeLinks = [];
+      return;
     }
-  }
 
-  async function refreshEntityFromDb() {
-    if (!key) return;
-
-    const freshEntity = await loadEntityFromDb(key).catch((error) => {
-      console.warn("Card DB load skipped:", error);
-      return null;
-    });
-
-    if (!freshEntity?.canonical_key) return;
-
-    entity = mergeEntityStable(entity, freshEntity);
-    setTemporaryCardItem(entity);
-    scheduleEnrichmentIfNeeded(entity);
-
-    await refreshUserMedia();
-  }
-
-  async function refreshRelated() {
-    if (!entity?.id) return;
-
-    const [nextRelatedItems, nextUniverseLinks] = await Promise.all([
-      getRelatedItemsForEntityFromDb(entity.id).catch(() => []),
-      getEntityUniverseLinksFromDb(entity.id).catch(() => [])
+    const [related, links] = await Promise.allSettled([
+      getRelatedItemsForEntityFromDb({ entityId: entity.id }),
+      getEntityUniverseLinksFromDb({ entityId: entity.id })
     ]);
 
-    relatedItems = safeArray(nextRelatedItems);
-    universeLinks = safeArray(nextUniverseLinks);
-  }
+    relatedItems = related.status === "fulfilled" ? safeArray(related.value) : [];
+    universeLinks = links.status === "fulfilled" ? safeArray(links.value) : [];
+  };
 
-  async function handleAddToLibrary() {
-    if (!state.user?.id) {
+  const handleAdd = async () => {
+    if (!userId) {
       openAuthModal("login");
       return;
     }
 
-    if (!isPersistableEntity(entity)) {
-      setStatusText(t("cardNotReady"));
+    if (!isEntityReadyToSave(entity)) {
+      statusText = getMissingText(entity);
+      actionModalOpen = false;
+      rerender();
       return;
     }
 
     try {
+      statusText = t("adding");
+      actionModalOpen = false;
+      rerender();
+
       const result = await addToUserLibrary({
-        userId: state.user.id,
-        entity,
-        status: "planned"
+        userId,
+        entity
       });
 
-      userMedia = result.userMedia || null;
+      const addedUserMedia =
+        result?.userMedia ||
+        result?.item ||
+        result?.data ||
+        result ||
+        null;
 
-      if (result.entity) {
-        entity = mergeEntityStable(entity, result.entity);
+      if (addedUserMedia?.media_entities) {
+        entity = normalizeEntityForView(addedUserMedia.media_entities) || entity;
+      } else if (addedUserMedia?.entity_id && !entity.id) {
+        entity = normalizeEntityForView(await loadEntityFromDb(entity.canonical_key)) || entity;
+      } else if (!entity.id) {
+        entity = normalizeEntityForView(await loadEntityFromDb(entity.canonical_key)) || entity;
       }
 
-      if (result.userMedia) {
-        updateCachedLibraryItem(state.user.id, result.userMedia, {
-          category: result.userMedia.category || entity.category
-        });
-      }
+      await refreshUserMedia();
+      await refreshFolders();
+      await refreshRelations();
 
-      setStatusText(result.alreadyExists ? t("alreadyInLibrary") : t("saved"));
-      closeActionModal();
+      statusText = result?.alreadyExists ? t("alreadyInLibrary") : t("saved");
       rerender();
     } catch (error) {
-      console.warn("Add to library skipped:", error);
-      setStatusText(String(error?.message || t("cardNotReady")));
+      console.warn("Add card error:", error);
+      statusText = error?.message || t("cardNotReady");
+      rerender();
     }
-  }
+  };
 
-  async function handleStatusChange(nextStatus) {
+  const handleStatusUpdate = async (status) => {
     if (!userMedia?.id) return;
+
+    try {
+      const updated = await updateUserMedia(userMedia.id, { status });
+      userMedia = updated || { ...userMedia, status };
+
+      if (updated?.media_entities) {
+        entity = normalizeEntityForView(updated.media_entities) || entity;
+      }
+
+      updateCachedLibraryItem(userId, {
+        ...updated,
+        media_entities: entity
+      });
+
+      actionModalOpen = false;
+      statusText = t("statusUpdated");
+      rerender();
+    } catch (error) {
+      console.warn("Status update error:", error);
+      statusText = t("cardNotReady");
+      rerender();
+    }
+  };
+
+  const handleFolderUpdate = async (folderName) => {
+    if (!userMedia?.id) return;
+
+    const normalizedFolder = normalizeFolderName(folderName);
 
     try {
       const updated = await updateUserMedia(userMedia.id, {
-        status: clean(nextStatus) || "planned"
+        folder_name: normalizedFolder || null
       });
 
-      if (updated?.id) {
-        userMedia = {
-          id: updated.id,
-          user_id: updated.user_id,
-          entity_id: updated.entity_id,
-          category: updated.category,
-          status: updated.status,
-          folder_name: updated.folder_name,
-          created_at: updated.created_at,
-          updated_at: updated.updated_at
-        };
+      userMedia = updated || { ...userMedia, folder_name: normalizedFolder };
 
-        if (updated.media_entities) {
-          entity = mergeEntityStable(entity, updated.media_entities);
-        }
-
-        updateCachedLibraryItem(userId, updated, { category: updated.category || entity.category });
+      if (updated?.media_entities) {
+        entity = normalizeEntityForView(updated.media_entities) || entity;
       }
 
-      setStatusText(t("statusUpdated"));
-      closeActionModal();
-      rerender();
-    } catch (error) {
-      console.warn("Status update skipped:", error);
-      setStatusText(String(error?.message || ""));
-    }
-  }
-
-  async function handleFolderChange(nextFolder) {
-    if (!userMedia?.id) return;
-
-    const folderName = normalizeFolderName(nextFolder);
-
-    try {
-      if (folderName) {
-        addEmptyFolder(entity.category || category, folderName);
+      if (normalizedFolder) {
+        folders = addEmptyFolder(entity.category, normalizedFolder);
       }
 
-      const updated = await updateUserMedia(userMedia.id, {
-        folder_name: folderName || null
+      updateCachedLibraryItem(userId, {
+        ...updated,
+        media_entities: entity
       });
 
-      if (updated?.id) {
-        userMedia = {
-          id: updated.id,
-          user_id: updated.user_id,
-          entity_id: updated.entity_id,
-          category: updated.category,
-          status: updated.status,
-          folder_name: updated.folder_name,
-          created_at: updated.created_at,
-          updated_at: updated.updated_at
-        };
-
-        if (updated.media_entities) {
-          entity = mergeEntityStable(entity, updated.media_entities);
-        }
-
-        updateCachedLibraryItem(userId, updated, { category: updated.category || entity.category });
-      }
-
-      setStatusText(t("folderUpdated"));
-      closeActionModal();
+      actionModalOpen = false;
+      statusText = t("folderUpdated");
       rerender();
     } catch (error) {
-      console.warn("Folder update skipped:", error);
-      setStatusText(String(error?.message || ""));
+      console.warn("Folder update error:", error);
+      statusText = t("cardNotReady");
+      rerender();
     }
-  }
+  };
 
-  async function handleDelete() {
+  const handleDelete = async () => {
     if (!userMedia?.id) return;
-    if (!window.confirm(t("confirmDeleteText"))) return;
+
+    const confirmed = window.confirm(t("confirmDeleteText"));
+    if (!confirmed) return;
 
     try {
-      const removedId = userMedia.id;
-      const removedCategory = userMedia.category || entity.category || category;
+      await deleteUserMedia(userMedia.id);
 
-      await deleteUserMedia(removedId);
-      removeCachedLibraryItem(userId, removedId, { category: removedCategory });
+      removeCachedLibraryItem(userId, entity.canonical_key);
 
       userMedia = null;
-      setStatusText(t("deleted"));
-      closeActionModal();
+      actionModalOpen = false;
+      statusText = t("deleted");
       rerender();
     } catch (error) {
-      console.warn("Delete skipped:", error);
-      setStatusText(String(error?.message || ""));
+      console.warn("Delete card error:", error);
+      statusText = t("cardNotReady");
+      rerender();
     }
-  }
+  };
 
-  function handleClick(event) {
-    const actionTarget = event.target.closest("[data-action]");
-    const relatedTarget = event.target.closest("[data-related]");
-    const universeTarget = event.target.closest("[data-universe-key]");
+  const bind = () => {
+    bindRelated(root);
 
-    if (relatedTarget) {
-      const relatedKey = relatedTarget.getAttribute("data-related") || "";
-      if (relatedKey) {
-        navigate(ROUTES.CARD, { key: relatedKey });
-      }
-      return;
-    }
-
-    if (universeTarget) {
-      const universeKey = universeTarget.getAttribute("data-universe-key") || "";
-      if (universeKey) {
-        navigate(ROUTES.UNIVERSE_DETAILS, { key: universeKey });
-      }
-      return;
-    }
-
-    if (!actionTarget) return;
-
-    const action = actionTarget.getAttribute("data-action");
-
-    if (action === "open-action-modal") {
-      openActionModal();
-      return;
-    }
-
-    if (action === "close-action-modal") {
-      if (event.target === actionTarget || actionTarget.classList.contains("card-action-modal__close")) {
-        closeActionModal();
-      }
-      return;
-    }
-
-    if (action === "modal-add") {
-      handleAddToLibrary();
-      return;
-    }
-
-    if (action === "modal-set-status") {
-      handleStatusChange(actionTarget.getAttribute("data-value"));
-      return;
-    }
-
-    if (action === "modal-set-folder") {
-      handleFolderChange(actionTarget.getAttribute("data-value"));
-      return;
-    }
-
-    if (action === "modal-remove-folder") {
-      handleFolderChange("");
-      return;
-    }
-
-    if (action === "modal-delete") {
-      handleDelete();
-    }
-  }
-
-  function handleSubmit(event) {
-    const form = event.target.closest('[data-action="modal-create-folder"]');
-    if (!form) return;
-
-    event.preventDefault();
-
-    const input = form.querySelector("[data-folder-input]");
-    const folderName = normalizeFolderName(input?.value || "");
-
-    if (!folderName) return;
-
-    addEmptyFolder(entity.category || category, folderName);
-    handleFolderChange(folderName);
-  }
-
-  root.addEventListener("click", handleClick);
-  root.addEventListener("submit", handleSubmit);
-
-  if (!entity) {
-    root.innerHTML = `
-      ${renderStyles()}
-      <section class="card-page">
-        <div class="card-section">
-          <div class="card-section__title">${escapeHtml(t("cardNotFound"))}</div>
-        </div>
-      </section>
-    `;
-  } else {
-    rerender();
-  }
-
-  refreshEntityFromDb()
-    .then(refreshRelated)
-    .then(() => {
-      if (!isDestroyed) rerender();
-    })
-    .catch((error) => {
-      console.warn("Card refresh skipped:", error);
-
-      if (!isDestroyed && entity) {
-        scheduleEnrichmentIfNeeded(entity);
-        rerender();
-      }
+    root.querySelector("[data-action='open-action-modal']")?.addEventListener("click", () => {
+      actionModalOpen = true;
+      rerender();
     });
 
+    root.querySelectorAll("[data-action='close-action-modal']").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        if (event.target !== button && button.classList.contains("card-action-backdrop")) return;
+        actionModalOpen = false;
+        rerender();
+      });
+    });
+
+    root.querySelector("[data-action='modal-add']")?.addEventListener("click", () => {
+      handleAdd();
+    });
+
+    root.querySelectorAll("[data-action='modal-set-status']").forEach((button) => {
+      button.addEventListener("click", () => {
+        handleStatusUpdate(button.dataset.value || "planned");
+      });
+    });
+
+    root.querySelectorAll("[data-action='modal-set-folder']").forEach((button) => {
+      button.addEventListener("click", () => {
+        handleFolderUpdate(button.dataset.value || "");
+      });
+    });
+
+    root.querySelector("[data-action='modal-remove-folder']")?.addEventListener("click", () => {
+      handleFolderUpdate("");
+    });
+
+    root.querySelector("[data-action='modal-delete']")?.addEventListener("click", () => {
+      handleDelete();
+    });
+
+    root.querySelector("[data-action='modal-create-folder']")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = root.querySelector("[data-folder-input]");
+      handleFolderUpdate(input?.value || "");
+    });
+  };
+
+  renderLoading(root);
+  rerender();
+
+  if (!previewMode && !isFallbackEntity(entity)) {
+    const loaded = await loadEntityFromDb(key).catch(() => null);
+
+    if (loaded?.canonical_key) {
+      entity = loaded;
+      rerender();
+    }
+  }
+
+  await Promise.allSettled([
+    refreshFolders(),
+    refreshUserMedia(),
+    refreshRelations()
+  ]);
+
+  rerender();
+
   return () => {
-    isDestroyed = true;
-    root.removeEventListener("click", handleClick);
-    root.removeEventListener("submit", handleSubmit);
+    destroyed = true;
   };
 }
