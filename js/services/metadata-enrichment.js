@@ -10,19 +10,20 @@ const SEARCH_TIMEOUT_MS = 9000;
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
+
 const OPEN_LIBRARY_BASE_URL = "https://openlibrary.org";
 const OPEN_LIBRARY_COVER_BASE_URL = "https://covers.openlibrary.org/b/id";
+
 const WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php";
 const WIKIPEDIA_RU_API_URL = "https://ru.wikipedia.org/w/api.php";
 const WIKIPEDIA_EN_API_URL = "https://en.wikipedia.org/w/api.php";
 
 const pendingEnrichmentByEntityId = new Map();
-const pendingRepairByCategory = new Map();
 
 const COVER_CONFIDENCE = {
   tmdb_details: 1,
   tmdb_find_imdb: 0.98,
-  tmdb_search_original_year: 0.9,
+  tmdb_search: 0.9,
   wikidata: 0.72,
   openlibrary: 0.68,
   wikipedia: 0.55,
@@ -61,7 +62,7 @@ function isTruthyFlag(value) {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
-function isHardLockedEntity(entity = {}) {
+export function isHardLockedEntity(entity = {}) {
   const canonicalKey = cleanLower(entity.canonical_key);
   const universeKey = cleanLower(entity.universe_key);
   const meta = normalizeJson(entity.meta, {});
@@ -75,6 +76,7 @@ function isHardLockedEntity(entity = {}) {
     isTruthyFlag(meta.enrichment_protected) ||
     universeKey === "marvel" ||
     canonicalKey.startsWith("marvel:") ||
+    canonicalKey.startsWith("mcu:") ||
     canonicalKey.startsWith("seed:") ||
     canonicalKey.startsWith("manual:")
   );
@@ -117,6 +119,7 @@ function getCurrentCoverConfidence(entity = {}) {
   const value = Number(meta.cover_confidence);
 
   if (Number.isFinite(value)) return value;
+
   return hasUsefulCover(entity.cover_url) ? COVER_CONFIDENCE.unknown : 0;
 }
 
@@ -130,7 +133,7 @@ function getPatchCoverConfidence(patch = {}) {
 
   if (source.startsWith("tmdb_details")) return COVER_CONFIDENCE.tmdb_details;
   if (source.startsWith("tmdb_find_imdb")) return COVER_CONFIDENCE.tmdb_find_imdb;
-  if (source.startsWith("tmdb_search")) return COVER_CONFIDENCE.tmdb_search_original_year;
+  if (source.startsWith("tmdb_search")) return COVER_CONFIDENCE.tmdb_search;
   if (source.startsWith("wikidata")) return COVER_CONFIDENCE.wikidata;
   if (source.startsWith("openlibrary")) return COVER_CONFIDENCE.openlibrary;
   if (source.startsWith("wikipedia")) return COVER_CONFIDENCE.wikipedia;
@@ -149,31 +152,25 @@ function pickBetterText(current = "", incoming = "") {
   return left;
 }
 
-function isProtectedEntity(entity = {}) {
-  const canonicalKey = cleanLower(entity.canonical_key);
-  const universeKey = cleanLower(entity.universe_key);
-  const meta = normalizeJson(entity.meta, {});
-  const ids = normalizeJson(entity.external_ids, {});
+function pickBetterTitle(current = "", incoming = "") {
+  const left = cleanText(current);
+  const right = cleanText(incoming);
 
-  return (
-    isHardLockedEntity(entity) ||
-    universeKey === "marvel" ||
-    cleanLower(meta.franchise) === "marvel" ||
-    cleanLower(meta.branch) === "mcu" ||
-    canonicalKey.startsWith("marvel:") ||
-    Boolean(ids.tmdb || ids.tmdb_id || ids.wikidata || ids.wikidata_id)
-  );
+  if (!left) return right;
+  if (!right) return left;
+
+  return left;
 }
 
 function mergeEntityMetadata(entity = {}, patch = {}) {
-  const protectedEntity = isProtectedEntity(entity);
+  if (isHardLockedEntity(entity)) {
+    return entity;
+  }
 
   const currentMeta = normalizeJson(entity.meta, {});
   const patchMeta = normalizeJson(patch.meta, {});
-  const externalIds = {
-    ...normalizeJson(entity.external_ids, {}),
-    ...normalizeJson(patch.external_ids, {})
-  };
+  const currentIds = normalizeJson(entity.external_ids, {});
+  const patchIds = normalizeJson(patch.external_ids, {});
 
   const currentCover = cleanText(entity.cover_url);
   const incomingCover = cleanText(patch.cover_url);
@@ -184,54 +181,13 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
     hasUsefulCover(incomingCover) &&
     (!hasUsefulCover(currentCover) || incomingConfidence > currentConfidence);
 
-  const meta = {
-    ...currentMeta,
-    ...patchMeta,
-    metadata_status: getMetadataStatus({
-      ...entity,
-      ...patch
-    }),
-    metadata_checked_at: new Date().toISOString()
-  };
-
-  if (protectedEntity) {
-    meta.enrichment_protected = true;
-    meta.enrichment_protected_at = new Date().toISOString();
-  }
-
-  if (shouldUseIncomingCover) {
-    meta.cover_source = cleanText(patch.__cover_source || patch.__source || "unknown");
-    meta.cover_confidence = incomingConfidence;
-    meta.cover_updated_at = new Date().toISOString();
-  }
-
-  if (protectedEntity) {
-    return {
-      ...entity,
-
-      title_primary: entity.title_primary,
-      title_ru: entity.title_ru,
-      title_en: entity.title_en,
-      original_title: entity.original_title,
-      year: entity.year,
-
-      cover_url: currentCover,
-
-      description_ru: entity.description_ru,
-      description_en: entity.description_en,
-
-      external_ids: normalizeJson(entity.external_ids, {}),
-      meta: currentMeta
-    };
-  }
-
-  return {
+  const next = {
     ...entity,
 
-    title_primary: pickBetterText(entity.title_primary, patch.title_primary),
-    title_ru: pickBetterText(entity.title_ru, patch.title_ru),
-    title_en: pickBetterText(entity.title_en, patch.title_en),
-    original_title: pickBetterText(entity.original_title, patch.original_title),
+    title_primary: pickBetterTitle(entity.title_primary, patch.title_primary),
+    title_ru: pickBetterTitle(entity.title_ru, patch.title_ru),
+    title_en: pickBetterTitle(entity.title_en, patch.title_en),
+    original_title: pickBetterTitle(entity.original_title, patch.original_title),
 
     year: normalizeYear(entity.year) || normalizeYear(patch.year),
 
@@ -240,8 +196,40 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
     description_ru: pickBetterText(entity.description_ru, patch.description_ru),
     description_en: pickBetterText(entity.description_en, patch.description_en),
 
-    external_ids: externalIds,
-    meta
+    external_ids: {
+      ...currentIds,
+      ...patchIds
+    }
+  };
+
+  next.meta = {
+    ...currentMeta,
+    ...patchMeta,
+    metadata_status: getMetadataStatus(next),
+    metadata_checked_at: new Date().toISOString()
+  };
+
+  if (shouldUseIncomingCover) {
+    next.meta.cover_source = cleanText(patch.__cover_source || patch.__source || "unknown");
+    next.meta.cover_confidence = incomingConfidence;
+    next.meta.cover_updated_at = new Date().toISOString();
+  }
+
+  return next;
+}
+
+function buildUpdatePayload(entity = {}) {
+  return {
+    title_primary: cleanText(entity.title_primary),
+    title_ru: cleanText(entity.title_ru),
+    title_en: cleanText(entity.title_en),
+    original_title: cleanText(entity.original_title),
+    year: normalizeYear(entity.year),
+    cover_url: cleanText(entity.cover_url),
+    description_ru: cleanText(entity.description_ru),
+    description_en: cleanText(entity.description_en),
+    external_ids: normalizeJson(entity.external_ids, {}),
+    meta: normalizeJson(entity.meta, {})
   };
 }
 
@@ -271,7 +259,10 @@ function getYearFromDate(value = "") {
   const raw = cleanText(value);
   if (!raw) return null;
 
-  const year = Number(raw.slice(0, 4));
+  const match = raw.match(/[+-]?(\d{4})/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
   return Number.isFinite(year) ? year : null;
 }
 
@@ -456,9 +447,7 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
   url.searchParams.set("append_to_response", "external_ids,images");
 
   const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   const title = type === "tv"
@@ -491,7 +480,8 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
       ...ids,
       tmdb: tmdbId,
       tmdb_id: ids.tmdb_id || tmdbId,
-      imdb: cleanText(payload?.external_ids?.imdb_id) || ids.imdb || null
+      imdb: cleanText(payload?.external_ids?.imdb_id) || ids.imdb || null,
+      imdb_id: cleanText(payload?.external_ids?.imdb_id) || ids.imdb_id || ids.imdb || null
     },
     meta: {
       tmdb_type: type,
@@ -511,18 +501,18 @@ async function fetchTmdbDetails(entity = {}, language = "ru") {
 async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
   const ids = normalizeJson(entity.external_ids, {});
 
-  if (!ids.imdb || !TMDB_API_KEY) return null;
+  if (!ids.imdb && !ids.imdb_id) return null;
+  if (!TMDB_API_KEY) return null;
 
-  const url = new URL(`${TMDB_BASE_URL}/find/${encodeURIComponent(ids.imdb)}`);
+  const imdbId = cleanText(ids.imdb || ids.imdb_id);
+  const url = new URL(`${TMDB_BASE_URL}/find/${encodeURIComponent(imdbId)}`);
 
   url.searchParams.set("api_key", TMDB_API_KEY);
   url.searchParams.set("external_source", "imdb_id");
   url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
 
   const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   const category = normalizeCategory(entity.category);
@@ -537,7 +527,8 @@ async function fetchTmdbFindByImdb(entity = {}, language = "ru") {
       ...entity,
       external_ids: {
         ...ids,
-        tmdb: String(result.id)
+        tmdb: String(result.id),
+        tmdb_id: String(result.id)
       }
     },
     language
@@ -573,9 +564,7 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
   url.searchParams.set("language", language === "en" ? "en-US" : "ru-RU");
 
   const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   const result = pickBestTmdbCandidate(payload.results, entity, type, options);
@@ -586,7 +575,8 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
       ...entity,
       external_ids: {
         ...normalizeJson(entity.external_ids, {}),
-        tmdb: String(result.id)
+        tmdb: String(result.id),
+        tmdb_id: String(result.id)
       }
     },
     language
@@ -598,11 +588,11 @@ async function fetchTmdbBySingleSearch(entity = {}, query = "", language = "ru",
     ...patch,
     meta: {
       ...normalizeJson(patch.meta, {}),
-      cover_source: "tmdb_search_original_year",
-      cover_confidence: COVER_CONFIDENCE.tmdb_search_original_year
+      cover_source: "tmdb_search",
+      cover_confidence: COVER_CONFIDENCE.tmdb_search
     },
     __source: `tmdb_search_${language}`,
-    __cover_source: "tmdb_search_original_year"
+    __cover_source: "tmdb_search"
   };
 }
 
@@ -611,9 +601,11 @@ async function fetchTmdbPatch(entity = {}, language = "ru") {
 
   const ids = normalizeJson(entity.external_ids, {});
 
-  if (ids.tmdb || ids.tmdb_id) return fetchTmdbDetails(entity, language);
+  if (ids.tmdb || ids.tmdb_id) {
+    return fetchTmdbDetails(entity, language);
+  }
 
-  if (ids.imdb) {
+  if (ids.imdb || ids.imdb_id) {
     const byImdb = await fetchTmdbFindByImdb(entity, language).catch((error) => {
       console.warn("TMDB find by IMDb skipped:", error);
       return null;
@@ -672,24 +664,24 @@ async function fetchOpenLibraryPatch(entity = {}) {
 
     const url = new URL(`${OPEN_LIBRARY_BASE_URL}/search.json`);
     url.searchParams.set("title", title);
-    url.searchParams.set("limit", "5");
+    url.searchParams.set("limit", "8");
+    url.searchParams.set("fields", "key,title,cover_i,author_name,first_publish_year,language");
 
     const searchPayload = await fetchJson(url.toString(), {
-      headers: {
-        Accept: "application/json"
-      }
+      headers: { Accept: "application/json" }
     }).catch(() => null);
 
-    const first = safeArray(searchPayload?.docs).find((item) => item?.key || item?.cover_i);
+    const first = safeArray(searchPayload?.docs)
+      .filter((item) => item?.key)
+      .find((item) => item.cover_i || item.author_name?.length);
+
     workId = normalizeOpenLibraryWork(first?.key || "");
   }
 
   if (!workId) return null;
 
   const payload = await fetchJson(`${OPEN_LIBRARY_BASE_URL}/works/${encodeURIComponent(workId)}.json`, {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   }).catch(() => null);
 
   if (!payload) return null;
@@ -765,9 +757,7 @@ async function searchWikidataIds(query = "", language = "ru") {
   url.searchParams.set("search", cleanQuery);
 
   const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   return safeArray(payload?.search)
@@ -789,9 +779,7 @@ async function fetchWikidataEntities(ids = []) {
   url.searchParams.set("ids", cleanIds.join("|"));
 
   const payload = await fetchJson(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   return Object.values(payload?.entities || {}).filter((item) => item?.id && item.id !== "-1");
@@ -841,7 +829,8 @@ async function fetchWikidataPatch(entity = {}) {
     description_en: descriptionEn,
     external_ids: {
       ...ids,
-      wikidata: wikidataId
+      wikidata: wikidataId,
+      wikidata_id: wikidataId
     },
     meta: {
       wikidata_loaded: true,
@@ -872,9 +861,7 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
       searchUrl.searchParams.set("srsearch", title);
 
       const searchPayload = await fetchJson(searchUrl.toString(), {
-        headers: {
-          Accept: "application/json"
-        }
+        headers: { Accept: "application/json" }
       });
 
       const pageTitle = cleanText(safeArray(searchPayload?.query?.search)[0]?.title);
@@ -892,9 +879,7 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
       summaryUrl.searchParams.set("titles", pageTitle);
 
       const summaryPayload = await fetchJson(summaryUrl.toString(), {
-        headers: {
-          Accept: "application/json"
-        }
+        headers: { Accept: "application/json" }
       });
 
       const page = Object.values(summaryPayload?.query?.pages || {})[0];
@@ -926,124 +911,142 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
   return null;
 }
 
-async function collectPatches(entity = {}) {
-  if (isHardLockedEntity(entity)) return [];
+async function buildMetadataPatch(entity = {}, options = {}) {
+  if (isHardLockedEntity(entity)) return null;
 
   const category = normalizeCategory(entity.category);
+  const language = options.language === "en" ? "en" : "ru";
   const patches = [];
 
   if (category === "movies" || category === "series") {
-    patches.push(await fetchTmdbPatch(entity, "ru").catch((error) => {
+    const tmdbRu = await fetchTmdbPatch(entity, "ru").catch((error) => {
       console.warn("TMDB RU patch skipped:", error);
       return null;
-    }));
+    });
 
-    patches.push(await fetchTmdbPatch(entity, "en").catch((error) => {
-      console.warn("TMDB EN patch skipped:", error);
-      return null;
-    }));
+    if (tmdbRu) patches.push(tmdbRu);
+
+    const afterRu = patches.reduce((current, patch) => mergeEntityMetadata(current, patch), entity);
+
+    if (!hasUsefulText(afterRu.description_en)) {
+      const tmdbEn = await fetchTmdbPatch(afterRu, "en").catch((error) => {
+        console.warn("TMDB EN patch skipped:", error);
+        return null;
+      });
+
+      if (tmdbEn) patches.push(tmdbEn);
+    }
   }
 
   if (category === "books") {
-    patches.push(await fetchOpenLibraryPatch(entity).catch((error) => {
+    const openLibrary = await fetchOpenLibraryPatch(entity).catch((error) => {
       console.warn("Open Library patch skipped:", error);
       return null;
-    }));
+    });
+
+    if (openLibrary) patches.push(openLibrary);
   }
 
-  patches.push(await fetchWikidataPatch(entity).catch((error) => {
+  const wikidata = await fetchWikidataPatch(entity).catch((error) => {
     console.warn("Wikidata patch skipped:", error);
     return null;
-  }));
+  });
 
-  patches.push(await fetchWikipediaSummary(entity, "ru").catch(() => null));
-  patches.push(await fetchWikipediaSummary(entity, "en").catch(() => null));
+  if (wikidata) patches.push(wikidata);
 
-  return patches.filter(Boolean);
-}
+  const afterStructured = patches.reduce((current, patch) => mergeEntityMetadata(current, patch), entity);
 
-function buildUpdatePayload(entity = {}) {
-  const meta = normalizeJson(entity.meta, {});
+  if (!hasUsefulText(afterStructured.description_ru)) {
+    const wikiRu = await fetchWikipediaSummary(afterStructured, "ru").catch((error) => {
+      console.warn("Wikipedia RU patch skipped:", error);
+      return null;
+    });
 
-  return {
-    title_primary: cleanText(entity.title_primary),
-    title_ru: cleanText(entity.title_ru),
-    title_en: cleanText(entity.title_en),
-    original_title: cleanText(entity.original_title),
-    year: normalizeYear(entity.year),
-    cover_url: cleanText(entity.cover_url),
-    description_ru: cleanText(entity.description_ru),
-    description_en: cleanText(entity.description_en),
-    external_ids: normalizeJson(entity.external_ids, {}),
-    meta: {
-      ...meta,
-      metadata_status: getMetadataStatus(entity),
-      metadata_updated_at: new Date().toISOString()
-    },
-    missing_fields: getMissingFields(entity),
-    metadata_status: getMetadataStatus(entity),
-    last_enriched_at: new Date().toISOString()
-  };
-}
-
-export function shouldEnrichEntity(entity = {}) {
-  if (!entity?.id) return false;
-  if (isHardLockedEntity(entity)) return false;
-
-  const missing = getMissingFields(entity);
-  if (!missing.length) return false;
-
-  const meta = normalizeJson(entity.meta, {});
-  const lastCheckedAt = Date.parse(meta.metadata_checked_at || meta.metadata_updated_at || "");
-
-  if (Number.isFinite(lastCheckedAt)) {
-    const hoursSinceCheck = (Date.now() - lastCheckedAt) / (1000 * 60 * 60);
-    if (hoursSinceCheck < 12) return false;
+    if (wikiRu) patches.push(wikiRu);
   }
 
-  return true;
-}
+  const afterRu = patches.reduce((current, patch) => mergeEntityMetadata(current, patch), entity);
 
-export async function enrichMediaEntity(entity = {}) {
-  if (!entity?.id) return entity || null;
-  if (isHardLockedEntity(entity)) return entity;
+  if (!hasUsefulText(afterRu.description_en)) {
+    const wikiEn = await fetchWikipediaSummary(afterRu, "en").catch((error) => {
+      console.warn("Wikipedia EN patch skipped:", error);
+      return null;
+    });
 
-  const patches = await collectPatches(entity);
-
-  if (!patches.length) {
-    return entity;
+    if (wikiEn) patches.push(wikiEn);
   }
 
-  const enriched = patches.reduce(
-    (current, patch) => mergeEntityMetadata(current, patch),
-    entity
-  );
+  if (!patches.length) return null;
 
-  if (isHardLockedEntity(enriched)) return entity;
+  return patches.reduce((current, patch) => mergeEntityMetadata(current, patch), entity);
+}
 
-  const payload = buildUpdatePayload(enriched);
+function hasMetadataImprovement(before = {}, after = {}) {
+  if (isHardLockedEntity(before)) return false;
+
+  if (!hasUsefulCover(before.cover_url) && hasUsefulCover(after.cover_url)) return true;
+  if (!hasUsefulText(before.description_ru) && hasUsefulText(after.description_ru)) return true;
+  if (!hasUsefulText(before.description_en) && hasUsefulText(after.description_en)) return true;
+
+  if (
+    hasUsefulCover(after.cover_url) &&
+    getCurrentCoverConfidence(after) > getCurrentCoverConfidence(before)
+  ) {
+    return true;
+  }
+
+  if (cleanText(after.description_ru).length >= cleanText(before.description_ru).length + 24) return true;
+  if (cleanText(after.description_en).length >= cleanText(before.description_en).length + 24) return true;
+
+  return false;
+}
+
+async function fetchCurrentEntityForUpdate(entity = {}) {
+  if (!entity?.id) return null;
 
   const supabase = getSupabaseClient();
 
   const { data, error } = await withTimeout(
     supabase
       .from(MEDIA_ENTITIES_TABLE)
-      .update(payload)
-      .eq("id", entity.id)
       .select("*")
-      .single(),
-    "Обогащение карточки",
-    WRITE_TIMEOUT_MS
+      .eq("id", entity.id)
+      .maybeSingle(),
+    "Проверка карточки перед обогащением",
+    READ_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  return data || enriched;
+  return data || null;
 }
 
-export async function enrichMediaEntityInBackground(entity = {}) {
-  if (!entity?.id) return null;
-  if (isHardLockedEntity(entity)) return entity;
+export function shouldEnrichEntity(entity = {}) {
+  if (!entity?.id) return false;
+  if (isHardLockedEntity(entity)) return false;
+
+  const category = normalizeCategory(entity.category);
+  if (!category) return false;
+
+  return getMissingFields(entity).length > 0;
+}
+
+export async function enrichMediaEntityInBackground(entity = {}, options = {}) {
+  if (!entity?.id) {
+    return {
+      skipped: true,
+      reason: "missing_entity_id",
+      entity
+    };
+  }
+
+  if (isHardLockedEntity(entity)) {
+    return {
+      skipped: true,
+      reason: "manual_locked",
+      entity
+    };
+  }
 
   const key = String(entity.id);
 
@@ -1051,11 +1054,114 @@ export async function enrichMediaEntityInBackground(entity = {}) {
     return pendingEnrichmentByEntityId.get(key);
   }
 
-  const promise = enrichMediaEntity(entity)
-    .catch((error) => {
-      console.warn("Background metadata enrichment skipped:", error);
-      return entity;
-    })
+  const promise = (async () => {
+    const current = await fetchCurrentEntityForUpdate(entity).catch((error) => {
+      console.warn("Current entity load skipped before enrichment:", error);
+      return null;
+    });
+
+    const safeCurrent = current || entity;
+
+    if (isHardLockedEntity(safeCurrent)) {
+      return {
+        skipped: true,
+        reason: "manual_locked",
+        entity: safeCurrent
+      };
+    }
+
+    if (!shouldEnrichEntity(safeCurrent)) {
+      return {
+        skipped: true,
+        reason: "metadata_ready",
+        entity: safeCurrent
+      };
+    }
+
+    const enriched = await buildMetadataPatch(safeCurrent, options).catch((error) => {
+      console.warn("Metadata patch build skipped:", error);
+      return null;
+    });
+
+    if (!enriched || isHardLockedEntity(enriched)) {
+      return {
+        skipped: true,
+        reason: "no_patch",
+        entity: safeCurrent
+      };
+    }
+
+    if (!hasMetadataImprovement(safeCurrent, enriched)) {
+      const metaOnly = {
+        ...normalizeJson(safeCurrent.meta, {}),
+        metadata_status: getMetadataStatus(safeCurrent),
+        metadata_checked_at: new Date().toISOString()
+      };
+
+      if (isHardLockedEntity(safeCurrent)) {
+        return {
+          skipped: true,
+          reason: "manual_locked",
+          entity: safeCurrent
+        };
+      }
+
+      const supabase = getSupabaseClient();
+
+      const { data, error } = await withTimeout(
+        supabase
+          .from(MEDIA_ENTITIES_TABLE)
+          .update({ meta: metaOnly })
+          .eq("id", safeCurrent.id)
+          .select("*")
+          .maybeSingle(),
+        "Обновление статуса метаданных",
+        WRITE_TIMEOUT_MS
+      ).catch((error) => ({ data: null, error }));
+
+      if (error) {
+        console.warn("Metadata status update skipped:", error);
+      }
+
+      return {
+        skipped: true,
+        reason: "no_improvement",
+        entity: data || safeCurrent
+      };
+    }
+
+    const payload = buildUpdatePayload(enriched);
+    const supabase = getSupabaseClient();
+
+    const beforeWrite = await fetchCurrentEntityForUpdate(safeCurrent).catch(() => safeCurrent);
+
+    if (isHardLockedEntity(beforeWrite)) {
+      return {
+        skipped: true,
+        reason: "manual_locked",
+        entity: beforeWrite
+      };
+    }
+
+    const { data, error } = await withTimeout(
+      supabase
+        .from(MEDIA_ENTITIES_TABLE)
+        .update(payload)
+        .eq("id", safeCurrent.id)
+        .select("*")
+        .maybeSingle(),
+      "Обогащение карточки",
+      WRITE_TIMEOUT_MS
+    );
+
+    if (error) throw error;
+
+    return {
+      skipped: false,
+      reason: "",
+      entity: data || enriched
+    };
+  })()
     .finally(() => {
       pendingEnrichmentByEntityId.delete(key);
     });
@@ -1064,58 +1170,47 @@ export async function enrichMediaEntityInBackground(entity = {}) {
   return promise;
 }
 
-export async function repairMissingMetadata({ category = "", limit = 20 } = {}) {
-  const cleanCategory = normalizeCategory(category);
-  const cleanLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+export async function repairMissingMetadata({ category = "", limit = 30, language = "ru" } = {}) {
+  const normalizedCategory = normalizeCategory(category);
+  const supabase = getSupabaseClient();
 
-  const key = `${cleanCategory || "all"}:${cleanLimit}`;
+  let query = supabase
+    .from(MEDIA_ENTITIES_TABLE)
+    .select("*")
+    .order("updated_at", { ascending: true })
+    .limit(Math.max(1, Math.min(Number(limit) || 30, 80)));
 
-  if (pendingRepairByCategory.has(key)) {
-    return pendingRepairByCategory.get(key);
+  if (normalizedCategory) {
+    query = query.eq("category", normalizedCategory);
   }
 
-  const promise = (async () => {
-    const supabase = getSupabaseClient();
+  const { data, error } = await withTimeout(
+    query,
+    "Поиск карточек для ремонта метаданных",
+    READ_TIMEOUT_MS
+  );
 
-    let query = supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select("*")
-      .or("cover_url.is.null,description_ru.is.null,description_en.is.null")
-      .order("updated_at", { ascending: true })
-      .limit(cleanLimit);
+  if (error) throw error;
 
-    if (cleanCategory) {
-      query = query.eq("category", cleanCategory);
-    }
+  const candidates = safeArray(data)
+    .filter((entity) => shouldEnrichEntity(entity))
+    .filter((entity) => !isHardLockedEntity(entity));
 
-    const { data, error } = await withTimeout(
-      query,
-      "Поиск карточек для обогащения",
-      READ_TIMEOUT_MS
-    );
+  const results = [];
 
-    if (error) throw error;
+  for (const entity of candidates) {
+    const result = await enrichMediaEntityInBackground(entity, { language }).catch((error) => ({
+      skipped: true,
+      reason: error?.message || "error",
+      entity
+    }));
 
-    const rows = Array.isArray(data) ? data : [];
-    const results = [];
+    results.push(result);
+  }
 
-    for (const entity of rows) {
-      if (isHardLockedEntity(entity)) continue;
-      if (!shouldEnrichEntity(entity)) continue;
+  return results;
+}
 
-      const result = await enrichMediaEntity(entity).catch((error) => {
-        console.warn("Repair metadata item skipped:", error);
-        return null;
-      });
-
-      if (result) results.push(result);
-    }
-
-    return results;
-  })().finally(() => {
-    pendingRepairByCategory.delete(key);
-  });
-
-  pendingRepairByCategory.set(key, promise);
-  return promise;
+export function scheduleMetadataAutoRepair() {
+  return () => {};
 }
