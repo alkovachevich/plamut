@@ -1,9 +1,8 @@
-// js/pages/search.js
-
 import {
   runGlobalSearch,
   runCategorySearch,
-  addSearchResultDirectlyToLibrary
+  addSearchResultDirectlyToLibrary,
+  getSearchResultSaveReadiness
 } from "../services/search-service.js";
 import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
@@ -18,36 +17,164 @@ let activeSearchPageRequestId = 0;
 
 const SEARCH_CATEGORIES = ["", "books", "movies", "series", "anime", "manga"];
 
+const I18N = {
+  ru: {
+    search: "Поиск",
+    all: "Все",
+    nothingFound: "Ничего не найдено",
+    typeMore: "Введите больше символов",
+    typeQuery: "Введите запрос...",
+    searching: "Ищем…",
+    searchError: "Ошибка поиска",
+    add: "Добавить",
+    adding: "Добавляем…",
+    added: "Добавлено",
+    alreadyAdded: "Уже в библиотеке",
+    preparing: "Карточка подготавливается",
+    prepareHint: "Не хватает данных для сохранения",
+    addSeries: "Добавить серию",
+    addingSeries: "Добавляем…",
+    seriesAdded: "Серия добавлена",
+    seriesPart: "Часть серии",
+    author: "Автор",
+    preview: "Preview",
+    dbReady: "Из базы",
+    needsData: "Нужны данные",
+    searchPlaceholder: "Поиск книг, фильмов, аниме, манги..."
+  },
+  en: {
+    search: "Search",
+    all: "All",
+    nothingFound: "Nothing found",
+    typeMore: "Type more characters",
+    typeQuery: "Type a query...",
+    searching: "Searching…",
+    searchError: "Search error",
+    add: "Add",
+    adding: "Adding…",
+    added: "Added",
+    alreadyAdded: "Already in library",
+    preparing: "Card is being prepared",
+    prepareHint: "Not enough data to save",
+    addSeries: "Add series",
+    addingSeries: "Adding…",
+    seriesAdded: "Series added",
+    seriesPart: "Part of series",
+    author: "Author",
+    preview: "Preview",
+    dbReady: "From database",
+    needsData: "Needs data",
+    searchPlaceholder: "Search books, movies, anime, manga..."
+  }
+};
+
+function t(key) {
+  const lang = state.language === "en" ? "en" : "ru";
+  return I18N[lang][key] || I18N.ru[key] || key;
+}
+
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeKey(value = "") {
+  return clean(value).toLowerCase();
+}
+
 function getOrderedCategories(category = "") {
   if (category) return [category];
   return ["books", "movies", "series", "anime", "manga"];
 }
 
 function getBookAuthors(item = {}) {
-  return (
+  return safeArray(
     item?.meta?.author_names ||
     item?.meta?.authors ||
     item?.authors ||
+    item?.author_names ||
     []
   ).filter(Boolean);
 }
 
 function getBookSeriesName(item = {}) {
-  return (
+  return clean(
     item?.meta?.series_name ||
     item?.meta?.series ||
     item?.series_name ||
+    item?.series ||
     ""
   );
 }
 
-function renderCover(item) {
+function resolveTitle(item = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+
+  if (lang === "en") {
+    return clean(
+      item.display_title ||
+      item.title_en ||
+      item.title ||
+      item.title_primary ||
+      item.title_ru ||
+      item.original_title ||
+      ""
+    );
+  }
+
+  return clean(
+    item.display_title ||
+    item.title_ru ||
+    item.title ||
+    item.title_primary ||
+    item.title_en ||
+    item.original_title ||
+    ""
+  );
+}
+
+function resolveOriginalTitle(item = {}) {
+  return clean(item.original_title || "");
+}
+
+function getSourceLabel(item = {}) {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+
+  if (meta.local_db_match || item.primary_source === "supabase" || item.primary_source === "alias") {
+    return t("dbReady");
+  }
+
+  return t("preview");
+}
+
+function isLocalDbResult(item = {}) {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  return Boolean(meta.local_db_match || item.primary_source === "supabase" || item.primary_source === "alias");
+}
+
+function getReadiness(item = {}) {
+  try {
+    return getSearchResultSaveReadiness(item);
+  } catch {
+    return {
+      ready: false,
+      complete: false,
+      missing: ["unknown"],
+      reason: t("prepareHint"),
+      item
+    };
+  }
+}
+
+function renderCover(item = {}) {
+  const title = resolveTitle(item);
+
   if (item.cover_url) {
     return `
       <img
         src="${escapeHtml(item.cover_url)}"
-        alt="${escapeHtml(item.title || "")}"
+        alt="${escapeHtml(title)}"
         loading="lazy"
+        decoding="async"
         onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
@@ -65,26 +192,51 @@ function renderBookExtraMeta(item = {}) {
   return `
     ${
       authors.length
-        ? `<div class="result-subtitle">Автор: ${escapeHtml(authors.join(", "))}</div>`
+        ? `<div class="result-subtitle">${escapeHtml(t("author"))}: ${escapeHtml(authors.join(", "))}</div>`
         : ""
     }
 
     ${
       seriesName
-        ? `<span class="badge">Часть серии: ${escapeHtml(seriesName)}</span>`
+        ? `<span class="badge">${escapeHtml(t("seriesPart"))}: ${escapeHtml(seriesName)}</span>`
         : ""
     }
   `;
 }
 
-function renderCard(item) {
+function renderMissingBadge(item = {}) {
+  const readiness = getReadiness(item);
+
+  if (readiness.ready) return "";
+
   return `
-    <div class="result-card">
+    <span
+      class="badge warning"
+      title="${escapeHtml(readiness.reason || t("prepareHint"))}"
+    >
+      ${escapeHtml(t("needsData"))}
+    </span>
+  `;
+}
+
+function renderCard(item = {}) {
+  const title = resolveTitle(item);
+  const originalTitle = resolveOriginalTitle(item);
+  const readiness = getReadiness(item);
+  const canSave = Boolean(readiness.ready);
+  const sourceLabel = getSourceLabel(item);
+
+  return `
+    <div
+      class="result-card ${isLocalDbResult(item) ? "is-db" : "is-preview"}"
+      data-result-card="${escapeHtml(item.canonical_key || "")}"
+    >
       <button
         class="result-card__main"
         type="button"
-        data-key="${escapeHtml(item.canonical_key)}"
-        data-category="${escapeHtml(item.category)}"
+        data-key="${escapeHtml(item.canonical_key || "")}"
+        data-category="${escapeHtml(item.category || "")}"
+        aria-label="${escapeHtml(title)}"
       >
         <div class="result-cover">
           ${renderCover(item)}
@@ -93,7 +245,7 @@ function renderCard(item) {
         <div class="result-meta">
           <div class="result-top">
             <div class="result-title">
-              ${escapeHtml(clampText(item.title || "", 90))}
+              ${escapeHtml(clampText(title, 90))}
             </div>
 
             ${
@@ -104,21 +256,28 @@ function renderCard(item) {
           </div>
 
           ${
-            item.original_title && item.original_title !== item.title
-              ? `<div class="result-subtitle">${escapeHtml(clampText(item.original_title, 100))}</div>`
+            originalTitle && originalTitle !== title
+              ? `<div class="result-subtitle">${escapeHtml(clampText(originalTitle, 100))}</div>`
               : ""
           }
 
           ${renderBookExtraMeta(item)}
 
           <div class="result-footer">
-            <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category))}</span>
+            <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category || ""))}</span>
+            <span class="badge muted">${escapeHtml(sourceLabel)}</span>
+            ${renderMissingBadge(item)}
           </div>
         </div>
       </button>
 
-      <button class="result-add-btn" type="button" data-add-key="${escapeHtml(item.canonical_key)}">
-        Добавить
+      <button
+        class="result-add-btn"
+        type="button"
+        data-add-key="${escapeHtml(item.canonical_key || "")}"
+        ${canSave ? "" : `title="${escapeHtml(readiness.reason || t("prepareHint"))}"`}
+      >
+        ${escapeHtml(canSave ? t("add") : t("preparing"))}
       </button>
     </div>
   `;
@@ -164,7 +323,7 @@ function renderBooksGroup(items = []) {
               type="button"
               data-add-series="${escapeHtml(entry.seriesName)}"
             >
-              Добавить серию
+              ${escapeHtml(t("addSeries"))}
             </button>
           </div>
         </div>
@@ -187,7 +346,7 @@ function flattenGroupedResults(grouped = {}, category = "") {
   const items = [];
 
   categories.forEach((key) => {
-    (grouped?.[key] || []).forEach((item) => {
+    safeArray(grouped?.[key]).forEach((item) => {
       items.push(item);
     });
   });
@@ -200,7 +359,7 @@ function renderGroupedResults(grouped = {}, category = "") {
     .filter((key) => grouped?.[key]?.length);
 
   if (!categories.length) {
-    return renderEmpty("Ничего не найдено");
+    return renderEmpty(t("nothingFound"));
   }
 
   return categories
@@ -218,8 +377,31 @@ function renderGroupedResults(grouped = {}, category = "") {
     .join("");
 }
 
+function setButtonPreparing(button) {
+  button.disabled = true;
+  button.classList.add("is-warning");
+  button.textContent = t("preparing");
+}
+
+function setButtonError(button, message = "") {
+  button.disabled = false;
+  button.classList.add("is-warning");
+  button.textContent = t("preparing");
+
+  if (message) {
+    button.title = message;
+  }
+}
+
+function setButtonAdded(button, alreadyExists = false) {
+  button.disabled = true;
+  button.classList.remove("is-warning");
+  button.classList.add("is-success");
+  button.textContent = alreadyExists ? t("alreadyAdded") : t("added");
+}
+
 function attachCardHandlers(root, items = []) {
-  const byKey = new Map(items.map((item) => [item.canonical_key, item]));
+  const byKey = new Map(items.map((item) => [normalizeKey(item.canonical_key), item]));
   const booksBySeries = new Map();
 
   safeArray(items)
@@ -234,12 +416,16 @@ function attachCardHandlers(root, items = []) {
 
   root.querySelectorAll("[data-key]").forEach((button) => {
     button.addEventListener("click", () => {
-      const key = button.dataset.key || "";
+      const key = normalizeKey(button.dataset.key || "");
       const category = button.dataset.category || "";
       const payload = byKey.get(key) || null;
 
       if (payload) {
-        setTemporaryCardItem(payload);
+        setTemporaryCardItem({
+          ...payload,
+          __mode: "temp",
+          __source: "search"
+        });
       }
 
       navigate("/card", {
@@ -252,7 +438,7 @@ function attachCardHandlers(root, items = []) {
 
   root.querySelectorAll("[data-add-key]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const key = button.dataset.addKey || "";
+      const key = normalizeKey(button.dataset.addKey || "");
       const item = byKey.get(key);
 
       if (!item) return;
@@ -264,22 +450,62 @@ function attachCardHandlers(root, items = []) {
         return;
       }
 
+      const readiness = getReadiness(item);
+
+      if (!readiness.ready) {
+        setTemporaryCardItem({
+          ...item,
+          __mode: "temp",
+          __source: "search",
+          __readiness: readiness
+        });
+
+        setButtonError(button, readiness.reason || t("prepareHint"));
+
+        navigate("/card", {
+          key: item.canonical_key,
+          category: item.category,
+          mode: "temp"
+        });
+
+        return;
+      }
+
       try {
         button.disabled = true;
-        button.textContent = "Добавляем…";
+        button.classList.remove("is-warning");
+        button.textContent = t("adding");
 
         const result = await addSearchResultDirectlyToLibrary({
           userId,
           item
         });
 
-        button.textContent = result?.alreadyExists
-          ? "Уже в библиотеке"
-          : "Добавлено";
+        setButtonAdded(button, Boolean(result?.alreadyExists));
       } catch (error) {
         console.warn("Direct add from search page error:", error);
+
+        if (error?.code === "INCOMPLETE_SEARCH_RESULT") {
+          setTemporaryCardItem({
+            ...item,
+            __mode: "temp",
+            __source: "search",
+            __readiness: error.readiness || readiness
+          });
+
+          setButtonError(button, error.message || t("prepareHint"));
+
+          navigate("/card", {
+            key: item.canonical_key,
+            category: item.category,
+            mode: "temp"
+          });
+
+          return;
+        }
+
         button.disabled = false;
-        button.textContent = "Ошибка";
+        button.textContent = t("add");
       }
     });
   });
@@ -300,19 +526,30 @@ function attachCardHandlers(root, items = []) {
 
       try {
         button.disabled = true;
-        button.textContent = "Добавляем…";
+        button.textContent = t("addingSeries");
+
+        const readyItems = seriesItems.filter((item) => getReadiness(item).ready);
+
+        if (!readyItems.length) {
+          button.disabled = false;
+          button.classList.add("is-warning");
+          button.textContent = t("preparing");
+          return;
+        }
 
         await Promise.allSettled(
-          seriesItems.map((item) =>
+          readyItems.map((item) =>
             addSearchResultDirectlyToLibrary({ userId, item })
           )
         );
 
-        button.textContent = "Серия добавлена";
+        button.disabled = true;
+        button.classList.add("is-success");
+        button.textContent = t("seriesAdded");
       } catch (error) {
         console.warn("Direct add series from search page error:", error);
         button.disabled = false;
-        button.textContent = "Ошибка";
+        button.textContent = t("addSeries");
       }
     });
   });
@@ -330,11 +567,11 @@ async function performSearch(resultsRoot, query, category = "") {
   resultsRoot.dataset.requestId = String(requestId);
 
   if (cleanQuery.length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
-    resultsRoot.innerHTML = renderEmpty("Введите больше символов");
+    resultsRoot.innerHTML = renderEmpty(t("typeMore"));
     return;
   }
 
-  resultsRoot.innerHTML = renderEmpty("Ищем…");
+  resultsRoot.innerHTML = renderEmpty(t("searching"));
 
   try {
     const grouped = selectedCategory
@@ -351,7 +588,7 @@ async function performSearch(resultsRoot, query, category = "") {
     const flat = flattenGroupedResults(grouped, selectedCategory);
 
     if (!flat.length) {
-      resultsRoot.innerHTML = renderEmpty("Ничего не найдено");
+      resultsRoot.innerHTML = renderEmpty(t("nothingFound"));
       return;
     }
 
@@ -367,13 +604,13 @@ async function performSearch(resultsRoot, query, category = "") {
       return;
     }
 
-    resultsRoot.innerHTML = renderEmpty("Ошибка поиска");
+    resultsRoot.innerHTML = renderEmpty(t("searchError"));
   }
 }
 
 function buildCategoryOptions(selectedCategory = "") {
   return SEARCH_CATEGORIES.map((category) => {
-    const label = category ? getCategoryLabel(state.language, category) : "Все";
+    const label = category ? getCategoryLabel(state.language, category) : t("all");
 
     return `
       <option value="${escapeHtml(category)}" ${category === selectedCategory ? "selected" : ""}>
@@ -383,11 +620,8 @@ function buildCategoryOptions(selectedCategory = "") {
   }).join("");
 }
 
-export function renderSearchPage(root, params = {}) {
-  const initialQuery = params.q || state.searchQuery || "";
-  let searchCategory = String(params.category || "").trim();
-
-  root.innerHTML = `
+function renderPageStyles() {
+  return `
     <style>
       .page {
         display: flex;
@@ -461,6 +695,10 @@ export function renderSearchPage(root, params = {}) {
         border: 1px solid var(--border);
       }
 
+      .result-card.is-db {
+        border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+      }
+
       .books-series-block {
         border: 1px solid var(--border);
         border-radius: 16px;
@@ -500,6 +738,7 @@ export function renderSearchPage(root, params = {}) {
         text-align: left;
         color: var(--text);
         background: transparent;
+        min-width: 0;
       }
 
       .result-add-btn {
@@ -514,8 +753,18 @@ export function renderSearchPage(root, params = {}) {
       }
 
       .result-add-btn:disabled {
-        opacity: 0.7;
+        opacity: 0.78;
         cursor: default;
+      }
+
+      .result-add-btn.is-warning {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
+
+      .result-add-btn.is-success {
+        background: var(--accent);
+        color: #fff;
       }
 
       .result-cover {
@@ -580,7 +829,7 @@ export function renderSearchPage(root, params = {}) {
       .result-footer {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         margin-top: 2px;
         font-size: 12px;
         color: var(--text-soft);
@@ -593,6 +842,15 @@ export function renderSearchPage(root, params = {}) {
         border-radius: 999px;
         font-size: 12px;
         color: var(--text-soft);
+      }
+
+      .badge.muted {
+        background: var(--bg-soft);
+      }
+
+      .badge.warning {
+        background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+        color: var(--danger);
       }
 
       .empty {
@@ -613,16 +871,48 @@ export function renderSearchPage(root, params = {}) {
           grid-template-columns: 1fr;
         }
 
+        .result-card__main {
+          grid-template-columns: 76px 1fr;
+        }
+
+        .result-cover {
+          width: 76px;
+          height: 108px;
+        }
+
         .result-add-btn {
           width: 100%;
         }
+
+        .books-series-block__top {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .books-series-block__actions {
+          width: 100%;
+          align-items: stretch;
+        }
+
+        .books-series-block__actions .result-add-btn {
+          flex: 1;
+        }
       }
     </style>
+  `;
+}
+
+export function renderSearchPage(root, params = {}) {
+  const initialQuery = params.q || state.searchQuery || "";
+  let searchCategory = String(params.category || "").trim();
+
+  root.innerHTML = `
+    ${renderPageStyles()}
 
     <section class="page">
       <div class="search-header">
         <div class="search-title">
-          Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}
+          ${escapeHtml(t("search"))}${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}
         </div>
 
         <div class="search-controls">
@@ -635,7 +925,7 @@ export function renderSearchPage(root, params = {}) {
             data-search-input
             type="text"
             value="${escapeHtml(initialQuery)}"
-            placeholder="Поиск книг, фильмов, аниме, манги..."
+            placeholder="${escapeHtml(t("searchPlaceholder"))}"
             autocomplete="off"
             spellcheck="false"
           />
@@ -643,7 +933,7 @@ export function renderSearchPage(root, params = {}) {
       </div>
 
       <div class="search-results" data-results>
-        ${renderEmpty("Введите запрос...")}
+        ${renderEmpty(t("typeQuery"))}
       </div>
     </section>
   `;
@@ -670,7 +960,7 @@ export function renderSearchPage(root, params = {}) {
     searchCategory = String(categorySelect.value || "").trim();
 
     if (title) {
-      title.innerHTML = `Поиск${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}`;
+      title.innerHTML = `${escapeHtml(t("search"))}${searchCategory ? `: ${escapeHtml(getCategoryLabel(state.language, searchCategory))}` : ""}`;
     }
 
     const value = input?.value || "";
@@ -678,7 +968,7 @@ export function renderSearchPage(root, params = {}) {
     if (value.trim().length >= SEARCH_LIMITS.MIN_QUERY_LENGTH) {
       runCurrentSearch();
     } else if (resultsRoot) {
-      resultsRoot.innerHTML = renderEmpty("Введите запрос...");
+      resultsRoot.innerHTML = renderEmpty(t("typeQuery"));
     }
   });
 
