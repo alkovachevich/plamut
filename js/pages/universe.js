@@ -5,18 +5,62 @@ import { getCategoryLabel } from "../config.js";
 import { getUniverseDetailsFromDb } from "../services/universe-db.js";
 
 function resolveTitle(entity = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+
+  if (lang === "en") {
+    return (
+      entity.title_en ||
+      entity.title_primary ||
+      entity.title_ru ||
+      entity.original_title ||
+      "Untitled"
+    );
+  }
+
   return (
-    entity.title_primary ||
     entity.title_ru ||
+    entity.title_primary ||
     entity.title_en ||
     entity.original_title ||
     "Без названия"
   );
 }
 
+function resolveUniverseTitle(universe = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+
+  if (lang === "en") {
+    return (
+      universe.title_en ||
+      universe.title ||
+      universe.title_ru ||
+      universe.universe_key ||
+      "Universe"
+    );
+  }
+
+  return (
+    universe.title_ru ||
+      universe.title ||
+      universe.title_en ||
+      universe.universe_key ||
+      "Вселенная"
+  );
+}
+
+function resolveUniverseDescription(universe = {}) {
+  const lang = state.language === "en" ? "en" : "ru";
+
+  if (lang === "en") {
+    return universe.description_en || universe.description || universe.description_ru || "";
+  }
+
+  return universe.description_ru || universe.description || universe.description_en || "";
+}
+
 function getCover(entity = {}) {
   const cover = entity.cover_url || "";
-  if (!cover || cover === "undefined" || cover === "null") return "";
+  if (!cover || cover === "undefined" || cover === "null" || cover.includes("/placeholder")) return "";
   return cover;
 }
 
@@ -28,6 +72,12 @@ function getEntityId(link = {}) {
   return Number(link.entity_id || link.media_entities?.id || 0);
 }
 
+function getYear(link = {}) {
+  const entity = link.media_entities || {};
+  const year = Number(entity.year || 0);
+  return Number.isFinite(year) && year > 0 ? year : 9999;
+}
+
 function getOrder(link = {}, mode = "release") {
   if (mode === "story") {
     return link.story_order ?? link.release_order ?? link.branch_order ?? 9999;
@@ -35,6 +85,10 @@ function getOrder(link = {}, mode = "release") {
 
   if (mode === "branch") {
     return link.branch_order ?? link.story_order ?? link.release_order ?? 9999;
+  }
+
+  if (mode === "year") {
+    return getYear(link);
   }
 
   return link.release_order ?? link.story_order ?? link.branch_order ?? 9999;
@@ -47,11 +101,11 @@ function sortLinks(items = [], mode = "release") {
 
     if (aOrder !== bOrder) return aOrder - bOrder;
 
-    const ay = Number(a.media_entities?.year || 0);
-    const by = Number(b.media_entities?.year || 0);
-    if (ay && by && ay !== by) return ay - by;
+    const ay = getYear(a);
+    const by = getYear(b);
+    if (ay !== by) return ay - by;
 
-    return resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), "ru");
+    return resolveTitle(a.media_entities).localeCompare(resolveTitle(b.media_entities), state.language === "en" ? "en" : "ru");
   });
 }
 
@@ -91,6 +145,10 @@ function mergeEntityLinks(links = []) {
     const existingStory = Number(existing.story_order ?? 9999);
     const nextStory = Number(link.story_order ?? 9999);
     if (nextStory < existingStory) existing.story_order = link.story_order;
+
+    const existingBranch = Number(existing.branch_order ?? 9999);
+    const nextBranch = Number(link.branch_order ?? 9999);
+    if (nextBranch < existingBranch) existing.branch_order = link.branch_order;
   });
 
   return Array.from(byEntity.values());
@@ -99,12 +157,17 @@ function mergeEntityLinks(links = []) {
 function groupLinks(links = [], view = "branch") {
   const list = safeArray(links);
 
-  if (view === "release" || view === "story") {
+  if (view === "release" || view === "story" || view === "year") {
     const uniqueItems = mergeEntityLinks(list);
 
     return [
       {
-        title: view === "story" ? "Хронология событий" : "Порядок выхода",
+        title:
+          view === "story"
+            ? "Хронология событий"
+            : view === "year"
+              ? "По годам"
+              : "Порядок выхода",
         items: sortLinks(uniqueItems, view)
       }
     ];
@@ -138,6 +201,7 @@ function renderCover(entity = {}) {
         src="${escapeHtml(cover)}"
         alt="${escapeHtml(title)}"
         loading="lazy"
+        decoding="async"
         onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
@@ -475,6 +539,10 @@ function renderStyles() {
           width: 100%;
         }
 
+        .view-btn {
+          flex: 1;
+        }
+
         .timeline {
           grid-template-columns: 1fr;
         }
@@ -593,6 +661,12 @@ function renderPage(root, { universe, links, view }) {
       .filter(Boolean)
   ).size;
 
+  const yearsCount = new Set(
+    safeArray(uniqueItems)
+      .map((link) => link.media_entities?.year)
+      .filter(Boolean)
+  ).size;
+
   root.innerHTML = `
     ${renderStyles()}
 
@@ -601,17 +675,17 @@ function renderPage(root, { universe, links, view }) {
         <div class="hero-cover">
           ${
             cover
-              ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(universe.title || "Universe")}" loading="lazy" />`
+              ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(resolveUniverseTitle(universe))}" loading="lazy" decoding="async" />`
               : `<div class="hero-cover-fallback">U</div>`
           }
         </div>
 
         <div class="hero-meta">
-          <div class="title">${escapeHtml(universe.title || universe.universe_key || "Вселенная")}</div>
+          <div class="title">${escapeHtml(resolveUniverseTitle(universe))}</div>
 
           ${
-            universe.description
-              ? `<div class="description">${escapeHtml(clampText(universe.description, 240))}</div>`
+            resolveUniverseDescription(universe)
+              ? `<div class="description">${escapeHtml(clampText(resolveUniverseDescription(universe), 240))}</div>`
               : `<div class="description">Связанная структура произведений из базы Plamut.</div>`
           }
 
@@ -619,15 +693,16 @@ function renderPage(root, { universe, links, view }) {
             <span class="stat">${escapeHtml(String(entityCount))} элементов</span>
             <span class="stat">${escapeHtml(String(branchCount))} веток</span>
             <span class="stat">${escapeHtml(String(continuityCount))} линий</span>
+            <span class="stat">${escapeHtml(String(yearsCount))} годов</span>
           </div>
         </div>
       </div>
 
       <div class="view-switch">
         <button class="view-btn ${view === "branch" ? "is-active" : ""}" data-view="branch" type="button">Ветки</button>
-        <button class="view-btn ${view === "continuity" ? "is-active" : ""}" data-view="continuity" type="button">Линии</button>
         <button class="view-btn ${view === "release" ? "is-active" : ""}" data-view="release" type="button">Выход</button>
-        <button class="view-btn ${view === "story" ? "is-active" : ""}" data-view="story" type="button">Сюжет</button>
+        <button class="view-btn ${view === "story" ? "is-active" : ""}" data-view="story" type="button">Хронология</button>
+        <button class="view-btn ${view === "year" ? "is-active" : ""}" data-view="year" type="button">Год</button>
       </div>
 
       <div data-groups-root>
