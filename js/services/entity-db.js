@@ -20,6 +20,8 @@ const pendingUserMediaByKey = new Map();
 
 const CACHE_TTL_MS = 1000 * 60 * 5;
 
+const VALID_CATEGORIES = new Set(["books", "movies", "series", "anime", "manga"]);
+
 const ALLOWED_PRIMARY_SOURCES = new Set([
   "wikidata",
   "openlibrary",
@@ -27,7 +29,10 @@ const ALLOWED_PRIMARY_SOURCES = new Set([
   "anilist",
   "jikan",
   "manual",
-  "system"
+  "system",
+  "search",
+  "supabase",
+  "alias"
 ]);
 
 const AUTHORITATIVE_CANONICAL_PREFIXES = [
@@ -89,6 +94,16 @@ function cleanText(value = "") {
 
 function cleanLower(value = "") {
   return cleanText(value).toLowerCase();
+}
+
+function normalizeCategory(value = "") {
+  const category = cleanLower(value);
+
+  if (category === "book") return "books";
+  if (category === "movie") return "movies";
+  if (category === "tv") return "series";
+
+  return VALID_CATEGORIES.has(category) ? category : "";
 }
 
 function normalizeYear(value) {
@@ -161,6 +176,22 @@ function normalizeExternalIdsMap(value = {}) {
     normalized.wikidata = cleanText(normalized.wikidata_id);
   }
 
+  if (normalized.anilist && !normalized.anilist_id) {
+    normalized.anilist_id = cleanText(normalized.anilist);
+  }
+
+  if (normalized.anilist_id && !normalized.anilist) {
+    normalized.anilist = cleanText(normalized.anilist_id);
+  }
+
+  if (normalized.mal && !normalized.mal_id) {
+    normalized.mal_id = cleanText(normalized.mal);
+  }
+
+  if (normalized.mal_id && !normalized.mal) {
+    normalized.mal = cleanText(normalized.mal_id);
+  }
+
   return normalized;
 }
 
@@ -193,21 +224,6 @@ function hasExternalIdConflict(existing = {}, incoming = {}) {
   return false;
 }
 
-function hasCategoryConflict(existing = {}, incoming = {}) {
-  const existingCategory = cleanLower(existing.category);
-  const incomingCategory = cleanLower(incoming.category);
-
-  if (!existingCategory || !incomingCategory) return false;
-  if (existingCategory === incomingCategory) return false;
-
-  const screenCategories = new Set(["movies", "series"]);
-  if (screenCategories.has(existingCategory) && screenCategories.has(incomingCategory)) {
-    return false;
-  }
-
-  return true;
-}
-
 function isTruthyFlag(value) {
   return value === true || value === "true" || value === 1 || value === "1";
 }
@@ -223,8 +239,10 @@ function isHardLockedEntity(entity = {}) {
     isTruthyFlag(meta.seed_locked) ||
     isTruthyFlag(meta.seed_final) ||
     isTruthyFlag(meta.manual_reference) ||
+    isTruthyFlag(meta.enrichment_protected) ||
     universeKey === "marvel" ||
     canonicalKey.startsWith("marvel:") ||
+    canonicalKey.startsWith("mcu:") ||
     canonicalKey.startsWith("seed:") ||
     canonicalKey.startsWith("manual:")
   );
@@ -241,46 +259,6 @@ function isAuthoritativeEntity(entity = {}) {
     Boolean(meta.seed_version) ||
     cleanLower(entity.primary_source) === "system"
   );
-}
-
-function canMergeEntities(existing = {}, incoming = {}) {
-  if (!existing?.id && !existing?.canonical_key) return true;
-
-  if (isHardLockedEntity(existing)) {
-    return false;
-  }
-
-  const existingKey = cleanLower(existing.canonical_key);
-  const incomingKey = cleanLower(incoming.canonical_key);
-
-  if (existingKey && incomingKey && existingKey === incomingKey) {
-    return true;
-  }
-
-  if (hasCategoryConflict(existing, incoming)) {
-    return false;
-  }
-
-  if (hasExternalIdConflict(existing, incoming)) {
-    return false;
-  }
-
-  const existingHasHardId = hasHardIdentity(existing);
-  const incomingHasHardId = hasHardIdentity(incoming);
-
-  if (existingHasHardId && incomingHasHardId) {
-    const existingIds = getHardIdentityIds(existing);
-    const incomingIds = getHardIdentityIds(incoming);
-    const sharedKeys = HARD_ID_KEYS.filter((key) => existingIds[key] && incomingIds[key]);
-
-    return sharedKeys.length > 0;
-  }
-
-  if (isAuthoritativeEntity(existing) || isAuthoritativeEntity(incoming)) {
-    return false;
-  }
-
-  return true;
 }
 
 function makeEntityCacheRow(entity) {
@@ -411,21 +389,20 @@ function getBookAuthorForIdentity(entity = {}) {
 
 function buildCanonicalKey(entity = {}) {
   const existing = cleanLower(entity.canonical_key);
-  const category = cleanLower(entity.category);
+  const category = normalizeCategory(entity.category);
   const ids = buildExternalIds(entity);
 
   if (category === "books") {
-    if (ids.wikidata) {
-      return `books:wikidata:${cleanText(ids.wikidata)}`.toLowerCase();
+    if (ids.wikidata) return `books:wikidata:${cleanText(ids.wikidata)}`.toLowerCase();
+    if (ids.wikidata_id) return `books:wikidata:${cleanText(ids.wikidata_id)}`.toLowerCase();
+
+    if (ids.openlibrary_work) {
+      return `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`.toLowerCase();
     }
 
-    if (existing.startsWith("books:wikidata:")) {
-      return existing;
-    }
-
-    if (existing.startsWith("books:work:")) {
-      return existing;
-    }
+    if (existing.startsWith("books:wikidata:")) return existing;
+    if (existing.startsWith("books:openlibrary:")) return existing;
+    if (existing.startsWith("books:work:")) return existing;
 
     const title = buildTitlePrimary(entity) || buildOriginalTitle(entity);
     const author = getBookAuthorForIdentity(entity);
@@ -438,6 +415,7 @@ function buildCanonicalKey(entity = {}) {
   const source = normalizePrimarySource(entity.primary_source || entity.source || "");
 
   if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
+  if (category && ids.wikidata_id) return `${category}:wikidata:${ids.wikidata_id}`.toLowerCase();
   if (category && ids.tmdb_id) return `${category}:tmdb:${ids.tmdb_id}`.toLowerCase();
   if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
   if (category && ids.imdb_id) return `${category}:imdb:${ids.imdb_id}`.toLowerCase();
@@ -446,10 +424,6 @@ function buildCanonicalKey(entity = {}) {
   if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
   if (category && ids.mal_id) return `${category}:mal:${ids.mal_id}`.toLowerCase();
   if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
-
-  if (category && ids.openlibrary_work) {
-    return `${category}:openlibrary:${ids.openlibrary_work}`.toLowerCase();
-  }
 
   const title = normalizeString(
     buildTitlePrimary(entity) || buildOriginalTitle(entity)
@@ -470,6 +444,7 @@ function buildAliasList(entity = {}) {
   return normalizeArray([
     ...safeArray(entity.aliases),
     entity.title,
+    entity.display_title,
     entity.title_primary,
     entity.title_ru,
     entity.title_en,
@@ -485,8 +460,8 @@ export function normalizeEntity(entity = {}) {
   }
 
   const category =
-    cleanLower(entity.category) ||
-    String(canonicalKey).split(":")[0] ||
+    normalizeCategory(entity.category) ||
+    normalizeCategory(String(canonicalKey).split(":")[0]) ||
     "";
 
   if (!category) {
@@ -595,7 +570,8 @@ export function getEntityCompleteness(entity = {}) {
     } catch {
       return {
         ...entity,
-        category: cleanLower(entity.category),
+        canonical_key: cleanText(entity.canonical_key),
+        category: normalizeCategory(entity.category),
         external_ids: buildExternalIds(entity),
         meta: normalizeJson(entity.meta, {})
       };
@@ -605,7 +581,7 @@ export function getEntityCompleteness(entity = {}) {
   const missing = [];
 
   if (!cleanText(normalized.canonical_key)) missing.push("canonical_key");
-  if (!cleanText(normalized.category)) missing.push("category");
+  if (!normalizeCategory(normalized.category)) missing.push("category");
   if (!hasUsefulTitle(normalized)) missing.push("title");
   if (!hasUsefulCover(normalized.cover_url)) missing.push("cover_url");
   if (!hasUsefulDescription(normalized)) missing.push("description");
@@ -644,179 +620,14 @@ function assertCompleteEntityForCatalog(entity = {}) {
   );
 }
 
-function pickBetterText(a = "", b = "") {
-  const left = cleanText(a);
-  const right = cleanText(b);
-
-  if (!left) return right;
-  if (!right) return left;
-
-  return right.length > left.length ? right : left;
-}
-
-function pickBetterCover(a = "", b = "") {
-  const left = cleanText(a);
-  const right = cleanText(b);
-
-  if (!left) return right;
-  if (!right) return left;
-
-  return left;
-}
-
-function looksLikeScreenDescription(value = "") {
-  const text = cleanLower(value);
-
-  if (!text) return false;
-
-  return ["фильм", "film", "movie", "сериал", "tv series", "телесериал"].some((word) =>
-    text.includes(word)
-  );
-}
-
-function pickBookDescription(a = "", b = "") {
-  const left = cleanText(a);
-  const right = cleanText(b);
-
-  if (!left) return right;
-  if (!right) return left;
-
-  const leftNoise = looksLikeScreenDescription(left);
-  const rightNoise = looksLikeScreenDescription(right);
-
-  if (!leftNoise && rightNoise) return left;
-  if (leftNoise && !rightNoise) return right;
-
-  return right.length > left.length ? right : left;
-}
-
-function mergeEntityPayload(existing = {}, incoming = {}) {
-  if (!canMergeEntities(existing, incoming)) {
-    console.warn("mergeEntityPayload blocked unsafe merge", {
-      existing: existing?.canonical_key,
-      incoming: incoming?.canonical_key,
-      existingIds: existing?.external_ids,
-      incomingIds: incoming?.external_ids
-    });
-
-    return buildEntityPayload(existing);
-  }
-
-  const existingAuthoritative = isAuthoritativeEntity(existing);
-  const incomingAuthoritative = isAuthoritativeEntity(incoming);
-
-  const existingCategory = cleanLower(existing.category);
-  const incomingCategory = cleanLower(incoming.category);
-  const isBookEntity = existingCategory === "books" || incomingCategory === "books";
-
-  const existingIds = normalizeJson(existing.external_ids, {});
-  const incomingIds = normalizeJson(incoming.external_ids, {});
-
-  const resolvedExternalIds = normalizeExternalIdsMap({
-    ...existingIds,
-    ...incomingIds
-  });
-
-  const resolvedCategory = isBookEntity
-    ? "books"
-    : existingCategory || incomingCategory || "";
-
-  const mergedMeta = {
-    ...normalizeJson(existing.meta, {}),
-    ...normalizeJson(incoming.meta, {})
-  };
-
-  const resolvedCanonicalKey = isBookEntity
-    ? buildCanonicalKey({
-        ...existing,
-        ...incoming,
-        category: "books",
-        external_ids: resolvedExternalIds,
-        title_primary: pickBetterText(existing.title_primary, incoming.title_primary),
-        title_ru: pickBetterText(existing.title_ru, incoming.title_ru),
-        title_en: pickBetterText(existing.title_en, incoming.title_en),
-        original_title: pickBetterText(existing.original_title, incoming.original_title),
-        meta: mergedMeta
-      })
-    : existing.canonical_key || incoming.canonical_key;
-
-  const resolvedPrimarySource = normalizePrimarySource(
-    incoming.primary_source ||
-      existing.primary_source ||
-      (resolvedExternalIds.tmdb || resolvedExternalIds.tmdb_id ? "tmdb" : "") ||
-      (resolvedExternalIds.wikidata || resolvedExternalIds.wikidata_id ? "wikidata" : "") ||
-      "manual"
-  );
-
-  if (existingAuthoritative && !incomingAuthoritative) {
-    return {
-      canonical_key: existing.canonical_key || resolvedCanonicalKey,
-      category: existing.category || resolvedCategory,
-      primary_source: existing.primary_source || resolvedPrimarySource,
-
-      title_primary: existing.title_primary || incoming.title_primary,
-      title_ru: existing.title_ru || incoming.title_ru,
-      title_en: existing.title_en || incoming.title_en,
-      original_title: existing.original_title || incoming.original_title,
-
-      year: existing.year ?? incoming.year ?? null,
-      cover_url: existing.cover_url || incoming.cover_url,
-
-      description_ru: existing.description_ru || incoming.description_ru,
-      description_en: existing.description_en || incoming.description_en,
-
-      external_ids: resolvedExternalIds,
-      meta: mergedMeta
-    };
-  }
-
-  return {
-    canonical_key: resolvedCanonicalKey,
-    category: resolvedCategory,
-    primary_source: resolvedPrimarySource,
-
-    title_primary: incomingAuthoritative
-      ? incoming.title_primary || existing.title_primary
-      : pickBetterText(existing.title_primary, incoming.title_primary),
-    title_ru: incomingAuthoritative
-      ? incoming.title_ru || existing.title_ru
-      : pickBetterText(existing.title_ru, incoming.title_ru),
-    title_en: incomingAuthoritative
-      ? incoming.title_en || existing.title_en
-      : pickBetterText(existing.title_en, incoming.title_en),
-    original_title: incomingAuthoritative
-      ? incoming.original_title || existing.original_title
-      : pickBetterText(existing.original_title, incoming.original_title),
-
-    year: incoming.year ?? existing.year ?? null,
-    cover_url: incomingAuthoritative
-      ? incoming.cover_url || existing.cover_url
-      : pickBetterCover(existing.cover_url, incoming.cover_url),
-
-    description_ru: isBookEntity
-      ? pickBookDescription(existing.description_ru, incoming.description_ru)
-      : incomingAuthoritative
-        ? incoming.description_ru || existing.description_ru
-        : pickBetterText(existing.description_ru, incoming.description_ru),
-
-    description_en: isBookEntity
-      ? pickBookDescription(existing.description_en, incoming.description_en)
-      : incomingAuthoritative
-        ? incoming.description_en || existing.description_en
-        : pickBetterText(existing.description_en, incoming.description_en),
-
-    external_ids: resolvedExternalIds,
-    meta: mergedMeta
-  };
-}
-
 function possibleCanonicalKeys(entity = {}) {
   const ids = entity.external_ids || {};
-  const category = cleanLower(entity.category);
+  const category = normalizeCategory(entity.category);
 
   return uniqueArray(
     [
       entity.canonical_key,
+
       ids.wikidata_id ? `${category}:wikidata:${ids.wikidata_id}` : "",
       ids.wikidata ? `${category}:wikidata:${ids.wikidata}` : "",
       ids.tmdb_id ? `${category}:tmdb:${ids.tmdb_id}` : "",
@@ -830,10 +641,6 @@ function possibleCanonicalKeys(entity = {}) {
 
       category === "books" && ids.openlibrary_work
         ? `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`
-        : "",
-
-      category !== "books" && ids.openlibrary_work
-        ? `${category}:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`
         : ""
     ]
       .map((key) => cleanLower(key))
@@ -891,10 +698,7 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
   if (!key) return null;
 
   const cached = getCachedEntity(key);
-
-  if (cached?.id) {
-    return cached;
-  }
+  if (cached?.id) return cached;
 
   const supabase = getSupabaseClient();
 
@@ -939,31 +743,12 @@ export async function getEntityLightByCanonicalKey(canonicalKey) {
 }
 
 async function findDuplicateEntity(entity = {}) {
-  const exactKey = cleanLower(entity.canonical_key);
+  const keys = possibleCanonicalKeys(entity);
 
-  if (exactKey) {
-    const exact = await getEntityByAnyCanonicalKey([exactKey]).catch(() => null);
-    if (exact?.id) return exact;
-  }
-
-  const keys = possibleCanonicalKeys(entity).filter((key) => key !== exactKey);
   if (!keys.length) return null;
 
   try {
-    const candidate = await getEntityByAnyCanonicalKey(keys);
-    if (!candidate?.id) return null;
-
-    if (!canMergeEntities(candidate, entity)) {
-      console.warn("findDuplicateEntity blocked unsafe duplicate match", {
-        candidate: candidate.canonical_key,
-        incoming: entity.canonical_key,
-        candidateIds: candidate.external_ids,
-        incomingIds: entity.external_ids
-      });
-      return null;
-    }
-
-    return candidate;
+    return await getEntityByAnyCanonicalKey(keys);
   } catch (error) {
     console.warn("findDuplicateEntity skipped:", error);
     return null;
@@ -1023,43 +808,32 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
 
 function scheduleEntityEnrichment(entity = {}) {
   if (!entity?.id) return;
+  if (isHardLockedEntity(entity) || isAuthoritativeEntity(entity)) return;
+  if (!shouldEnrichEntity(entity)) return;
 
-  if (isHardLockedEntity(entity) || isAuthoritativeEntity(entity)) {
-    return;
-  }
-
-  if (!shouldEnrichEntity(entity)) {
-    return;
-  }
-
-  enrichMediaEntityInBackground(entity);
+  window.setTimeout?.(() => {
+    enrichMediaEntityInBackground(entity).catch((error) => {
+      console.warn("Entity enrichment skipped:", error);
+    });
+  }, 50);
 }
 
-export async function saveEntityIfMissing(inputEntity) {
-  const entity = normalizeEntity(inputEntity);
-  const cacheKey = cleanLower(entity.canonical_key);
+async function insertCompleteEntity(entity = {}) {
+  const completeEntity = assertCompleteEntityForCatalog(entity);
+  const payload = buildEntityPayload(completeEntity);
+  const key = cleanLower(payload.canonical_key);
 
-  const cached = getCachedEntity(cacheKey);
-  if (cached?.id) {
-    scheduleEntityEnrichment(cached);
-    return cached;
-  }
-
-  if (pendingEntitySaveByCanonicalKey.has(cacheKey)) {
-    return pendingEntitySaveByCanonicalKey.get(cacheKey);
+  if (pendingEntitySaveByCanonicalKey.has(key)) {
+    return pendingEntitySaveByCanonicalKey.get(key);
   }
 
   const promise = (async () => {
-    const existing = await findDuplicateEntity(entity).catch(() => null);
-
+    const existing = await findDuplicateEntity(completeEntity);
     if (existing?.id) {
       setCachedEntity(existing);
-      scheduleEntityEnrichment(existing);
+      await saveAliases(existing.id, completeEntity.aliases, completeEntity.primary_source).catch(() => []);
       return existing;
     }
-
-    const completeEntity = assertCompleteEntityForCatalog(entity);
-    const payload = buildEntityPayload(completeEntity);
 
     const supabase = getSupabaseClient();
 
@@ -1068,88 +842,47 @@ export async function saveEntityIfMissing(inputEntity) {
         .from(MEDIA_ENTITIES_TABLE)
         .insert(payload)
         .select("*")
-        .single(),
-      "Сохранение полной сущности",
+        .maybeSingle(),
+      "Создание полной карточки",
       WRITE_TIMEOUT_MS
     );
 
     if (error) throw error;
 
-    setCachedEntity(data);
+    const created = data || null;
 
-    saveAliases(data.id, completeEntity.aliases, completeEntity.primary_source).catch((error) => {
-      console.warn("saveEntityIfMissing aliases skipped:", error);
-    });
-
-    scheduleEntityEnrichment(data);
-
-    return data;
-  })().finally(() => {
-    pendingEntitySaveByCanonicalKey.delete(cacheKey);
-  });
-
-  pendingEntitySaveByCanonicalKey.set(cacheKey, promise);
-  return promise;
-}
-
-export async function getUserLibraryEntryLight(userId, entityId) {
-  const cleanUserId = cleanText(userId);
-  const cleanEntityId = Number(entityId || 0);
-
-  if (!cleanUserId || !cleanEntityId) return null;
-
-  const cached = getCachedUserMedia(cleanUserId, cleanEntityId);
-  if (cached) return cached;
-
-  const cacheKey = getUserMediaCacheKey(cleanUserId, cleanEntityId);
-
-  if (pendingUserMediaByKey.has(cacheKey)) {
-    return pendingUserMediaByKey.get(cacheKey);
-  }
-
-  const promise = (async () => {
-    const supabase = getSupabaseClient();
-
-    const { data, error } = await withTimeout(
-      supabase
-        .from(USER_MEDIA_TABLE)
-        .select(USER_MEDIA_WITH_ENTITY_SELECT)
-        .eq("user_id", cleanUserId)
-        .eq("entity_id", cleanEntityId)
-        .maybeSingle(),
-      "Быстрая проверка библиотеки",
-      READ_TIMEOUT_MS
-    );
-
-    if (error) throw error;
-
-    if (data) {
-      setCachedUserMedia(cleanUserId, cleanEntityId, data);
-
-      if (data.media_entities?.id) {
-        setCachedEntity(data.media_entities);
-        scheduleEntityEnrichment(data.media_entities);
-      }
+    if (created?.id) {
+      setCachedEntity(created);
+      await saveAliases(created.id, completeEntity.aliases, completeEntity.primary_source).catch(() => []);
+      scheduleEntityEnrichment(created);
     }
 
-    return data || null;
-  })().finally(() => {
-    pendingUserMediaByKey.delete(cacheKey);
-  });
+    return created;
+  })()
+    .finally(() => {
+      pendingEntitySaveByCanonicalKey.delete(key);
+    });
 
-  pendingUserMediaByKey.set(cacheKey, promise);
+  pendingEntitySaveByCanonicalKey.set(key, promise);
   return promise;
 }
 
-export async function getUserLibraryEntry(userId, entityId, { full = true } = {}) {
-  const cleanUserId = cleanText(userId);
-  const cleanEntityId = Number(entityId || 0);
+export async function saveEntityIfMissing(entity = {}) {
+  const normalized = normalizeEntity(entity);
+  const existing = await findDuplicateEntity(normalized);
 
-  if (!cleanUserId || !cleanEntityId) return null;
-
-  if (!full) {
-    return getUserLibraryEntryLight(cleanUserId, cleanEntityId);
+  if (existing?.id) {
+    setCachedEntity(existing);
+    await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
+    return existing;
   }
+
+  return insertCompleteEntity(normalized);
+}
+
+async function getExistingUserMedia(userId, entityId) {
+  const cached = getCachedUserMedia(userId, entityId);
+  if (cached?.id) return cached;
 
   const supabase = getSupabaseClient();
 
@@ -1157,30 +890,81 @@ export async function getUserLibraryEntry(userId, entityId, { full = true } = {}
     supabase
       .from(USER_MEDIA_TABLE)
       .select(USER_MEDIA_WITH_ENTITY_SELECT)
-      .eq("user_id", cleanUserId)
-      .eq("entity_id", cleanEntityId)
+      .eq("user_id", userId)
+      .eq("entity_id", entityId)
       .maybeSingle(),
-    "Проверка библиотеки",
+    "Проверка карточки в библиотеке",
     READ_TIMEOUT_MS
   );
 
   if (error) throw error;
 
-  if (data) {
-    setCachedUserMedia(cleanUserId, cleanEntityId, data);
-
-    if (data.media_entities?.id) {
-      setCachedEntity(data.media_entities);
-      scheduleEntityEnrichment(data.media_entities);
-    }
+  if (data?.id) {
+    setCachedUserMedia(userId, entityId, data);
   }
 
   return data || null;
 }
 
-export async function isAlreadyInUserLibrary(userId, entityId) {
-  const existing = await getUserLibraryEntryLight(userId, entityId);
-  return Boolean(existing);
+async function insertUserMedia({ userId, entity, status = "planned", folderName = "" }) {
+  const userMediaKey = `${userId}:${entity.id}`;
+
+  if (pendingUserMediaByKey.has(userMediaKey)) {
+    return pendingUserMediaByKey.get(userMediaKey);
+  }
+
+  const promise = (async () => {
+    const existing = await getExistingUserMedia(userId, entity.id);
+
+    if (existing?.id) {
+      return {
+        alreadyExists: true,
+        userMedia: existing,
+        entity: existing.media_entities || entity
+      };
+    }
+
+    const supabase = getSupabaseClient();
+
+    const payload = {
+      user_id: userId,
+      entity_id: entity.id,
+      category: entity.category,
+      status: cleanText(status) || "planned",
+      folder_name: cleanText(folderName) || null
+    };
+
+    const { data, error } = await withTimeout(
+      supabase
+        .from(USER_MEDIA_TABLE)
+        .insert(payload)
+        .select(USER_MEDIA_WITH_ENTITY_SELECT)
+        .maybeSingle(),
+      "Добавление карточки в библиотеку",
+      WRITE_TIMEOUT_MS
+    );
+
+    if (error) throw error;
+
+    const row = data || null;
+
+    if (row?.id) {
+      setCachedUserMedia(userId, entity.id, row);
+      updateCachedLibraryItem(userId, row);
+    }
+
+    return {
+      alreadyExists: false,
+      userMedia: row,
+      entity: row?.media_entities || entity
+    };
+  })()
+    .finally(() => {
+      pendingUserMediaByKey.delete(userMediaKey);
+    });
+
+  pendingUserMediaByKey.set(userMediaKey, promise);
+  return promise;
 }
 
 export async function addToUserLibrary({
@@ -1188,82 +972,55 @@ export async function addToUserLibrary({
   entity,
   status = "planned",
   folderName = ""
-}) {
-  const cleanUserId = cleanText(userId);
-
-  if (!cleanUserId) {
-    throw new Error("Пользователь не найден");
+} = {}) {
+  if (!userId) {
+    throw new Error("addToUserLibrary: userId is required");
   }
 
   if (!entity || typeof entity !== "object") {
-    throw new Error("Не передана карточка для добавления");
+    throw new Error("addToUserLibrary: entity is required");
   }
 
-  const savedEntity = await saveEntityIfMissing(entity);
+  const normalized = normalizeEntity(entity);
+  const existing = await findDuplicateEntity(normalized);
 
-  const existingEntry = await getUserLibraryEntryLight(cleanUserId, savedEntity.id);
+  if (existing?.id) {
+    setCachedEntity(existing);
+    await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
 
-  if (existingEntry) {
-    const cachedEntry = {
-      ...existingEntry,
-      media_entities: existingEntry.media_entities || savedEntity
-    };
-
-    setCachedUserMedia(cleanUserId, savedEntity.id, cachedEntry);
-
-    updateCachedLibraryItem(cleanUserId, cachedEntry, {
-      category: existingEntry.category || savedEntity.category
+    return insertUserMedia({
+      userId,
+      entity: existing,
+      status,
+      folderName
     });
-
-    scheduleEntityEnrichment(savedEntity);
-
-    return {
-      added: false,
-      alreadyExists: true,
-      entity: savedEntity,
-      userMedia: cachedEntry
-    };
   }
 
-  const supabase = getSupabaseClient();
+  const completeEntity = assertCompleteEntityForCatalog(normalized);
+  const created = await insertCompleteEntity(completeEntity);
 
-  const insertPayload = {
-    user_id: cleanUserId,
-    entity_id: savedEntity.id,
-    category: savedEntity.category,
-    status: cleanText(status) || "planned",
-    folder_name: cleanText(folderName) || null
-  };
+  if (!created?.id) {
+    throw new Error("Не удалось создать карточку");
+  }
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from(USER_MEDIA_TABLE)
-      .insert(insertPayload)
-      .select(USER_MEDIA_WITH_ENTITY_SELECT)
-      .single(),
-    "Добавление в библиотеку",
-    WRITE_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-
-  const cachedEntry = {
-    ...data,
-    media_entities: data.media_entities || savedEntity
-  };
-
-  setCachedUserMedia(cleanUserId, savedEntity.id, cachedEntry);
-
-  updateCachedLibraryItem(cleanUserId, cachedEntry, {
-    category: cachedEntry.category || savedEntity.category
+  return insertUserMedia({
+    userId,
+    entity: created,
+    status,
+    folderName
   });
+}
 
-  scheduleEntityEnrichment(cachedEntry.media_entities || savedEntity);
+export async function findEntityBySearchIdentity(item = {}) {
+  const normalized = normalizeEntity(item);
+  return findDuplicateEntity(normalized);
+}
 
-  return {
-    added: true,
-    alreadyExists: false,
-    entity: cachedEntry.media_entities || savedEntity,
-    userMedia: cachedEntry
-  };
+export async function ensureEntityForLibrary(item = {}) {
+  const normalized = normalizeEntity(item);
+  const existing = await findDuplicateEntity(normalized);
+
+  if (existing?.id) return existing;
+
+  return insertCompleteEntity(normalized);
 }
