@@ -57,6 +57,29 @@ function normalizeYear(value) {
   return Number.isFinite(year) ? year : null;
 }
 
+function isTruthyFlag(value) {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function isHardLockedEntity(entity = {}) {
+  const canonicalKey = cleanLower(entity.canonical_key);
+  const universeKey = cleanLower(entity.universe_key);
+  const meta = normalizeJson(entity.meta, {});
+
+  return (
+    isTruthyFlag(entity.manual_locked) ||
+    isTruthyFlag(meta.manual_locked) ||
+    isTruthyFlag(meta.seed_locked) ||
+    isTruthyFlag(meta.seed_final) ||
+    isTruthyFlag(meta.manual_reference) ||
+    isTruthyFlag(meta.enrichment_protected) ||
+    universeKey === "marvel" ||
+    canonicalKey.startsWith("marvel:") ||
+    canonicalKey.startsWith("seed:") ||
+    canonicalKey.startsWith("manual:")
+  );
+}
+
 function hasUsefulText(value = "", minLength = 40) {
   return cleanText(value).length >= minLength;
 }
@@ -133,6 +156,7 @@ function isProtectedEntity(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
 
   return (
+    isHardLockedEntity(entity) ||
     universeKey === "marvel" ||
     cleanLower(meta.franchise) === "marvel" ||
     cleanLower(meta.branch) === "mcu" ||
@@ -191,18 +215,13 @@ function mergeEntityMetadata(entity = {}, patch = {}) {
       original_title: entity.original_title,
       year: entity.year,
 
-      cover_url: shouldUseIncomingCover ? incomingCover : currentCover,
+      cover_url: currentCover,
 
-      description_ru: hasUsefulText(entity.description_ru, 20)
-        ? entity.description_ru
-        : cleanText(patch.description_ru),
+      description_ru: entity.description_ru,
+      description_en: entity.description_en,
 
-      description_en: hasUsefulText(entity.description_en, 20)
-        ? entity.description_en
-        : cleanText(patch.description_en),
-
-      external_ids: externalIds,
-      meta
+      external_ids: normalizeJson(entity.external_ids, {}),
+      meta: currentMeta
     };
   }
 
@@ -908,6 +927,8 @@ async function fetchWikipediaSummary(entity = {}, language = "ru") {
 }
 
 async function collectPatches(entity = {}) {
+  if (isHardLockedEntity(entity)) return [];
+
   const category = normalizeCategory(entity.category);
   const patches = [];
 
@@ -967,6 +988,7 @@ function buildUpdatePayload(entity = {}) {
 
 export function shouldEnrichEntity(entity = {}) {
   if (!entity?.id) return false;
+  if (isHardLockedEntity(entity)) return false;
 
   const missing = getMissingFields(entity);
   if (!missing.length) return false;
@@ -984,6 +1006,7 @@ export function shouldEnrichEntity(entity = {}) {
 
 export async function enrichMediaEntity(entity = {}) {
   if (!entity?.id) return entity || null;
+  if (isHardLockedEntity(entity)) return entity;
 
   const patches = await collectPatches(entity);
 
@@ -995,6 +1018,8 @@ export async function enrichMediaEntity(entity = {}) {
     (current, patch) => mergeEntityMetadata(current, patch),
     entity
   );
+
+  if (isHardLockedEntity(enriched)) return entity;
 
   const payload = buildUpdatePayload(enriched);
 
@@ -1018,6 +1043,7 @@ export async function enrichMediaEntity(entity = {}) {
 
 export async function enrichMediaEntityInBackground(entity = {}) {
   if (!entity?.id) return null;
+  if (isHardLockedEntity(entity)) return entity;
 
   const key = String(entity.id);
 
@@ -1074,6 +1100,7 @@ export async function repairMissingMetadata({ category = "", limit = 20 } = {}) 
     const results = [];
 
     for (const entity of rows) {
+      if (isHardLockedEntity(entity)) continue;
       if (!shouldEnrichEntity(entity)) continue;
 
       const result = await enrichMediaEntity(entity).catch((error) => {
