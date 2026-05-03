@@ -8,7 +8,7 @@ import {
   openAuthModal,
   setTemporaryCardItem
 } from "../state.js";
-import { debounce, escapeHtml } from "../utils.js";
+import { debounce, escapeHtml, safeArray } from "../utils.js";
 import {
   runGlobalSearch,
   runCategorySearch,
@@ -22,52 +22,150 @@ let activeSearchRequestId = 0;
 
 const SEARCH_CATEGORIES = ["", "books", "movies", "series", "anime", "manga"];
 
+const I18N = {
+  ru: {
+    add: "Добавить",
+    adding: "Добавляем…",
+    added: "Добавлено",
+    alreadyAdded: "Уже в библиотеке",
+    showAll: "Показать все",
+    startTyping: "Начни вводить название, чтобы найти и добавить что-то в библиотеку.",
+    nothingFound: "Ничего не найдено. Попробуй изменить запрос.",
+    searchFailed: "Не удалось выполнить поиск. Попробуй ещё раз.",
+    searching: "Ищем…",
+    all: "Все",
+    author: "Автор",
+    seriesPart: "Часть серии",
+    searchResult: "Результат поиска",
+    dbReady: "Из базы",
+    searchTitle: "Добавить",
+    close: "Закрыть",
+    placeholder: "Искать книги, фильмы, аниме, мангу…",
+    addError: "Ошибка",
+    originalTitle: "Оригинальное название"
+  },
+  en: {
+    add: "Add",
+    adding: "Adding…",
+    added: "Added",
+    alreadyAdded: "Already in library",
+    showAll: "Show all",
+    startTyping: "Start typing a title to find and add something to your library.",
+    nothingFound: "Nothing found. Try changing the query.",
+    searchFailed: "Search failed. Try again.",
+    searching: "Searching…",
+    all: "All",
+    author: "Author",
+    seriesPart: "Part of series",
+    searchResult: "Search result",
+    dbReady: "From database",
+    searchTitle: "Add",
+    close: "Close",
+    placeholder: "Search books, movies, anime, manga…",
+    addError: "Error",
+    originalTitle: "Original title"
+  }
+};
+
+function t(key) {
+  const language = state.language === "en" ? "en" : "ru";
+  return I18N[language][key] || I18N.ru[key] || key;
+}
+
+function clean(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeKey(value = "") {
+  return clean(value).toLowerCase();
+}
+
 function getTotalCount(groupedResults) {
   if (!groupedResults) return 0;
   return Object.values(groupedResults).reduce((sum, items) => sum + (items?.length || 0), 0);
+}
+
+function resolveTitle(item = {}) {
+  const language = state.language === "en" ? "en" : "ru";
+
+  if (language === "en") {
+    return clean(
+      item.display_title ||
+      item.title_en ||
+      item.title ||
+      item.title_primary ||
+      item.title_ru ||
+      item.original_title ||
+      ""
+    );
+  }
+
+  return clean(
+    item.display_title ||
+    item.title_ru ||
+    item.title ||
+    item.title_primary ||
+    item.title_en ||
+    item.original_title ||
+    ""
+  );
+}
+
+function resolveOriginalTitle(item = {}) {
+  return clean(item.original_title || "");
+}
+
+function isLocalDbResult(item = {}) {
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+  return Boolean(meta.local_db_match || item.primary_source === "supabase" || item.primary_source === "alias");
 }
 
 function renderEmpty(query) {
   if (!query || query.trim().length < SEARCH_LIMITS.MIN_QUERY_LENGTH) {
     return `
       <div class="search-modal__empty">
-        Начни вводить название, чтобы найти и добавить что-то в библиотеку.
+        ${escapeHtml(t("startTyping"))}
       </div>
     `;
   }
 
   return `
     <div class="search-modal__empty">
-      Ничего не найдено. Попробуй изменить запрос.
+      ${escapeHtml(t("nothingFound"))}
     </div>
   `;
 }
 
 function getBookAuthors(item = {}) {
-  return (
+  return safeArray(
     item?.meta?.author_names ||
     item?.meta?.authors ||
     item?.authors ||
+    item?.author_names ||
     []
   ).filter(Boolean);
 }
 
 function getBookSeriesName(item = {}) {
-  return (
+  return clean(
     item?.meta?.series_name ||
     item?.meta?.series ||
     item?.series_name ||
+    item?.series ||
     ""
   );
 }
 
-function renderCover(item) {
+function renderCover(item = {}) {
+  const title = resolveTitle(item);
+
   if (item.cover_url) {
     return `
       <img
         src="${escapeHtml(item.cover_url)}"
-        alt="${escapeHtml(item.title || "")}"
+        alt="${escapeHtml(title)}"
         loading="lazy"
+        decoding="async"
         onerror="this.style.display='none';this.parentElement.classList.add('is-empty');"
       />
     `;
@@ -76,7 +174,7 @@ function renderCover(item) {
   return `<div class="search-result-card__cover-fallback">?</div>`;
 }
 
-function renderBookExtraMeta(item) {
+function renderBookExtraMeta(item = {}) {
   if (item.category !== "books") return "";
 
   const authors = getBookAuthors(item);
@@ -85,30 +183,40 @@ function renderBookExtraMeta(item) {
   return `
     ${
       authors.length
-        ? `<div class="search-result-card__subtitle">Автор: ${escapeHtml(authors.join(", "))}</div>`
+        ? `<div class="search-result-card__subtitle">${escapeHtml(t("author"))}: ${escapeHtml(authors.join(", "))}</div>`
         : ""
     }
 
     ${
       seriesName
-        ? `<div class="search-result-card__series">Часть серии: ${escapeHtml(seriesName)}</div>`
+        ? `<div class="search-result-card__series">${escapeHtml(t("seriesPart"))}: ${escapeHtml(seriesName)}</div>`
         : ""
     }
   `;
 }
 
-function renderResultCard(item) {
+function renderSourceBadge(item = {}) {
+  return `
+    <span class="search-result-card__badge ${isLocalDbResult(item) ? "is-db" : ""}">
+      ${escapeHtml(isLocalDbResult(item) ? t("dbReady") : t("searchResult"))}
+    </span>
+  `;
+}
+
+function renderResultCard(item = {}) {
+  const title = resolveTitle(item);
+  const originalTitle = resolveOriginalTitle(item);
   const year = item.year
     ? `<span class="search-result-card__year">${escapeHtml(String(item.year))}</span>`
     : "";
 
   return `
-    <div class="search-result-card">
+    <div class="search-result-card ${isLocalDbResult(item) ? "is-db" : "is-search-result"}">
       <button
         class="search-result-card__main"
         type="button"
-        data-card-key="${escapeHtml(item.canonical_key)}"
-        data-card-category="${escapeHtml(item.category)}"
+        data-card-key="${escapeHtml(item.canonical_key || "")}"
+        data-card-category="${escapeHtml(item.category || "")}"
       >
         <div class="search-result-card__cover">
           ${renderCover(item)}
@@ -117,21 +225,24 @@ function renderResultCard(item) {
         <div class="search-result-card__meta">
           <div class="search-result-card__top">
             <div class="search-result-card__title">
-              ${escapeHtml(item.title || "")}
+              ${escapeHtml(title)}
             </div>
             ${year}
           </div>
 
           ${
-            item.original_title && item.original_title !== item.title
-              ? `<div class="search-result-card__subtitle">${escapeHtml(item.original_title)}</div>`
+            originalTitle && originalTitle !== title
+              ? `<div class="search-result-card__subtitle">${escapeHtml(originalTitle)}</div>`
               : ""
           }
 
           ${renderBookExtraMeta(item)}
 
-          <div class="search-result-card__category">
-            ${escapeHtml(getCategoryLabel(state.language, item.category))}
+          <div class="search-result-card__footer">
+            <span class="search-result-card__badge">
+              ${escapeHtml(getCategoryLabel(state.language, item.category))}
+            </span>
+            ${renderSourceBadge(item)}
           </div>
         </div>
       </button>
@@ -139,9 +250,9 @@ function renderResultCard(item) {
       <button
         class="search-result-card__add"
         type="button"
-        data-add-key="${escapeHtml(item.canonical_key)}"
+        data-add-key="${escapeHtml(item.canonical_key || "")}"
       >
-        Добавить
+        ${escapeHtml(t("add"))}
       </button>
     </div>
   `;
@@ -175,7 +286,51 @@ function buildItemsMap(groupedResults) {
     SEARCH_LIMITS.PAGE_RESULTS
   );
 
-  return new Map(flat.map((item) => [item.canonical_key, item]));
+  return new Map(flat.map((item) => [normalizeKey(item.canonical_key), item]));
+}
+
+function openTemporaryCard(item = {}) {
+  const key = item.canonical_key || "";
+  const category = item.category || "";
+
+  if (!key) return;
+
+  setTemporaryCardItem({
+    ...item,
+    __mode: "temp",
+    __source: "search"
+  });
+
+  closeSearchModal();
+
+  navigate("/card", {
+    key,
+    category,
+    mode: "temp"
+  });
+}
+
+function setButtonAdded(button, alreadyExists = false) {
+  button.disabled = true;
+  button.classList.remove("is-error");
+  button.classList.add("is-success");
+  button.textContent = alreadyExists ? t("alreadyAdded") : t("added");
+}
+
+function setButtonError(button, message = "") {
+  button.disabled = false;
+  button.classList.add("is-error");
+  button.textContent = t("addError");
+
+  if (message) {
+    button.title = message;
+  }
+
+  window.setTimeout?.(() => {
+    if (!button.isConnected) return;
+    button.classList.remove("is-error");
+    button.textContent = t("add");
+  }, 2200);
 }
 
 function attachResultHandlers(resultsRoot, groupedResults, currentQuery) {
@@ -185,27 +340,18 @@ function attachResultHandlers(resultsRoot, groupedResults, currentQuery) {
 
   resultsRoot.querySelectorAll("[data-card-key]").forEach((button) => {
     button.addEventListener("click", () => {
-      const canonicalKey = button.dataset.cardKey || "";
-      const category = button.dataset.cardCategory || "";
+      const canonicalKey = normalizeKey(button.dataset.cardKey || "");
       const item = itemsByKey.get(canonicalKey) || null;
 
-      if (item) {
-        setTemporaryCardItem(item);
-      }
+      if (!item) return;
 
-      closeSearchModal();
-
-      navigate("/card", {
-        key: canonicalKey,
-        category,
-        mode: "temp"
-      });
+      openTemporaryCard(item);
     });
   });
 
   resultsRoot.querySelectorAll("[data-add-key]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const key = button.dataset.addKey || "";
+      const key = normalizeKey(button.dataset.addKey || "");
       const item = itemsByKey.get(key);
 
       if (!item) return;
@@ -219,20 +365,18 @@ function attachResultHandlers(resultsRoot, groupedResults, currentQuery) {
 
       try {
         button.disabled = true;
-        button.textContent = "Добавляем…";
+        button.classList.remove("is-error");
+        button.textContent = t("adding");
 
         const result = await addSearchResultDirectlyToLibrary({
           userId,
           item
         });
 
-        button.textContent = result?.alreadyExists
-          ? "Уже в библиотеке"
-          : "Добавлено";
+        setButtonAdded(button, Boolean(result?.alreadyExists));
       } catch (error) {
         console.warn("Direct add error:", error);
-        button.disabled = false;
-        button.textContent = "Ошибка";
+        setButtonError(button, error?.message || t("addError"));
       }
     });
   });
@@ -268,7 +412,7 @@ async function performSearch(root, query) {
     return;
   }
 
-  resultsRoot.innerHTML = `<div class="search-modal__loading">Ищем…</div>`;
+  resultsRoot.innerHTML = `<div class="search-modal__loading">${escapeHtml(t("searching"))}</div>`;
 
   try {
     const groupedResults = selectedCategory
@@ -294,7 +438,7 @@ async function performSearch(root, query) {
 
       <div class="search-modal__footer">
         <button class="search-modal__show-all" type="button" data-action="show-all">
-          Показать все
+          ${escapeHtml(t("showAll"))}
         </button>
       </div>
     `;
@@ -312,7 +456,7 @@ async function performSearch(root, query) {
 
     resultsRoot.innerHTML = `
       <div class="search-modal__empty">
-        Не удалось выполнить поиск. Попробуй ещё раз.
+        ${escapeHtml(t("searchFailed"))}
       </div>
     `;
   }
@@ -326,7 +470,7 @@ export function renderSearchModal(root, options = {}) {
   const initialCategory = String(options.category || state.searchContextCategory || "").trim();
 
   const categoryOptions = SEARCH_CATEGORIES.map((category) => {
-    const label = category ? getCategoryLabel(state.language, category) : "Все";
+    const label = category ? getCategoryLabel(state.language, category) : t("all");
     return `
       <option value="${escapeHtml(category)}" ${category === initialCategory ? "selected" : ""}>
         ${escapeHtml(label)}
@@ -493,6 +637,10 @@ export function renderSearchModal(root, options = {}) {
         padding: 10px;
       }
 
+      .search-result-card.is-db {
+        border-color: color-mix(in srgb, var(--accent) 35%, var(--border-soft));
+      }
+
       .search-result-card__main {
         display: grid;
         grid-template-columns: 74px minmax(0, 1fr);
@@ -501,6 +649,7 @@ export function renderSearchModal(root, options = {}) {
         text-align: left;
         background: transparent;
         color: var(--text);
+        min-width: 0;
       }
 
       .search-result-card__add {
@@ -513,8 +662,18 @@ export function renderSearchModal(root, options = {}) {
         padding: 0 12px;
       }
 
+      .search-result-card__add.is-error {
+        background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+        color: var(--danger);
+      }
+
+      .search-result-card__add.is-success {
+        background: var(--accent);
+        color: #fff;
+      }
+
       .search-result-card__add:disabled {
-        opacity: 0.7;
+        opacity: 0.76;
         cursor: default;
       }
 
@@ -583,9 +742,24 @@ export function renderSearchModal(root, options = {}) {
         border-radius: 999px;
       }
 
-      .search-result-card__category {
+      .search-result-card__footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .search-result-card__badge {
+        width: fit-content;
         font-size: 12px;
-        color: var(--text-muted);
+        color: var(--text-soft);
+        background: var(--bg-soft);
+        padding: 4px 8px;
+        border-radius: 999px;
+      }
+
+      .search-result-card__badge.is-db {
+        background: var(--accent-soft);
+        color: var(--text);
       }
 
       .search-result-card__year {
@@ -617,10 +791,10 @@ export function renderSearchModal(root, options = {}) {
     </style>
 
     <div class="search-modal-overlay ${isOpen ? "is-open" : ""}">
-      <div class="search-modal-panel" role="dialog" aria-modal="true" aria-label="Поиск">
+      <div class="search-modal-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("searchTitle"))}">
         <div class="search-modal__header">
-          <div class="search-modal__title">Добавить</div>
-          <button class="search-modal__close" type="button" data-action="close" aria-label="Закрыть">
+          <div class="search-modal__title">${escapeHtml(t("searchTitle"))}</div>
+          <button class="search-modal__close" type="button" data-action="close" aria-label="${escapeHtml(t("close"))}">
             ✕
           </button>
         </div>
@@ -635,7 +809,7 @@ export function renderSearchModal(root, options = {}) {
             data-search-input
             type="text"
             value="${escapeHtml(initialQuery)}"
-            placeholder="Искать книги, фильмы, аниме, мангу…"
+            placeholder="${escapeHtml(t("placeholder"))}"
             autocomplete="off"
             spellcheck="false"
           />
