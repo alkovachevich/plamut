@@ -216,7 +216,11 @@ function isFallbackEntity(entity = {}) {
 }
 
 function isSearchTemporaryEntity(entity = {}) {
-  return Boolean(entity?.__mode === "temp" || entity?.__source === "search" || entity?.meta?.search_preview);
+  return Boolean(
+    entity?.__mode === "temp" ||
+    entity?.__source === "search" ||
+    entity?.meta?.search_preview === true
+  );
 }
 
 function normalizeEntityForView(item = {}) {
@@ -351,25 +355,20 @@ function buildFallbackEntity(params = {}) {
 function loadFastEntity(params = {}) {
   const key = normalizeKey(params.key || "");
   const userId = state.user?.id || "";
-
   const cachedEntity = getCachedEntityByKey(userId, key);
+
+  if (!isTempMode(params)) {
+    return cachedEntity || null;
+  }
+
   const temp = normalizeEntityForView(getTemporaryCardItem());
   const stored = normalizeEntityForView(getStoredCardItemByKey(key));
 
-  if (isTempMode(params)) {
-    const tempMatch = [temp, stored].find((item) =>
-      item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key)
-    );
-
-    return tempMatch || cachedEntity || null;
-  }
-
-  const candidates = [cachedEntity, stored, temp].filter(Boolean);
-  const matching = candidates.find((item) =>
+  const tempMatch = [temp, stored].find((item) =>
     item?.canonical_key && (!key || normalizeKey(item.canonical_key) === key)
   );
 
-  return matching || null;
+  return tempMatch || cachedEntity || null;
 }
 
 async function loadEntityFromDb(key) {
@@ -865,15 +864,7 @@ export async function renderCardPage(root, params = {}) {
     return;
   }
 
-  let entity =
-    loadFastEntity(params) ||
-    buildFallbackEntity(params);
-
-  if (!entity) {
-    renderNotFound(root);
-    return;
-  }
-
+  let entity = loadFastEntity(params);
   let userMedia = null;
   let folders = [];
   let relatedItems = [];
@@ -882,10 +873,10 @@ export async function renderCardPage(root, params = {}) {
   let statusText = "";
   let destroyed = false;
 
-  const isTemp = () => tempMode || isSearchTemporaryEntity(entity) || (!entity.id && !userMedia?.id);
+  const isTemp = () => tempMode || isSearchTemporaryEntity(entity);
 
   const rerender = () => {
-    if (destroyed) return;
+    if (destroyed || !entity) return;
 
     renderPage(root, {
       entity,
@@ -1115,15 +1106,26 @@ export async function renderCardPage(root, params = {}) {
   };
 
   renderLoading(root);
-  rerender();
 
-  if (!tempMode && !isFallbackEntity(entity)) {
+  if (entity) {
+    rerender();
+  }
+
+  if (!tempMode) {
     const loaded = await loadEntityFromDb(key).catch(() => null);
 
     if (loaded?.canonical_key) {
       entity = loaded;
-      rerender();
+    } else if (!entity) {
+      entity = buildFallbackEntity(params);
     }
+  } else if (!entity) {
+    entity = buildFallbackEntity(params);
+  }
+
+  if (!entity) {
+    renderNotFound(root);
+    return;
   }
 
   await Promise.allSettled([
