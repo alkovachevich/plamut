@@ -1,10 +1,6 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
 import { updateCachedLibraryItem } from "./library-cache.js";
-import {
-  enrichMediaEntityInBackground,
-  shouldEnrichEntity
-} from "./metadata-enrichment.js";
 
 const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
@@ -13,17 +9,12 @@ const USER_MEDIA_TABLE = "user_media";
 const READ_TIMEOUT_MS = 9000;
 const WRITE_TIMEOUT_MS = 14000;
 
-const entityCacheByCanonicalKey = new Map();
-const userMediaCacheByKey = new Map();
-const pendingEntitySaveByCanonicalKey = new Map();
-const pendingUserMediaByKey = new Map();
-
-const CACHE_TTL_MS = 1000 * 60 * 5;
-
 const VALID_CATEGORIES = new Set(["books", "movies", "series", "anime", "manga"]);
 
 const ALLOWED_PRIMARY_SOURCES = new Set([
   "wikidata",
+  "wikipedia",
+  "wikimedia",
   "openlibrary",
   "tmdb",
   "anilist",
@@ -35,26 +26,27 @@ const ALLOWED_PRIMARY_SOURCES = new Set([
   "alias"
 ]);
 
-const AUTHORITATIVE_CANONICAL_PREFIXES = [
-  "marvel:",
-  "mcu:",
-  "seed:",
-  "manual:"
+const HARD_ID_KEYS = [
+  "wikidata",
+  "wikidata_id",
+  "openlibrary_work",
+  "openlibrary",
+  "tmdb",
+  "tmdb_id",
+  "imdb",
+  "imdb_id",
+  "anilist",
+  "anilist_id",
+  "mal",
+  "mal_id"
 ];
 
-const HARD_ID_KEYS = [
-  "tmdb_id",
-  "tmdb",
-  "wikidata_id",
-  "wikidata",
-  "imdb_id",
-  "imdb",
-  "anilist_id",
-  "anilist",
-  "mal_id",
-  "mal",
-  "openlibrary_work"
-];
+const entityCacheByCanonicalKey = new Map();
+const userMediaCacheByKey = new Map();
+const pendingEntitySaveByCanonicalKey = new Map();
+const pendingUserMediaByKey = new Map();
+
+const CACHE_TTL_MS = 1000 * 60 * 5;
 
 const USER_MEDIA_WITH_ENTITY_SELECT = `
   id,
@@ -128,16 +120,11 @@ function normalizeArray(value) {
 
 function normalizePrimarySource(value = "") {
   const source = cleanLower(value);
-  return ALLOWED_PRIMARY_SOURCES.has(source) ? source : "manual";
+  return ALLOWED_PRIMARY_SOURCES.has(source) ? source : "search";
 }
 
 function normalizeOpenLibraryWork(value = "") {
   return cleanText(value).replace("/works/", "");
-}
-
-function normalizeExternalIdValue(value) {
-  if (value === null || value === undefined || value === "") return "";
-  return cleanLower(String(value).replace("/works/", ""));
 }
 
 function normalizeExternalIdsMap(value = {}) {
@@ -152,47 +139,35 @@ function normalizeExternalIdsMap(value = {}) {
     normalized.openlibrary = normalizeOpenLibraryWork(normalized.openlibrary);
   }
 
-  if (normalized.tmdb && !normalized.tmdb_id) {
-    normalized.tmdb_id = cleanText(normalized.tmdb);
-  }
+  if (normalized.tmdb && !normalized.tmdb_id) normalized.tmdb_id = cleanText(normalized.tmdb);
+  if (normalized.tmdb_id && !normalized.tmdb) normalized.tmdb = cleanText(normalized.tmdb_id);
 
-  if (normalized.tmdb_id && !normalized.tmdb) {
-    normalized.tmdb = cleanText(normalized.tmdb_id);
-  }
+  if (normalized.imdb && !normalized.imdb_id) normalized.imdb_id = cleanText(normalized.imdb);
+  if (normalized.imdb_id && !normalized.imdb) normalized.imdb = cleanText(normalized.imdb_id);
 
-  if (normalized.imdb && !normalized.imdb_id) {
-    normalized.imdb_id = cleanText(normalized.imdb);
-  }
+  if (normalized.wikidata && !normalized.wikidata_id) normalized.wikidata_id = cleanText(normalized.wikidata);
+  if (normalized.wikidata_id && !normalized.wikidata) normalized.wikidata = cleanText(normalized.wikidata_id);
 
-  if (normalized.imdb_id && !normalized.imdb) {
-    normalized.imdb = cleanText(normalized.imdb_id);
-  }
+  if (normalized.anilist && !normalized.anilist_id) normalized.anilist_id = cleanText(normalized.anilist);
+  if (normalized.anilist_id && !normalized.anilist) normalized.anilist = cleanText(normalized.anilist_id);
 
-  if (normalized.wikidata && !normalized.wikidata_id) {
-    normalized.wikidata_id = cleanText(normalized.wikidata);
-  }
+  if (normalized.mal && !normalized.mal_id) normalized.mal_id = cleanText(normalized.mal);
+  if (normalized.mal_id && !normalized.mal) normalized.mal = cleanText(normalized.mal_id);
 
-  if (normalized.wikidata_id && !normalized.wikidata) {
-    normalized.wikidata = cleanText(normalized.wikidata_id);
-  }
+  return Object.fromEntries(
+    Object.entries(normalized)
+      .map(([key, value]) => [key, value === null || value === undefined ? "" : value])
+      .filter(([, value]) => {
+        if (Array.isArray(value)) return value.length > 0;
+        if (typeof value === "object") return value && Object.keys(value).length > 0;
+        return cleanText(value) !== "";
+      })
+  );
+}
 
-  if (normalized.anilist && !normalized.anilist_id) {
-    normalized.anilist_id = cleanText(normalized.anilist);
-  }
-
-  if (normalized.anilist_id && !normalized.anilist) {
-    normalized.anilist = cleanText(normalized.anilist_id);
-  }
-
-  if (normalized.mal && !normalized.mal_id) {
-    normalized.mal_id = cleanText(normalized.mal);
-  }
-
-  if (normalized.mal_id && !normalized.mal) {
-    normalized.mal = cleanText(normalized.mal_id);
-  }
-
-  return normalized;
+function normalizeExternalIdValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return cleanLower(String(value).replace("/works/", ""));
 }
 
 function getHardIdentityIds(entity = {}) {
@@ -209,19 +184,6 @@ function getHardIdentityIds(entity = {}) {
 
 function hasHardIdentity(entity = {}) {
   return Object.keys(getHardIdentityIds(entity)).length > 0;
-}
-
-function hasExternalIdConflict(existing = {}, incoming = {}) {
-  const existingIds = getHardIdentityIds(existing);
-  const incomingIds = getHardIdentityIds(incoming);
-
-  for (const key of HARD_ID_KEYS) {
-    if (existingIds[key] && incomingIds[key] && existingIds[key] !== incomingIds[key]) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function isTruthyFlag(value) {
@@ -245,19 +207,6 @@ function isHardLockedEntity(entity = {}) {
     canonicalKey.startsWith("mcu:") ||
     canonicalKey.startsWith("seed:") ||
     canonicalKey.startsWith("manual:")
-  );
-}
-
-function isAuthoritativeEntity(entity = {}) {
-  const canonicalKey = cleanLower(entity.canonical_key);
-  const meta = normalizeJson(entity.meta, {});
-
-  return (
-    isHardLockedEntity(entity) ||
-    AUTHORITATIVE_CANONICAL_PREFIXES.some((prefix) => canonicalKey.startsWith(prefix)) ||
-    cleanLower(meta.franchise) === "marvel" ||
-    Boolean(meta.seed_version) ||
-    cleanLower(entity.primary_source) === "system"
   );
 }
 
@@ -323,19 +272,15 @@ function setCachedUserMedia(userId, entityId, value) {
   });
 }
 
-function extractPrimarySourceFromCanonicalKey(canonicalKey = "") {
-  const parts = String(canonicalKey).split(":").filter(Boolean);
-  return normalizePrimarySource(parts[1] || "manual");
-}
-
 function buildTitlePrimary(entity = {}) {
   return (
     cleanText(entity.title_primary) ||
     cleanText(entity.title) ||
+    cleanText(entity.display_title) ||
     cleanText(entity.title_ru) ||
     cleanText(entity.title_en) ||
     cleanText(entity.original_title) ||
-    ""
+    "Без названия"
   );
 }
 
@@ -353,24 +298,16 @@ function buildExternalIds(entity = {}) {
   return normalizeExternalIdsMap(entity.external_ids);
 }
 
+function slugify(value = "") {
+  return normalizeString(value)
+    .replace(/[^a-z0-9а-яё]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
 function slugifyWorkIdentity(title = "", author = "") {
-  const titlePart = normalizeString(title)
-    .replace(/\bкнига\b/g, "")
-    .replace(/\bbook\b/g, "")
-    .replace(/\bроман\b/g, "")
-    .replace(/\bnovel\b/g, "")
-    .replace(/\bтом\b/g, "")
-    .replace(/\bvolume\b/g, "")
-    .replace(/[^a-z0-9а-яё]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  const authorPart = normalizeString(author)
-    .replace(/[^a-z0-9а-яё]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  return [titlePart || "untitled", authorPart]
+  return [slugify(title) || "untitled", slugify(author)]
     .filter(Boolean)
     .join("-");
 }
@@ -400,9 +337,11 @@ function buildCanonicalKey(entity = {}) {
       return `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`.toLowerCase();
     }
 
-    if (existing.startsWith("books:wikidata:")) return existing;
-    if (existing.startsWith("books:openlibrary:")) return existing;
-    if (existing.startsWith("books:work:")) return existing;
+    if (ids.openlibrary) {
+      return `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary)}`.toLowerCase();
+    }
+
+    if (existing) return existing;
 
     const title = buildTitlePrimary(entity) || buildOriginalTitle(entity);
     const author = getBookAuthorForIdentity(entity);
@@ -411,8 +350,6 @@ function buildCanonicalKey(entity = {}) {
   }
 
   if (existing) return existing;
-
-  const source = normalizePrimarySource(entity.primary_source || entity.source || "");
 
   if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
   if (category && ids.wikidata_id) return `${category}:wikidata:${ids.wikidata_id}`.toLowerCase();
@@ -425,16 +362,11 @@ function buildCanonicalKey(entity = {}) {
   if (category && ids.mal_id) return `${category}:mal:${ids.mal_id}`.toLowerCase();
   if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
 
-  const title = normalizeString(
-    buildTitlePrimary(entity) || buildOriginalTitle(entity)
-  )
-    .replace(/[^a-z0-9а-яё]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
+  const source = normalizePrimarySource(entity.primary_source || entity.source || "search");
+  const title = slugify(buildTitlePrimary(entity) || buildOriginalTitle(entity) || "untitled");
   const year = normalizeYear(entity.year);
 
-  return [category || "unknown", source || "manual", title || "untitled", year || ""]
+  return [category || "unknown", source, title || "untitled", year || ""]
     .filter(Boolean)
     .join(":")
     .toLowerCase();
@@ -448,20 +380,38 @@ function buildAliasList(entity = {}) {
     entity.title_primary,
     entity.title_ru,
     entity.title_en,
-    entity.original_title
+    entity.original_title,
+    ...safeArray(entity?.meta?.wikidata_aliases?.ru),
+    ...safeArray(entity?.meta?.wikidata_aliases?.en)
   ]);
 }
 
-export function normalizeEntity(entity = {}) {
-  const canonicalKey = buildCanonicalKey(entity);
+function getMissingMetadataFields(entity = {}) {
+  const missing = [];
 
-  if (!canonicalKey) {
-    throw new Error("У сущности нет canonical_key");
+  if (!cleanText(entity.cover_url)) missing.push("cover_url");
+
+  if (!cleanText(entity.description_ru) && !cleanText(entity.description_en)) {
+    missing.push("description");
   }
 
+  if (!hasHardIdentity(entity)) missing.push("external_ids");
+
+  if (entity.category !== "books" && !normalizeYear(entity.year)) {
+    missing.push("year");
+  }
+
+  if (entity.category === "books" && !getBookAuthorForIdentity(entity)) {
+    missing.push("author");
+  }
+
+  return missing;
+}
+
+export function normalizeEntity(entity = {}) {
   const category =
     normalizeCategory(entity.category) ||
-    normalizeCategory(String(canonicalKey).split(":")[0]) ||
+    normalizeCategory(String(entity.canonical_key || "").split(":")[0]) ||
     "";
 
   if (!category) {
@@ -470,19 +420,27 @@ export function normalizeEntity(entity = {}) {
 
   const titlePrimary = buildTitlePrimary(entity);
 
-  if (!titlePrimary) {
+  if (!cleanText(titlePrimary)) {
     throw new Error("У сущности нет названия");
   }
 
   const externalIds = buildExternalIds(entity);
-  const meta = normalizeJson(entity.meta, {});
+  const canonicalKey = buildCanonicalKey({
+    ...entity,
+    category,
+    title_primary: titlePrimary,
+    external_ids: externalIds
+  });
 
-  return {
+  if (!canonicalKey) {
+    throw new Error("У сущности нет canonical_key");
+  }
+
+  const meta = normalizeJson(entity.meta, {});
+  const normalized = {
     canonical_key: canonicalKey,
     category,
-    primary_source:
-      normalizePrimarySource(entity.primary_source || entity.source) ||
-      extractPrimarySourceFromCanonicalKey(canonicalKey),
+    primary_source: normalizePrimarySource(entity.primary_source || entity.source || meta.source || "search"),
 
     title_primary: titlePrimary,
     title_ru: cleanText(entity.title_ru),
@@ -496,10 +454,23 @@ export function normalizeEntity(entity = {}) {
     description_en: cleanText(entity.description_en || ""),
 
     external_ids: externalIds,
-    meta,
+    meta: {
+      ...meta
+    },
 
     aliases: buildAliasList(entity)
   };
+
+  const missing = getMissingMetadataFields(normalized);
+
+  normalized.meta = {
+    ...normalized.meta,
+    metadata_status: missing.length ? "needs_enrichment" : "ready",
+    missing_fields: missing,
+    sources: normalizeJson(normalized.meta.sources, {})
+  };
+
+  return normalized;
 }
 
 function buildEntityPayload(entity) {
@@ -524,45 +495,6 @@ function buildEntityPayload(entity) {
   };
 }
 
-function hasUsefulCover(value = "") {
-  const cover = cleanText(value);
-
-  if (!cover) return false;
-  if (cover === "undefined" || cover === "null") return false;
-  if (cover.includes("/placeholder")) return false;
-
-  return /^https?:\/\//i.test(cover) || cover.startsWith("/");
-}
-
-function hasUsefulDescription(entity = {}) {
-  return (
-    cleanText(entity.description_ru).length >= 80 ||
-    cleanText(entity.description_en).length >= 80
-  );
-}
-
-function hasUsefulTitle(entity = {}) {
-  return Boolean(
-    cleanText(entity.title_primary) ||
-    cleanText(entity.title_ru) ||
-    cleanText(entity.title_en) ||
-    cleanText(entity.original_title) ||
-    cleanText(entity.title)
-  );
-}
-
-function hasUsefulBookAuthor(entity = {}) {
-  if (entity.category !== "books") return true;
-
-  const meta = normalizeJson(entity.meta, {});
-  return Boolean(
-    cleanText(safeArray(meta.author_names)[0]) ||
-    cleanText(safeArray(meta.authors)[0]) ||
-    cleanText(safeArray(entity.author_names)[0]) ||
-    cleanText(safeArray(entity.authors)[0])
-  );
-}
-
 export function getEntityCompleteness(entity = {}) {
   const normalized = (() => {
     try {
@@ -578,26 +510,20 @@ export function getEntityCompleteness(entity = {}) {
     }
   })();
 
-  const missing = [];
+  const requiredMissing = [];
+  const metadataMissing = getMissingMetadataFields(normalized);
 
-  if (!cleanText(normalized.canonical_key)) missing.push("canonical_key");
-  if (!normalizeCategory(normalized.category)) missing.push("category");
-  if (!hasUsefulTitle(normalized)) missing.push("title");
-  if (!hasUsefulCover(normalized.cover_url)) missing.push("cover_url");
-  if (!hasUsefulDescription(normalized)) missing.push("description");
-  if (!hasHardIdentity(normalized)) missing.push("external_ids");
-
-  if (normalized.category !== "books" && !normalizeYear(normalized.year)) {
-    missing.push("year");
-  }
-
-  if (normalized.category === "books" && !hasUsefulBookAuthor(normalized)) {
-    missing.push("author");
-  }
+  if (!cleanText(normalized.canonical_key)) requiredMissing.push("canonical_key");
+  if (!normalizeCategory(normalized.category)) requiredMissing.push("category");
+  if (!cleanText(normalized.title_primary)) requiredMissing.push("title_primary");
+  if (!cleanText(normalized.primary_source)) requiredMissing.push("primary_source");
 
   return {
-    complete: missing.length === 0,
-    missing,
+    complete: requiredMissing.length === 0,
+    saveable: requiredMissing.length === 0,
+    requiredMissing,
+    missing: metadataMissing,
+    metadataMissing,
     entity: normalized
   };
 }
@@ -606,17 +532,15 @@ export function isCompleteEntity(entity = {}) {
   return getEntityCompleteness(entity).complete;
 }
 
-function assertCompleteEntityForCatalog(entity = {}) {
+function assertSaveableEntity(entity = {}) {
   const completeness = getEntityCompleteness(entity);
 
-  if (completeness.complete) {
+  if (completeness.saveable) {
     return completeness.entity;
   }
 
-  const missingText = completeness.missing.join(", ");
-
   throw new Error(
-    `Карточка неполная и не может быть сохранена в каталог. Не хватает: ${missingText}`
+    `Карточку нельзя сохранить. Не хватает: ${completeness.requiredMissing.join(", ")}`
   );
 }
 
@@ -641,6 +565,10 @@ function possibleCanonicalKeys(entity = {}) {
 
       category === "books" && ids.openlibrary_work
         ? `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary_work)}`
+        : "",
+
+      category === "books" && ids.openlibrary
+        ? `books:openlibrary:${normalizeOpenLibraryWork(ids.openlibrary)}`
         : ""
     ]
       .map((key) => cleanLower(key))
@@ -693,53 +621,7 @@ export async function getEntityByCanonicalKey(canonicalKey) {
 }
 
 export async function getEntityLightByCanonicalKey(canonicalKey) {
-  const key = cleanLower(canonicalKey);
-
-  if (!key) return null;
-
-  const cached = getCachedEntity(key);
-  if (cached?.id) return cached;
-
-  const supabase = getSupabaseClient();
-
-  const { data, error } = await withTimeout(
-    supabase
-      .from(MEDIA_ENTITIES_TABLE)
-      .select(`
-        id,
-        canonical_key,
-        category,
-        primary_source,
-        title_primary,
-        title_ru,
-        title_en,
-        original_title,
-        year,
-        cover_url,
-        description_ru,
-        description_en,
-        external_ids,
-        meta,
-        universe_key,
-        relations_built_at,
-        relations_status,
-        manual_locked,
-        manual_verified
-      `)
-      .eq("canonical_key", key)
-      .maybeSingle(),
-    "Быстрая загрузка карточки из БД",
-    READ_TIMEOUT_MS
-  );
-
-  if (error) throw error;
-
-  if (data?.id) {
-    setCachedEntity(data);
-    scheduleEntityEnrichment(data);
-  }
-
-  return data || null;
+  return getEntityByCanonicalKey(canonicalKey);
 }
 
 async function findDuplicateEntity(entity = {}) {
@@ -779,9 +661,7 @@ function buildAliasRows(entityId, aliases = [], source = "entity") {
 }
 
 export async function saveAliases(entityId, aliases = [], source = "entity") {
-  if (!entityId) {
-    throw new Error("saveAliases: entityId is required");
-  }
+  if (!entityId) return [];
 
   const rows = buildAliasRows(entityId, aliases, source);
 
@@ -806,21 +686,9 @@ export async function saveAliases(entityId, aliases = [], source = "entity") {
   return data || [];
 }
 
-function scheduleEntityEnrichment(entity = {}) {
-  if (!entity?.id) return;
-  if (isHardLockedEntity(entity) || isAuthoritativeEntity(entity)) return;
-  if (!shouldEnrichEntity(entity)) return;
-
-  window.setTimeout?.(() => {
-    enrichMediaEntityInBackground(entity).catch((error) => {
-      console.warn("Entity enrichment skipped:", error);
-    });
-  }, 50);
-}
-
-async function insertCompleteEntity(entity = {}) {
-  const completeEntity = assertCompleteEntityForCatalog(entity);
-  const payload = buildEntityPayload(completeEntity);
+async function insertEntity(entity = {}) {
+  const normalized = assertSaveableEntity(entity);
+  const payload = buildEntityPayload(normalized);
   const key = cleanLower(payload.canonical_key);
 
   if (pendingEntitySaveByCanonicalKey.has(key)) {
@@ -828,10 +696,11 @@ async function insertCompleteEntity(entity = {}) {
   }
 
   const promise = (async () => {
-    const existing = await findDuplicateEntity(completeEntity);
+    const existing = await findDuplicateEntity(normalized);
+
     if (existing?.id) {
       setCachedEntity(existing);
-      await saveAliases(existing.id, completeEntity.aliases, completeEntity.primary_source).catch(() => []);
+      await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
       return existing;
     }
 
@@ -843,18 +712,21 @@ async function insertCompleteEntity(entity = {}) {
         .insert(payload)
         .select("*")
         .maybeSingle(),
-      "Создание полной карточки",
+      "Создание карточки",
       WRITE_TIMEOUT_MS
     );
 
-    if (error) throw error;
+    if (error) {
+      const duplicate = await findDuplicateEntity(normalized).catch(() => null);
+      if (duplicate?.id) return duplicate;
+      throw error;
+    }
 
     const created = data || null;
 
     if (created?.id) {
       setCachedEntity(created);
-      await saveAliases(created.id, completeEntity.aliases, completeEntity.primary_source).catch(() => []);
-      scheduleEntityEnrichment(created);
+      await saveAliases(created.id, normalized.aliases, normalized.primary_source).catch(() => []);
     }
 
     return created;
@@ -868,7 +740,7 @@ async function insertCompleteEntity(entity = {}) {
 }
 
 export async function saveEntityIfMissing(entity = {}) {
-  const normalized = normalizeEntity(entity);
+  const normalized = assertSaveableEntity(entity);
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) {
@@ -877,7 +749,7 @@ export async function saveEntityIfMissing(entity = {}) {
     return existing;
   }
 
-  return insertCompleteEntity(normalized);
+  return insertEntity(normalized);
 }
 
 async function getExistingUserMedia(userId, entityId) {
@@ -920,6 +792,7 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
       return {
         alreadyExists: true,
         userMedia: existing,
+        item: existing,
         entity: existing.media_entities || entity
       };
     }
@@ -944,7 +817,19 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
       WRITE_TIMEOUT_MS
     );
 
-    if (error) throw error;
+    if (error) {
+      const afterConflict = await getExistingUserMedia(userId, entity.id).catch(() => null);
+      if (afterConflict?.id) {
+        return {
+          alreadyExists: true,
+          userMedia: afterConflict,
+          item: afterConflict,
+          entity: afterConflict.media_entities || entity
+        };
+      }
+
+      throw error;
+    }
 
     const row = data || null;
 
@@ -956,6 +841,7 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     return {
       alreadyExists: false,
       userMedia: row,
+      item: row,
       entity: row?.media_entities || entity
     };
   })()
@@ -981,7 +867,7 @@ export async function addToUserLibrary({
     throw new Error("addToUserLibrary: entity is required");
   }
 
-  const normalized = normalizeEntity(entity);
+  const normalized = assertSaveableEntity(entity);
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) {
@@ -996,8 +882,7 @@ export async function addToUserLibrary({
     });
   }
 
-  const completeEntity = assertCompleteEntityForCatalog(normalized);
-  const created = await insertCompleteEntity(completeEntity);
+  const created = await insertEntity(normalized);
 
   if (!created?.id) {
     throw new Error("Не удалось создать карточку");
@@ -1017,10 +902,14 @@ export async function findEntityBySearchIdentity(item = {}) {
 }
 
 export async function ensureEntityForLibrary(item = {}) {
-  const normalized = normalizeEntity(item);
+  const normalized = assertSaveableEntity(item);
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) return existing;
 
-  return insertCompleteEntity(normalized);
+  return insertEntity(normalized);
+}
+
+export function isEntityHardLocked(entity = {}) {
+  return isHardLockedEntity(entity);
 }
