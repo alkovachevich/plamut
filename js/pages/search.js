@@ -1,8 +1,7 @@
 import {
   runGlobalSearch,
   runCategorySearch,
-  addSearchResultDirectlyToLibrary,
-  getSearchResultSaveReadiness
+  addSearchResultDirectlyToLibrary
 } from "../services/search-service.js";
 import { SEARCH_LIMITS, getCategoryLabel } from "../config.js";
 import { navigate } from "../router.js";
@@ -30,17 +29,15 @@ const I18N = {
     adding: "Добавляем…",
     added: "Добавлено",
     alreadyAdded: "Уже в библиотеке",
-    preparing: "Карточка подготавливается",
-    prepareHint: "Не хватает данных для сохранения",
     addSeries: "Добавить серию",
     addingSeries: "Добавляем…",
     seriesAdded: "Серия добавлена",
     seriesPart: "Часть серии",
     author: "Автор",
-    preview: "Preview",
+    searchResult: "Результат поиска",
     dbReady: "Из базы",
-    needsData: "Нужны данные",
-    searchPlaceholder: "Поиск книг, фильмов, аниме, манги..."
+    searchPlaceholder: "Поиск книг, фильмов, аниме, манги...",
+    addError: "Не удалось добавить"
   },
   en: {
     search: "Search",
@@ -54,17 +51,15 @@ const I18N = {
     adding: "Adding…",
     added: "Added",
     alreadyAdded: "Already in library",
-    preparing: "Card is being prepared",
-    prepareHint: "Not enough data to save",
     addSeries: "Add series",
     addingSeries: "Adding…",
     seriesAdded: "Series added",
     seriesPart: "Part of series",
     author: "Author",
-    preview: "Preview",
+    searchResult: "Search result",
     dbReady: "From database",
-    needsData: "Needs data",
-    searchPlaceholder: "Search books, movies, anime, manga..."
+    searchPlaceholder: "Search books, movies, anime, manga...",
+    addError: "Could not add"
   }
 };
 
@@ -136,33 +131,13 @@ function resolveOriginalTitle(item = {}) {
   return clean(item.original_title || "");
 }
 
-function getSourceLabel(item = {}) {
-  const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
-
-  if (meta.local_db_match || item.primary_source === "supabase" || item.primary_source === "alias") {
-    return t("dbReady");
-  }
-
-  return t("preview");
-}
-
 function isLocalDbResult(item = {}) {
   const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
   return Boolean(meta.local_db_match || item.primary_source === "supabase" || item.primary_source === "alias");
 }
 
-function getReadiness(item = {}) {
-  try {
-    return getSearchResultSaveReadiness(item);
-  } catch {
-    return {
-      ready: false,
-      complete: false,
-      missing: ["unknown"],
-      reason: t("prepareHint"),
-      item
-    };
-  }
+function getSourceLabel(item = {}) {
+  return isLocalDbResult(item) ? t("dbReady") : t("searchResult");
 }
 
 function renderCover(item = {}) {
@@ -204,31 +179,14 @@ function renderBookExtraMeta(item = {}) {
   `;
 }
 
-function renderMissingBadge(item = {}) {
-  const readiness = getReadiness(item);
-
-  if (readiness.ready) return "";
-
-  return `
-    <span
-      class="badge warning"
-      title="${escapeHtml(readiness.reason || t("prepareHint"))}"
-    >
-      ${escapeHtml(t("needsData"))}
-    </span>
-  `;
-}
-
 function renderCard(item = {}) {
   const title = resolveTitle(item);
   const originalTitle = resolveOriginalTitle(item);
-  const readiness = getReadiness(item);
-  const canSave = Boolean(readiness.ready);
   const sourceLabel = getSourceLabel(item);
 
   return `
     <div
-      class="result-card ${isLocalDbResult(item) ? "is-db" : "is-preview"}"
+      class="result-card ${isLocalDbResult(item) ? "is-db" : "is-search-result"}"
       data-result-card="${escapeHtml(item.canonical_key || "")}"
     >
       <button
@@ -266,7 +224,6 @@ function renderCard(item = {}) {
           <div class="result-footer">
             <span class="badge">${escapeHtml(getCategoryLabel(state.language, item.category || ""))}</span>
             <span class="badge muted">${escapeHtml(sourceLabel)}</span>
-            ${renderMissingBadge(item)}
           </div>
         </div>
       </button>
@@ -275,9 +232,8 @@ function renderCard(item = {}) {
         class="result-add-btn"
         type="button"
         data-add-key="${escapeHtml(item.canonical_key || "")}"
-        ${canSave ? "" : `title="${escapeHtml(readiness.reason || t("prepareHint"))}"`}
       >
-        ${escapeHtml(canSave ? t("add") : t("preparing"))}
+        ${escapeHtml(t("add"))}
       </button>
     </div>
   `;
@@ -377,27 +333,43 @@ function renderGroupedResults(grouped = {}, category = "") {
     .join("");
 }
 
-function setButtonPreparing(button) {
+function setButtonAdded(button, alreadyExists = false) {
   button.disabled = true;
-  button.classList.add("is-warning");
-  button.textContent = t("preparing");
+  button.classList.remove("is-error");
+  button.classList.add("is-success");
+  button.textContent = alreadyExists ? t("alreadyAdded") : t("added");
 }
 
 function setButtonError(button, message = "") {
   button.disabled = false;
-  button.classList.add("is-warning");
-  button.textContent = t("preparing");
+  button.classList.add("is-error");
+  button.textContent = t("addError");
 
   if (message) {
     button.title = message;
   }
+
+  window.setTimeout?.(() => {
+    if (!button.isConnected) return;
+    button.classList.remove("is-error");
+    button.textContent = t("add");
+  }, 2200);
 }
 
-function setButtonAdded(button, alreadyExists = false) {
-  button.disabled = true;
-  button.classList.remove("is-warning");
-  button.classList.add("is-success");
-  button.textContent = alreadyExists ? t("alreadyAdded") : t("added");
+function openTemporaryCard(item = {}) {
+  if (!item?.canonical_key) return;
+
+  setTemporaryCardItem({
+    ...item,
+    __mode: "temp",
+    __source: "search"
+  });
+
+  navigate("/card", {
+    key: item.canonical_key,
+    category: item.category,
+    mode: "temp"
+  });
 }
 
 function attachCardHandlers(root, items = []) {
@@ -417,22 +389,11 @@ function attachCardHandlers(root, items = []) {
   root.querySelectorAll("[data-key]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = normalizeKey(button.dataset.key || "");
-      const category = button.dataset.category || "";
       const payload = byKey.get(key) || null;
 
       if (payload) {
-        setTemporaryCardItem({
-          ...payload,
-          __mode: "temp",
-          __source: "search"
-        });
+        openTemporaryCard(payload);
       }
-
-      navigate("/card", {
-        key,
-        category,
-        mode: "temp"
-      });
     });
   });
 
@@ -450,30 +411,9 @@ function attachCardHandlers(root, items = []) {
         return;
       }
 
-      const readiness = getReadiness(item);
-
-      if (!readiness.ready) {
-        setTemporaryCardItem({
-          ...item,
-          __mode: "temp",
-          __source: "search",
-          __readiness: readiness
-        });
-
-        setButtonError(button, readiness.reason || t("prepareHint"));
-
-        navigate("/card", {
-          key: item.canonical_key,
-          category: item.category,
-          mode: "temp"
-        });
-
-        return;
-      }
-
       try {
         button.disabled = true;
-        button.classList.remove("is-warning");
+        button.classList.remove("is-error");
         button.textContent = t("adding");
 
         const result = await addSearchResultDirectlyToLibrary({
@@ -484,28 +424,7 @@ function attachCardHandlers(root, items = []) {
         setButtonAdded(button, Boolean(result?.alreadyExists));
       } catch (error) {
         console.warn("Direct add from search page error:", error);
-
-        if (error?.code === "INCOMPLETE_SEARCH_RESULT") {
-          setTemporaryCardItem({
-            ...item,
-            __mode: "temp",
-            __source: "search",
-            __readiness: error.readiness || readiness
-          });
-
-          setButtonError(button, error.message || t("prepareHint"));
-
-          navigate("/card", {
-            key: item.canonical_key,
-            category: item.category,
-            mode: "temp"
-          });
-
-          return;
-        }
-
-        button.disabled = false;
-        button.textContent = t("add");
+        setButtonError(button, error?.message || t("addError"));
       }
     });
   });
@@ -528,17 +447,8 @@ function attachCardHandlers(root, items = []) {
         button.disabled = true;
         button.textContent = t("addingSeries");
 
-        const readyItems = seriesItems.filter((item) => getReadiness(item).ready);
-
-        if (!readyItems.length) {
-          button.disabled = false;
-          button.classList.add("is-warning");
-          button.textContent = t("preparing");
-          return;
-        }
-
         await Promise.allSettled(
-          readyItems.map((item) =>
+          seriesItems.map((item) =>
             addSearchResultDirectlyToLibrary({ userId, item })
           )
         );
@@ -757,9 +667,9 @@ function renderPageStyles() {
         cursor: default;
       }
 
-      .result-add-btn.is-warning {
-        background: var(--accent-soft);
-        color: var(--text);
+      .result-add-btn.is-error {
+        background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+        color: var(--danger);
       }
 
       .result-add-btn.is-success {
@@ -846,11 +756,6 @@ function renderPageStyles() {
 
       .badge.muted {
         background: var(--bg-soft);
-      }
-
-      .badge.warning {
-        background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-        color: var(--danger);
       }
 
       .empty {
