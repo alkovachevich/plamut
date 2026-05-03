@@ -24,14 +24,14 @@ const DB_SEARCH_TIMEOUT_MS = 6500;
 const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
 
-const searchCache = new Map();
-const pendingSearches = new Map();
-
 const VALID_CATEGORIES = ["books", "movies", "series", "anime", "manga"];
 
-const LOCAL_DB_SCORE_BOOST = 1200;
-const ALIAS_DB_SCORE_BOOST = 1150;
+const LOCAL_DB_SCORE_BOOST = 5000;
+const ALIAS_DB_SCORE_BOOST = 4800;
 const API_SCORE_BOOST = 0;
+
+const searchCache = new Map();
+const pendingSearches = new Map();
 
 function now() {
   return Date.now();
@@ -47,6 +47,11 @@ function cleanLower(value = "") {
 
 function normalizeCategory(category = "") {
   const normalized = cleanLower(category);
+
+  if (normalized === "book") return "books";
+  if (normalized === "movie") return "movies";
+  if (normalized === "tv") return "series";
+
   return VALID_CATEGORIES.includes(normalized) ? normalized : "";
 }
 
@@ -77,6 +82,7 @@ function normalizeTitleKey(value = "") {
   return cleanLower(value)
     .replace(/ё/g, "е")
     .replace(/&/g, " and ")
+    .replace(/['’`´]/g, "")
     .replace(/[^a-z0-9а-яе]+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -197,33 +203,46 @@ function extractExternalIds(item = {}) {
   const ids = normalizeJson(item.external_ids, {});
   const meta = normalizeJson(item.meta, {});
 
-  return {
-    ...ids,
+  const wikidata = cleanText(ids.wikidata || ids.wikidata_id || item.wikidata_id || meta.wikidata_id || "");
+  const tmdb = cleanText(ids.tmdb || ids.tmdb_id || item.tmdb_id || meta.tmdb_id || "");
+  const imdb = cleanText(ids.imdb || ids.imdb_id || item.imdb_id || meta.imdb_id || "");
+  const anilist = cleanText(ids.anilist || ids.anilist_id || item.anilist_id || meta.anilist_id || "");
+  const mal = cleanText(ids.mal || ids.mal_id || item.mal_id || meta.mal_id || "");
+  const openlibraryWork = cleanText(
+    ids.openlibrary_work ||
+    ids.openlibrary ||
+    item.openlibrary_work ||
+    item.openlibrary_id ||
+    meta.openlibrary_work ||
+    ""
+  ).replace("/works/", "");
 
-    wikidata: cleanText(ids.wikidata || ids.wikidata_id || item.wikidata_id || meta.wikidata_id || ""),
-    wikidata_id: cleanText(ids.wikidata_id || ids.wikidata || item.wikidata_id || meta.wikidata_id || ""),
+  return Object.fromEntries(
+    Object.entries({
+      ...ids,
 
-    tmdb: cleanText(ids.tmdb || ids.tmdb_id || item.tmdb_id || meta.tmdb_id || ""),
-    tmdb_id: cleanText(ids.tmdb_id || ids.tmdb || item.tmdb_id || meta.tmdb_id || ""),
+      wikidata: wikidata || "",
+      wikidata_id: wikidata || "",
 
-    imdb: cleanText(ids.imdb || ids.imdb_id || item.imdb_id || meta.imdb_id || ""),
-    imdb_id: cleanText(ids.imdb_id || ids.imdb || item.imdb_id || meta.imdb_id || ""),
+      tmdb: tmdb || "",
+      tmdb_id: tmdb || "",
 
-    anilist: cleanText(ids.anilist || ids.anilist_id || item.anilist_id || meta.anilist_id || ""),
-    anilist_id: cleanText(ids.anilist_id || ids.anilist || item.anilist_id || meta.anilist_id || ""),
+      imdb: imdb || "",
+      imdb_id: imdb || "",
 
-    mal: cleanText(ids.mal || ids.mal_id || item.mal_id || meta.mal_id || ""),
-    mal_id: cleanText(ids.mal_id || ids.mal || item.mal_id || meta.mal_id || ""),
+      anilist: anilist || "",
+      anilist_id: anilist || "",
 
-    openlibrary_work: cleanText(
-      ids.openlibrary_work ||
-      ids.openlibrary ||
-      item.openlibrary_work ||
-      item.openlibrary_id ||
-      meta.openlibrary_work ||
-      ""
-    ).replace("/works/", "")
-  };
+      mal: mal || "",
+      mal_id: mal || "",
+
+      openlibrary_work: openlibraryWork || ""
+    }).filter(([, value]) => {
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === "object") return Object.keys(value).length > 0;
+      return cleanText(value) !== "";
+    })
+  );
 }
 
 function getBookAuthors(item = {}) {
@@ -251,6 +270,7 @@ function getBookSeries(item = {}) {
 function resolveDisplayTitle(item = {}, language = "ru") {
   if (language === "en") {
     return cleanText(
+      item.display_title ||
       item.title_en ||
       item.title ||
       item.title_primary ||
@@ -261,6 +281,7 @@ function resolveDisplayTitle(item = {}, language = "ru") {
   }
 
   return cleanText(
+    item.display_title ||
     item.title_ru ||
     item.title ||
     item.title_primary ||
@@ -277,29 +298,25 @@ function buildCanonicalKey(item = {}) {
   const category = normalizeCategory(item.category);
   const ids = extractExternalIds(item);
 
-  if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
-  if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
-  if (category && ids.imdb) return `${category}:imdb:${ids.imdb}`.toLowerCase();
-  if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
-  if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
-
-  if (category === "books" && ids.openlibrary_work) {
-    return `books:openlibrary:${ids.openlibrary_work}`.toLowerCase();
-  }
-
-  const title = normalizeTitleKey(
-    item.title ||
-    item.title_primary ||
-    item.title_ru ||
-    item.title_en ||
-    item.original_title ||
-    "untitled"
-  ).replace(/\s+/g, "-");
-
-  const year = normalizeYear(item.year);
-
   if (category === "books") {
+    if (ids.wikidata) return `books:wikidata:${ids.wikidata}`.toLowerCase();
+
+    if (ids.openlibrary_work) {
+      return `books:openlibrary:${ids.openlibrary_work}`.toLowerCase();
+    }
+
+    const title = normalizeTitleKey(
+      item.title ||
+      item.title_primary ||
+      item.title_ru ||
+      item.title_en ||
+      item.original_title ||
+      "untitled"
+    ).replace(/\s+/g, "-");
+
     const author = normalizePersonKey(getBookAuthors(item)[0] || "");
+    const year = normalizeYear(item.year);
+
     return [
       "books",
       "work",
@@ -312,9 +329,27 @@ function buildCanonicalKey(item = {}) {
       .toLowerCase();
   }
 
+  if (category && ids.wikidata) return `${category}:wikidata:${ids.wikidata}`.toLowerCase();
+  if (category && ids.tmdb) return `${category}:tmdb:${ids.tmdb}`.toLowerCase();
+  if (category && ids.imdb) return `${category}:imdb:${ids.imdb}`.toLowerCase();
+  if (category && ids.anilist) return `${category}:anilist:${ids.anilist}`.toLowerCase();
+  if (category && ids.mal) return `${category}:mal:${ids.mal}`.toLowerCase();
+
+  const title = normalizeTitleKey(
+    item.title ||
+    item.title_primary ||
+    item.title_ru ||
+    item.title_en ||
+    item.original_title ||
+    "untitled"
+  ).replace(/\s+/g, "-");
+
+  const year = normalizeYear(item.year);
+  const source = cleanLower(item.primary_source || item.source || "search");
+
   return [
     category || "unknown",
-    cleanLower(item.primary_source || item.source || "manual"),
+    source || "search",
     title || "untitled",
     year || ""
   ]
@@ -344,20 +379,17 @@ function normalizeSearchItem(item = {}, options = {}) {
 
   if (!title) return null;
 
-  const canonicalKey = buildCanonicalKey({
-    ...item,
-    title
-  });
-
-  if (!canonicalKey) return null;
-
-  const meta = normalizeJson(item.meta, {});
   const externalIds = extractExternalIds(item);
   const descriptions = extractDescriptionFields(item);
-  const source = cleanText(item.primary_source || item.source || meta.source || "");
+  const meta = normalizeJson(item.meta, {});
+  const source = cleanText(item.primary_source || item.source || meta.source || meta.search_source || "search");
 
   const normalized = {
-    canonical_key: canonicalKey,
+    canonical_key: buildCanonicalKey({
+      ...item,
+      title,
+      external_ids: externalIds
+    }),
     category,
 
     title,
@@ -376,10 +408,13 @@ function normalizeSearchItem(item = {}, options = {}) {
     aliases: normalizeAliases([
       ...safeArray(item.aliases),
       item.title,
+      item.display_title,
       item.title_primary,
       item.title_ru,
       item.title_en,
-      item.original_title
+      item.original_title,
+      ...safeArray(meta?.wikidata_aliases?.ru),
+      ...safeArray(meta?.wikidata_aliases?.en)
     ]),
 
     external_ids: externalIds,
@@ -393,7 +428,7 @@ function normalizeSearchItem(item = {}, options = {}) {
       metadata_status:
         isUsefulCover(item.cover_url || meta.cover_url) &&
         (descriptions.description_ru || descriptions.description_en)
-          ? "partial"
+          ? "ready"
           : "needs_enrichment"
     }
   };
@@ -463,10 +498,19 @@ function mergeSearchItems(existing = {}, incoming = {}) {
 
     meta: {
       ...existingMeta,
-      ...incomingMeta
+      ...incomingMeta,
+      author_names: Array.from(new Set([
+        ...safeArray(existingMeta.author_names),
+        ...safeArray(incomingMeta.author_names)
+      ].map(cleanText).filter(Boolean))),
+      series_name: existingMeta.series_name || incomingMeta.series_name || ""
     },
 
-    primary_source: existing.primary_source || incoming.primary_source || "",
+    primary_source:
+      existing.primary_source === "supabase" || existing.primary_source === "alias"
+        ? existing.primary_source
+        : incoming.primary_source || existing.primary_source || "search",
+
     score: Math.max(existing.score || 0, incoming.score || 0)
   };
 }
@@ -496,6 +540,7 @@ function getBookDedupeKeys(item = {}) {
   if (ids.wikidata) keys.push(`book:wikidata:${cleanLower(ids.wikidata)}`);
   if (ids.wikidata_id) keys.push(`book:wikidata:${cleanLower(ids.wikidata_id)}`);
   if (ids.openlibrary_work) keys.push(`book:openlibrary:${cleanLower(ids.openlibrary_work)}`);
+  if (ids.openlibrary) keys.push(`book:openlibrary:${cleanLower(ids.openlibrary)}`);
 
   titles.forEach((title) => {
     authors.forEach((author) => {
@@ -566,7 +611,17 @@ function dedupeByIdentity(items = [], options = {}) {
 }
 
 function sortByScoreInternal(items = []) {
-  return [...safeArray(items)].sort((a, b) => (b.score || 0) - (a.score || 0));
+  return [...safeArray(items)].sort((a, b) => {
+    const scoreDiff = Number(b.score || 0) - Number(a.score || 0);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const ay = Number(a.year || 0);
+    const by = Number(b.year || 0);
+
+    if (ay && by && ay !== by) return ay - by;
+
+    return cleanText(a.title_primary || a.title).localeCompare(cleanText(b.title_primary || b.title), "ru");
+  });
 }
 
 function limitInternal(items = [], limit = SEARCH_LIMITS.PAGE_RESULTS) {
@@ -612,7 +667,7 @@ function mapMediaEntityRowToSearchItem(row = {}, language = "ru", source = "supa
   const item = {
     canonical_key: row.canonical_key,
     category: row.category,
-    primary_source: row.primary_source || source,
+    primary_source: source,
 
     title: resolveDisplayTitle(row, language),
     title_primary: row.title_primary || "",
@@ -684,7 +739,7 @@ async function searchMediaEntitiesByTitle(query = "", category = "", language = 
             `original_title.ilike.${pattern}`
           ].join(",")
         )
-        .limit(24),
+        .limit(30),
       "Поиск карточек в БД",
       DB_SEARCH_TIMEOUT_MS
     );
@@ -718,7 +773,7 @@ async function searchMediaEntitiesByAliases(query = "", category = "", language 
         .from(ENTITY_ALIASES_TABLE)
         .select("entity_id, alias, alias_normalized, source")
         .ilike("alias_normalized", pattern)
-        .limit(40),
+        .limit(50),
       "Поиск алиасов",
       DB_SEARCH_TIMEOUT_MS
     );
@@ -763,7 +818,7 @@ async function searchMediaEntitiesByAliases(query = "", category = "", language 
         `)
         .eq("category", normalizedCategory)
         .in("id", entityIds)
-        .limit(40),
+        .limit(50),
       "Загрузка карточек по алиасам",
       DB_SEARCH_TIMEOUT_MS
     );
@@ -975,9 +1030,12 @@ export function getSearchResultSaveReadiness(item = {}) {
   if (!normalizedItem) {
     return {
       ready: false,
+      saveable: false,
       complete: false,
       item: null,
       missing: ["invalid_search_item"],
+      metadataMissing: ["invalid_search_item"],
+      requiredMissing: ["invalid_search_item"],
       reason: "Search item is not valid"
     };
   }
@@ -985,13 +1043,16 @@ export function getSearchResultSaveReadiness(item = {}) {
   const completeness = getEntityCompleteness(normalizedItem);
 
   return {
-    ready: Boolean(completeness.complete),
+    ready: Boolean(completeness.saveable ?? completeness.complete),
+    saveable: Boolean(completeness.saveable ?? completeness.complete),
     complete: Boolean(completeness.complete),
     item: completeness.entity || normalizedItem,
     missing: safeArray(completeness.missing),
-    reason: completeness.complete
-      ? ""
-      : `Карточка неполная. Не хватает: ${safeArray(completeness.missing).join(", ")}`
+    metadataMissing: safeArray(completeness.metadataMissing || completeness.missing),
+    requiredMissing: safeArray(completeness.requiredMissing),
+    reason: safeArray(completeness.requiredMissing).length
+      ? `Карточку нельзя сохранить. Не хватает: ${safeArray(completeness.requiredMissing).join(", ")}`
+      : ""
   };
 }
 
@@ -1006,10 +1067,10 @@ export async function addSearchResultDirectlyToLibrary({ userId, item }) {
     throw new Error("Search item is not valid");
   }
 
-  if (!readiness.ready) {
-    const error = new Error(readiness.reason || "Карточка пока не готова к сохранению");
-    error.code = "INCOMPLETE_SEARCH_RESULT";
-    error.missing = readiness.missing;
+  if (!readiness.saveable) {
+    const error = new Error(readiness.reason || "Карточку нельзя сохранить");
+    error.code = "INVALID_SEARCH_RESULT";
+    error.missing = readiness.requiredMissing;
     error.item = readiness.item;
     error.readiness = readiness;
     throw error;
