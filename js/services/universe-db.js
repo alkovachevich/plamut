@@ -7,17 +7,21 @@ const LIST_TIMEOUT_MS = 25000;
 const FALLBACK_UNIVERSES = [
   {
     id: null,
-    universe_key: "mcu",
-    title: "Кинематографическая вселенная Marvel",
-    title_ru: "Кинематографическая вселенная Marvel",
-    title_en: "Marvel Cinematic Universe",
+    universe_key: "marvel",
+    title: "Marvel",
+    title_ru: "Marvel",
+    title_en: "Marvel",
     description: "Эталонная вселенная Plamut.",
     description_ru: "Эталонная вселенная Plamut.",
     description_en: "Plamut reference universe.",
     cover_url: "",
     source: "manual",
     is_public: true,
-    metadata_json: {},
+    metadata_json: {
+      manual_locked: true,
+      manual_verified: true,
+      reference_universe: true
+    },
     total: 0,
     done: 0,
     in_library_count: 0,
@@ -31,6 +35,12 @@ const FALLBACK_UNIVERSES = [
 
 function clean(value = "") {
   return String(value || "").trim();
+}
+
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizeUniverse(row = {}) {
@@ -101,7 +111,9 @@ function normalizeEntity(row = {}) {
     meta: row.meta || {},
     universe_key: row.universe_key || "",
     relations_built_at: row.relations_built_at || null,
-    relations_status: row.relations_status || ""
+    relations_status: row.relations_status || "",
+    manual_locked: row.manual_locked === true,
+    manual_verified: row.manual_verified === true
   };
 }
 
@@ -113,6 +125,10 @@ function normalizeUniverseLink(row = {}) {
   const continuity = normalizeContinuity(row.universe_continuities || row.continuity || {});
   const branch = normalizeBranch(row.universe_branches || row.branch || {});
 
+  const releaseOrder = toNumberOrNull(row.release_order);
+  const storyOrder = toNumberOrNull(row.story_order);
+  const branchOrder = toNumberOrNull(row.branch_order);
+
   return {
     id: row.id || null,
     universe_id: row.universe_id || universe?.id || null,
@@ -121,9 +137,9 @@ function normalizeUniverseLink(row = {}) {
     entity_id: entity.id,
 
     role: row.role || "member",
-    release_order: row.release_order ?? null,
-    story_order: row.story_order ?? null,
-    branch_order: row.branch_order ?? null,
+    release_order: releaseOrder,
+    story_order: storyOrder,
+    branch_order: branchOrder,
     is_core: row.is_core !== false,
     metadata_json: row.metadata_json || {},
 
@@ -143,6 +159,7 @@ function normalizeUniverseLink(row = {}) {
     branch_type: branch?.type || "",
 
     category: entity.category,
+    year: entity.year,
     media_entities: entity
   };
 }
@@ -161,23 +178,52 @@ function normalizeRelation(row = {}) {
   };
 }
 
+function getLinkYear(link = {}) {
+  const year = Number(link.year || link.media_entities?.year || 0);
+  return Number.isFinite(year) && year > 0 ? year : 9999;
+}
+
+function getSortOrder(link = {}, mode = "release") {
+  if (mode === "story") {
+    return link.story_order ?? link.release_order ?? link.branch_order ?? 9999;
+  }
+
+  if (mode === "branch") {
+    return link.branch_order ?? link.story_order ?? link.release_order ?? 9999;
+  }
+
+  if (mode === "year") {
+    return getLinkYear(link);
+  }
+
+  return link.release_order ?? link.story_order ?? link.branch_order ?? 9999;
+}
+
 function sortLinks(items = [], mode = "release") {
   return [...safeArray(items)].sort((a, b) => {
-    const aOrder =
-      mode === "story"
-        ? a.story_order ?? a.release_order ?? a.branch_order ?? 9999
-        : mode === "branch"
-          ? a.branch_order ?? a.story_order ?? a.release_order ?? 9999
-          : a.release_order ?? a.story_order ?? a.branch_order ?? 9999;
+    const aContinuity = a.continuity?.sort_order ?? 9999;
+    const bContinuity = b.continuity?.sort_order ?? 9999;
 
-    const bOrder =
-      mode === "story"
-        ? b.story_order ?? b.release_order ?? b.branch_order ?? 9999
-        : mode === "branch"
-          ? b.branch_order ?? b.story_order ?? b.release_order ?? 9999
-          : b.release_order ?? b.story_order ?? b.branch_order ?? 9999;
+    if (mode === "branch" && aContinuity !== bContinuity) {
+      return aContinuity - bContinuity;
+    }
 
-    if (Number(aOrder) !== Number(bOrder)) return Number(aOrder) - Number(bOrder);
+    const aBranch = a.branch?.sort_order ?? 9999;
+    const bBranch = b.branch?.sort_order ?? 9999;
+
+    if (mode === "branch" && aBranch !== bBranch) {
+      return aBranch - bBranch;
+    }
+
+    const aOrder = Number(getSortOrder(a, mode));
+    const bOrder = Number(getSortOrder(b, mode));
+
+    if (aOrder !== bOrder) return aOrder - bOrder;
+
+    const ay = getLinkYear(a);
+    const by = getLinkYear(b);
+
+    if (ay !== by) return ay - by;
 
     return String(a.media_entities?.title_primary || "").localeCompare(
       String(b.media_entities?.title_primary || ""),
@@ -204,6 +250,7 @@ function uniqueLinksByEntity(items = []) {
 async function safeQuery(query, label = "Запрос к БД", timeoutMs = DEFAULT_TIMEOUT_MS) {
   try {
     const { data, error } = await withTimeout(query, label, timeoutMs);
+
     if (error) {
       console.warn(`${label} skipped:`, error);
       return [];
@@ -383,13 +430,15 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
             meta,
             universe_key,
             relations_built_at,
-            relations_status
+            relations_status,
+            manual_locked,
+            manual_verified
           )
         `)
         .eq("universe_id", universe.id)
-        .order("release_order", { ascending: true })
-        .limit(2000),
-      "Загрузка V3 элементов вселенной",
+        .order("release_order", { ascending: true, nullsFirst: false })
+        .limit(3000),
+      "Загрузка элементов вселенной",
       DEFAULT_TIMEOUT_MS
     ),
     safeQuery(
@@ -397,8 +446,8 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .from("universe_relations")
         .select("*")
         .eq("universe_id", universe.id)
-        .order("sort_order", { ascending: true })
-        .limit(2000),
+        .order("sort_order", { ascending: true, nullsFirst: false })
+        .limit(3000),
       "Загрузка связей вселенной",
       DEFAULT_TIMEOUT_MS
     ),
@@ -407,7 +456,7 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .from("universe_continuities")
         .select("*")
         .eq("universe_id", universe.id)
-        .order("sort_order", { ascending: true })
+        .order("sort_order", { ascending: true, nullsFirst: false })
         .limit(500),
       "Загрузка линий канона вселенной",
       DEFAULT_TIMEOUT_MS
@@ -417,7 +466,7 @@ export async function getUniverseDetailsFromDb({ universeKey = "" } = {}) {
         .from("universe_branches")
         .select("*")
         .eq("universe_id", universe.id)
-        .order("sort_order", { ascending: true })
+        .order("sort_order", { ascending: true, nullsFirst: false })
         .limit(1000),
       "Загрузка веток вселенной",
       DEFAULT_TIMEOUT_MS
@@ -467,7 +516,7 @@ export async function getRelatedItemsForEntityFromDb({ entityId } = {}) {
       .from("universe_relations")
       .select("*")
       .or(`from_entity_id.eq.${cleanEntityId},to_entity_id.eq.${cleanEntityId}`)
-      .order("sort_order", { ascending: true })
+      .order("sort_order", { ascending: true, nullsFirst: false })
       .limit(80),
     "Загрузка связанных элементов из БД",
     DEFAULT_TIMEOUT_MS
@@ -511,7 +560,9 @@ export async function getRelatedItemsForEntityFromDb({ entityId } = {}) {
         meta,
         universe_key,
         relations_built_at,
-        relations_status
+        relations_status,
+        manual_locked,
+        manual_verified
       `)
       .in("id", relatedIds)
       .limit(100),
@@ -614,11 +665,13 @@ export async function getEntityUniverseLinksFromDb({ entityId } = {}) {
           meta,
           universe_key,
           relations_built_at,
-          relations_status
+          relations_status,
+          manual_locked,
+          manual_verified
         )
       `)
       .eq("entity_id", cleanEntityId)
-      .order("branch_order", { ascending: true })
+      .order("branch_order", { ascending: true, nullsFirst: false })
       .limit(100),
     "Загрузка вселенных карточки",
     DEFAULT_TIMEOUT_MS
