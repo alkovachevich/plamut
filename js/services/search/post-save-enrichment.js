@@ -20,10 +20,12 @@ function cleanUserId(value = "") {
     : "";
 }
 
-function suggestionKey(entityId, userId) {
+function suggestionKey(entityId, userId = "") {
   const cleanEntityId = cleanId(entityId);
   const cleanOwnerId = cleanUserId(userId);
-  return cleanEntityId && cleanOwnerId ? `${cleanOwnerId}:${cleanEntityId}` : "";
+
+  if (!cleanEntityId) return "";
+  return cleanOwnerId ? `${cleanOwnerId}:${cleanEntityId}` : `current-user:${cleanEntityId}`;
 }
 
 function cleanupCache(map, ttlMs) {
@@ -67,7 +69,7 @@ export function schedulePostSaveRelatedSuggestions(entity = {}, options = {}) {
   const ownerUserId = cleanUserId(options.userId || options.ownerUserId || "");
   const key = suggestionKey(entityId, ownerUserId);
 
-  if (!entityId || !ownerUserId || !key) return false;
+  if (!entityId || !key) return false;
   if (pendingSuggestionKeys.has(key)) return false;
   if (wasRecentlyScheduledSuggestions(key)) return false;
 
@@ -76,7 +78,7 @@ export function schedulePostSaveRelatedSuggestions(entity = {}, options = {}) {
 
   runLater(async () => {
     try {
-      await saveRelatedSuggestionsForEntity(entity, { ownerUserId });
+      await saveRelatedSuggestionsForEntity(entity, ownerUserId ? { ownerUserId } : {});
     } catch (error) {
       console.warn("Post-save related suggestions skipped:", error);
     } finally {
