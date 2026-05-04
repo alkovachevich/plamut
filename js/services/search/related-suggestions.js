@@ -60,6 +60,19 @@ async function resolveOwnerUserId(options = {}) {
   }
 }
 
+function withOwner(row = {}, ownerUserId = "") {
+  const cleanOwner = cleanOwnerUserId(ownerUserId);
+  return cleanOwner ? { owner_user_id: cleanOwner, ...row } : row;
+}
+
+function stripEmptyOwner(row = {}) {
+  const next = { ...row };
+  if (!cleanOwnerUserId(next.owner_user_id)) {
+    delete next.owner_user_id;
+  }
+  return next;
+}
+
 function getEntityWikidataId(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
   const meta = normalizeJson(entity.meta, {});
@@ -212,8 +225,7 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUser
       const cleanTargetId = cleanWikidataId(targetId);
       if (!cleanTargetId) return;
 
-      candidates.push({
-        owner_user_id: ownerUserId,
+      candidates.push(withOwner({
         source_entity_id: entity.id,
         relation_type: config.relation_type,
         source: "wikidata",
@@ -227,7 +239,7 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUser
           relation_type: config.relation_type,
           direction: "direct"
         }
-      });
+      }, ownerUserId));
     });
   });
 
@@ -238,8 +250,7 @@ async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "", s
   const resolvedSourceWikidataId = sourceWikidataId || getEntityWikidataId(entity);
   const reverseIds = await fetchReverseAdaptationIds(resolvedSourceWikidataId);
 
-  return reverseIds.map((targetId) => ({
-    owner_user_id: ownerUserId,
+  return reverseIds.map((targetId) => withOwner({
     source_entity_id: entity.id,
     relation_type: "adaptation",
     source: "wikidata",
@@ -253,7 +264,7 @@ async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "", s
       relation_type: "adaptation",
       direction: "reverse"
     }
-  }));
+  }, ownerUserId));
 }
 
 async function enrichCandidatePayloads(candidates = []) {
@@ -294,9 +305,10 @@ function dedupeCandidates(candidates = []) {
 
   return safeArray(candidates).filter((candidate) => {
     const targetId = cleanWikidataId(candidate.wikidata_entity_id);
-    if (!candidate.owner_user_id || !candidate.source_entity_id || !targetId) return false;
+    if (!candidate.source_entity_id || !targetId) return false;
 
-    const key = `${candidate.owner_user_id}:${candidate.source_entity_id}:${candidate.relation_type}:${targetId}`;
+    const ownerKey = cleanOwnerUserId(candidate.owner_user_id) || "db-default-owner";
+    const key = `${ownerKey}:${candidate.source_entity_id}:${candidate.relation_type}:${targetId}`;
     if (seen.has(key)) return false;
 
     seen.add(key);
@@ -305,10 +317,12 @@ function dedupeCandidates(candidates = []) {
 }
 
 async function saveCandidatesWithUpsert(supabase, candidates = []) {
+  const rows = safeArray(candidates).map(stripEmptyOwner);
+
   return withTimeout(
     supabase
       .from(RELATION_CANDIDATES_TABLE)
-      .upsert(candidates, {
+      .upsert(rows, {
         onConflict: "owner_user_id,source_entity_id,relation_type,wikidata_entity_id",
         ignoreDuplicates: false
       })
@@ -319,10 +333,12 @@ async function saveCandidatesWithUpsert(supabase, candidates = []) {
 }
 
 async function saveCandidatesWithInsertFallback(supabase, candidates = []) {
+  const rows = safeArray(candidates).map(stripEmptyOwner);
+
   return withTimeout(
     supabase
       .from(RELATION_CANDIDATES_TABLE)
-      .insert(candidates)
+      .insert(rows)
       .select("id"),
     "Fallback-сохранение подсказок связанных произведений",
     WRITE_TIMEOUT_MS
@@ -333,7 +349,6 @@ export async function buildRelatedSuggestionsForEntity(entity = {}, options = {}
   const ownerUserId = await resolveOwnerUserId(options);
 
   if (!entity?.id) return [];
-  if (!ownerUserId) return [];
   if (isProtectedEntity(entity)) return [];
 
   const wikidataId = await resolveWikidataIdForEntity(entity);
