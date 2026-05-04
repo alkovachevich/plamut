@@ -45,6 +45,20 @@ function cleanOwnerUserId(value = "") {
     : "";
 }
 
+async function resolveOwnerUserId(options = {}) {
+  const explicit = cleanOwnerUserId(options.ownerUserId || options.userId || "");
+  if (explicit) return explicit;
+
+  try {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase.auth.getUser();
+    return cleanOwnerUserId(data?.user?.id || "");
+  } catch (error) {
+    console.warn("Related suggestions user resolve skipped:", error);
+    return "";
+  }
+}
+
 function getEntityWikidataId(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
   const meta = normalizeJson(entity.meta, {});
@@ -275,7 +289,7 @@ async function saveCandidatesWithInsertFallback(supabase, candidates = []) {
 }
 
 export async function buildRelatedSuggestionsForEntity(entity = {}, options = {}) {
-  const ownerUserId = cleanOwnerUserId(options.ownerUserId || options.userId || "");
+  const ownerUserId = await resolveOwnerUserId(options);
 
   if (!entity?.id) return [];
   if (!ownerUserId) return [];
