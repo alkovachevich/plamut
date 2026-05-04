@@ -64,6 +64,11 @@ create index if not exists relation_candidates_source_entity_idx
 create index if not exists relation_candidates_owner_idx
   on public.relation_candidates(owner_user_id, status, created_at desc);
 
+-- Required for Supabase upsert(... onConflict: 'source_entity_id,relation_type,wikidata_entity_id').
+-- Do not make this partial: PostgREST conflict inference needs a matching unique index.
+create unique index if not exists relation_candidates_source_relation_wikidata_unique_idx
+  on public.relation_candidates(source_entity_id, relation_type, wikidata_entity_id);
+
 create index if not exists media_entities_canonical_key_idx
   on public.media_entities(canonical_key);
 
