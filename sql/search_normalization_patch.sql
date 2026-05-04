@@ -62,6 +62,28 @@ create table if not exists public.relation_candidates (
 alter table public.relation_candidates
   alter column owner_user_id set default auth.uid();
 
+-- Trigger makes the owner stable even when the frontend omits owner_user_id.
+create or replace function public.set_relation_candidate_owner()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.owner_user_id is null then
+    new.owner_user_id := auth.uid();
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists set_relation_candidate_owner_before_insert on public.relation_candidates;
+create trigger set_relation_candidate_owner_before_insert
+before insert on public.relation_candidates
+for each row
+execute function public.set_relation_candidate_owner();
+
 create index if not exists relation_candidates_source_entity_idx
   on public.relation_candidates(source_entity_id, status, confidence desc);
 
@@ -78,58 +100,35 @@ create unique index if not exists relation_candidates_source_relation_wikidata_u
 
 alter table public.relation_candidates enable row level security;
 
--- Idempotent RLS policies for user-owned lightweight suggestions.
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'relation_candidates'
-      and policyname = 'Users can view their relation candidates'
-  ) then
-    create policy "Users can view their relation candidates"
-      on public.relation_candidates
-      for select
-      using (auth.uid() = owner_user_id);
-  end if;
+-- Replace old policies because earlier versions were too strict for insert when owner_user_id was filled by default/trigger.
+drop policy if exists "Users can view their relation candidates" on public.relation_candidates;
+drop policy if exists "Users can insert their relation candidates" on public.relation_candidates;
+drop policy if exists "Users can update their relation candidates" on public.relation_candidates;
+drop policy if exists "Users can delete their relation candidates" on public.relation_candidates;
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'relation_candidates'
-      and policyname = 'Users can insert their relation candidates'
-  ) then
-    create policy "Users can insert their relation candidates"
-      on public.relation_candidates
-      for insert
-      with check (auth.uid() = owner_user_id);
-  end if;
+create policy "Users can view their relation candidates"
+  on public.relation_candidates
+  for select
+  using (auth.uid() = owner_user_id);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'relation_candidates'
-      and policyname = 'Users can update their relation candidates'
-  ) then
-    create policy "Users can update their relation candidates"
-      on public.relation_candidates
-      for update
-      using (auth.uid() = owner_user_id)
-      with check (auth.uid() = owner_user_id);
-  end if;
+create policy "Users can insert their relation candidates"
+  on public.relation_candidates
+  for insert
+  to authenticated
+  with check (owner_user_id is null or auth.uid() = owner_user_id);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'relation_candidates'
-      and policyname = 'Users can delete their relation candidates'
-  ) then
-    create policy "Users can delete their relation candidates"
-      on public.relation_candidates
-      for delete
-      using (auth.uid() = owner_user_id);
-  end if;
-end $$;
+create policy "Users can update their relation candidates"
+  on public.relation_candidates
+  for update
+  to authenticated
+  using (auth.uid() = owner_user_id)
+  with check (auth.uid() = owner_user_id);
+
+create policy "Users can delete their relation candidates"
+  on public.relation_candidates
+  for delete
+  to authenticated
+  using (auth.uid() = owner_user_id);
 
 create index if not exists media_entities_canonical_key_idx
   on public.media_entities(canonical_key);
