@@ -45,7 +45,7 @@ create index if not exists metadata_enrichment_jobs_status_priority_idx
 
 create table if not exists public.relation_candidates (
   id bigserial primary key,
-  owner_user_id uuid,
+  owner_user_id uuid default auth.uid(),
   source_entity_id bigint references public.media_entities(id) on delete cascade,
   target_entity_id bigint references public.media_entities(id) on delete cascade,
   relation_type text not null default 'related_work',
@@ -57,6 +57,10 @@ create table if not exists public.relation_candidates (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- If the table already existed before this patch, make the default explicit.
+alter table public.relation_candidates
+  alter column owner_user_id set default auth.uid();
 
 create index if not exists relation_candidates_source_entity_idx
   on public.relation_candidates(source_entity_id, status, confidence desc);
