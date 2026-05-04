@@ -3,7 +3,8 @@ import { safeArray, uniqueArray } from "../../utils.js";
 import {
   fetchWikidataEntities,
   getClaimEntityIds,
-  mapWikidataEntityToPatch
+  mapWikidataEntityToPatch,
+  searchWikidataIds
 } from "./wikidata-source.js";
 
 const RELATION_CANDIDATES_TABLE = "relation_candidates";
@@ -70,6 +71,46 @@ function getEntityWikidataId(entity = {}) {
     meta.wikidata_id ||
     ""
   );
+}
+
+function getTitleCandidates(entity = {}) {
+  const meta = normalizeJson(entity.meta, {});
+
+  return uniqueArray([
+    entity.title_primary,
+    entity.title_ru,
+    entity.title_en,
+    entity.original_title,
+    entity.title,
+    entity.display_title,
+    ...safeArray(entity.aliases),
+    ...safeArray(meta?.wikidata_aliases?.ru),
+    ...safeArray(meta?.wikidata_aliases?.en)
+  ].map(clean).filter(Boolean)).slice(0, 4);
+}
+
+async function resolveWikidataIdForEntity(entity = {}) {
+  const existing = getEntityWikidataId(entity);
+  if (existing) return existing;
+
+  const titles = getTitleCandidates(entity);
+  if (!titles.length) return "";
+
+  for (const title of titles) {
+    const [ru, en] = await Promise.allSettled([
+      searchWikidataIds(title, "ru", 4),
+      searchWikidataIds(title, "en", 4)
+    ]);
+
+    const ids = uniqueArray([
+      ...safeArray(ru.status === "fulfilled" ? ru.value : []),
+      ...safeArray(en.status === "fulfilled" ? en.value : [])
+    ].map(cleanWikidataId).filter(Boolean));
+
+    if (ids[0]) return ids[0];
+  }
+
+  return "";
 }
 
 function isTruthyFlag(value) {
@@ -161,7 +202,7 @@ function mapEntityPatchForPayload(patch = {}) {
   };
 }
 
-async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUserId = "") {
+async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUserId = "", sourceWikidataId = "") {
   const candidates = [];
 
   DIRECT_RELATION_PROPERTIES.forEach((config) => {
@@ -181,7 +222,7 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUser
         wikidata_entity_id: cleanTargetId,
         candidate_payload: {
           target_wikidata_id: cleanTargetId,
-          source_wikidata_id: getEntityWikidataId(entity),
+          source_wikidata_id: sourceWikidataId || getEntityWikidataId(entity),
           wikidata_property: config.property,
           relation_type: config.relation_type,
           direction: "direct"
@@ -193,9 +234,9 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUser
   return candidates;
 }
 
-async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "") {
-  const sourceWikidataId = getEntityWikidataId(entity);
-  const reverseIds = await fetchReverseAdaptationIds(sourceWikidataId);
+async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "", sourceWikidataId = "") {
+  const resolvedSourceWikidataId = sourceWikidataId || getEntityWikidataId(entity);
+  const reverseIds = await fetchReverseAdaptationIds(resolvedSourceWikidataId);
 
   return reverseIds.map((targetId) => ({
     owner_user_id: ownerUserId,
@@ -207,7 +248,7 @@ async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "") {
     wikidata_entity_id: targetId,
     candidate_payload: {
       target_wikidata_id: targetId,
-      source_wikidata_id: sourceWikidataId,
+      source_wikidata_id: resolvedSourceWikidataId,
       wikidata_property: "P144",
       relation_type: "adaptation",
       direction: "reverse"
@@ -295,15 +336,15 @@ export async function buildRelatedSuggestionsForEntity(entity = {}, options = {}
   if (!ownerUserId) return [];
   if (isProtectedEntity(entity)) return [];
 
-  const wikidataId = getEntityWikidataId(entity);
+  const wikidataId = await resolveWikidataIdForEntity(entity);
   if (!wikidataId) return [];
 
   const [wikidataEntity] = await fetchWikidataEntities([wikidataId]).catch(() => []);
   if (!wikidataEntity?.id) return [];
 
   const [direct, reverseAdaptations] = await Promise.allSettled([
-    buildDirectCandidates(entity, wikidataEntity, ownerUserId),
-    buildReverseAdaptationCandidates(entity, ownerUserId)
+    buildDirectCandidates(entity, wikidataEntity, ownerUserId, wikidataId),
+    buildReverseAdaptationCandidates(entity, ownerUserId, wikidataId)
   ]);
 
   const rawCandidates = [
