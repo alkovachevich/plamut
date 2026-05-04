@@ -1,6 +1,7 @@
 import { getSupabaseClient, withTimeout } from "../lib/supabase-client.js";
 import { normalizeString, safeArray, uniqueArray } from "../utils.js";
 import { updateCachedLibraryItem } from "./library-cache.js";
+import { schedulePostSaveMetadataEnrichment } from "./search/post-save-enrichment.js";
 
 const MEDIA_ENTITIES_TABLE = "media_entities";
 const ENTITY_ALIASES_TABLE = "entity_aliases";
@@ -270,6 +271,14 @@ function setCachedUserMedia(userId, entityId, value) {
     value,
     ts: Date.now()
   });
+}
+
+function scheduleEntityEnrichmentSafely(entity = {}) {
+  try {
+    schedulePostSaveMetadataEnrichment(entity);
+  } catch (error) {
+    console.warn("Post-save metadata enrichment scheduling skipped:", error);
+  }
 }
 
 function buildTitlePrimary(entity = {}) {
@@ -701,6 +710,7 @@ async function insertEntity(entity = {}) {
     if (existing?.id) {
       setCachedEntity(existing);
       await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
+      scheduleEntityEnrichmentSafely(existing);
       return existing;
     }
 
@@ -718,7 +728,10 @@ async function insertEntity(entity = {}) {
 
     if (error) {
       const duplicate = await findDuplicateEntity(normalized).catch(() => null);
-      if (duplicate?.id) return duplicate;
+      if (duplicate?.id) {
+        scheduleEntityEnrichmentSafely(duplicate);
+        return duplicate;
+      }
       throw error;
     }
 
@@ -727,6 +740,7 @@ async function insertEntity(entity = {}) {
     if (created?.id) {
       setCachedEntity(created);
       await saveAliases(created.id, normalized.aliases, normalized.primary_source).catch(() => []);
+      scheduleEntityEnrichmentSafely(created);
     }
 
     return created;
@@ -746,6 +760,7 @@ export async function saveEntityIfMissing(entity = {}) {
   if (existing?.id) {
     setCachedEntity(existing);
     await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
+    scheduleEntityEnrichmentSafely(existing);
     return existing;
   }
 
@@ -789,6 +804,8 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     const existing = await getExistingUserMedia(userId, entity.id);
 
     if (existing?.id) {
+      scheduleEntityEnrichmentSafely(existing.media_entities || entity);
+
       return {
         alreadyExists: true,
         userMedia: existing,
@@ -820,6 +837,8 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     if (error) {
       const afterConflict = await getExistingUserMedia(userId, entity.id).catch(() => null);
       if (afterConflict?.id) {
+        scheduleEntityEnrichmentSafely(afterConflict.media_entities || entity);
+
         return {
           alreadyExists: true,
           userMedia: afterConflict,
@@ -836,6 +855,7 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     if (row?.id) {
       setCachedUserMedia(userId, entity.id, row);
       updateCachedLibraryItem(userId, row);
+      scheduleEntityEnrichmentSafely(row.media_entities || entity);
     }
 
     return {
@@ -873,6 +893,7 @@ export async function addToUserLibrary({
   if (existing?.id) {
     setCachedEntity(existing);
     await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
+    scheduleEntityEnrichmentSafely(existing);
 
     return insertUserMedia({
       userId,
@@ -905,7 +926,10 @@ export async function ensureEntityForLibrary(item = {}) {
   const normalized = assertSaveableEntity(item);
   const existing = await findDuplicateEntity(normalized);
 
-  if (existing?.id) return existing;
+  if (existing?.id) {
+    scheduleEntityEnrichmentSafely(existing);
+    return existing;
+  }
 
   return insertEntity(normalized);
 }
