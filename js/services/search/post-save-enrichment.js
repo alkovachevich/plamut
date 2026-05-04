@@ -13,11 +13,34 @@ function cleanId(value) {
   return Number.isFinite(id) && id > 0 ? id : 0;
 }
 
+function cleanText(value = "") {
+  return String(value || "").trim();
+}
+
 function cleanUserId(value = "") {
   const id = String(value || "").trim();
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
     ? id
     : "";
+}
+
+function hasCyrillic(value = "") {
+  return /[А-Яа-яЁёІіЇїЄє]/.test(String(value || ""));
+}
+
+function hasUsefulRussianDescription(value = "") {
+  const text = cleanText(value);
+  return text.length >= 90 && hasCyrillic(text);
+}
+
+function shouldSkipPostSaveMetadataEnrichment(entity = {}) {
+  if (entity?.category !== "books") return false;
+
+  // Search is now stricter than the generic post-save enrichment for books.
+  // If a saved book already has a real Russian description, do not run the
+  // generic enrichment because it can still fetch English/OpenLibrary fallback
+  // and make the visible card worse.
+  return hasUsefulRussianDescription(entity.description_ru);
 }
 
 function suggestionKey(entityId, userId = "") {
@@ -96,6 +119,7 @@ export function schedulePostSaveMetadataEnrichment(entity = {}, options = {}) {
 
   schedulePostSaveRelatedSuggestions(entity, options);
 
+  if (shouldSkipPostSaveMetadataEnrichment(entity)) return false;
   if (!shouldEnrichEntity(entity)) return false;
   if (pendingEntityIds.has(entityId)) return false;
   if (wasRecentlyScheduled(entityId)) return false;
