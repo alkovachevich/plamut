@@ -240,6 +240,31 @@ function dedupeCandidates(candidates = []) {
   });
 }
 
+async function saveCandidatesWithUpsert(supabase, candidates = []) {
+  return withTimeout(
+    supabase
+      .from(RELATION_CANDIDATES_TABLE)
+      .upsert(candidates, {
+        onConflict: "source_entity_id,relation_type,wikidata_entity_id",
+        ignoreDuplicates: false
+      })
+      .select("id"),
+    "Сохранение подсказок связанных произведений",
+    WRITE_TIMEOUT_MS
+  );
+}
+
+async function saveCandidatesWithInsertFallback(supabase, candidates = []) {
+  return withTimeout(
+    supabase
+      .from(RELATION_CANDIDATES_TABLE)
+      .insert(candidates)
+      .select("id"),
+    "Fallback-сохранение подсказок связанных произведений",
+    WRITE_TIMEOUT_MS
+  );
+}
+
 export async function buildRelatedSuggestionsForEntity(entity = {}) {
   if (!entity?.id) return [];
   if (isProtectedEntity(entity)) return [];
@@ -275,20 +300,24 @@ export async function saveRelatedSuggestionsForEntity(entity = {}) {
 
   const supabase = getSupabaseClient();
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from(RELATION_CANDIDATES_TABLE)
-      .upsert(candidates, {
-        onConflict: "source_entity_id,relation_type,wikidata_entity_id",
-        ignoreDuplicates: false
-      })
-      .select("id"),
-    "Сохранение подсказок связанных произведений",
-    WRITE_TIMEOUT_MS
-  ).catch((error) => ({ data: [], error }));
+  const { data, error } = await saveCandidatesWithUpsert(supabase, candidates)
+    .catch((error) => ({ data: [], error }));
 
-  if (error) {
-    console.warn("Related suggestions save skipped:", error);
+  if (!error) {
+    return {
+      saved: safeArray(data).length,
+      skipped: false,
+      reason: ""
+    };
+  }
+
+  console.warn("Related suggestions upsert failed, trying insert fallback:", error);
+
+  const { data: fallbackData, error: fallbackError } = await saveCandidatesWithInsertFallback(supabase, candidates)
+    .catch((error) => ({ data: [], error }));
+
+  if (fallbackError) {
+    console.warn("Related suggestions save skipped:", fallbackError);
     return {
       saved: 0,
       skipped: true,
@@ -297,8 +326,8 @@ export async function saveRelatedSuggestionsForEntity(entity = {}) {
   }
 
   return {
-    saved: safeArray(data).length,
+    saved: safeArray(fallbackData).length,
     skipped: false,
-    reason: ""
+    reason: "insert_fallback"
   };
 }
