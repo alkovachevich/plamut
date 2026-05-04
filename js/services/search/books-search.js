@@ -1,6 +1,5 @@
 import { SEARCH_LIMITS } from "../../config.js";
 import { safeArray, uniqueArray } from "../../utils.js";
-import { enrichBookSearchResults } from "./books-enrichment.js";
 
 const SEARCH_TIMEOUT_MS = 8500;
 const WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php";
@@ -11,39 +10,62 @@ const OPEN_LIBRARY_WORK_URL = "https://openlibrary.org/works";
 const OPEN_LIBRARY_COVER_BASE_URL = "https://covers.openlibrary.org/b/id";
 const COMMONS_FILE_BASE_URL = "https://commons.wikimedia.org/wiki/Special:FilePath";
 
-const WIKIDATA_SEARCH_LIMIT = 16;
-const WIKIDATA_ENTITY_LIMIT = 40;
-const OPEN_LIBRARY_LIMIT = 18;
-const FAST_WIKIPEDIA_ENRICH_LIMIT = 6;
+const WIKIDATA_SEARCH_LIMIT = 18;
+const WIKIDATA_ENTITY_LIMIT = 45;
+const OPEN_LIBRARY_LIMIT = 16;
+const WIKIPEDIA_ENRICH_LIMIT = 5;
 
 const BOOK_TYPE_IDS = new Set([
-  "Q571", // book
-  "Q8261", // novel
-  "Q7725634", // literary work
+  "Q571",      // book
+  "Q8261",     // novel
+  "Q7725634",  // literary work
   "Q47461344", // written work
-  "Q49084", // short story
-  "Q25379", // play
-  "Q5185279" // poem
+  "Q49084",    // short story
+  "Q25379",    // play
+  "Q5185279"   // poem
 ]);
 
 const BOOK_SERIES_TYPE_IDS = new Set([
-  "Q277759", // book series
-  "Q7725310" // series of creative works
+  "Q277759",  // book series
+  "Q7725310"  // series of creative works
 ]);
 
 const AUTHOR_TYPE_IDS = new Set(["Q5"]);
 
 const NON_BOOK_TYPE_IDS = new Set([
-  "Q5",
-  "Q11424",
-  "Q5398426",
-  "Q15416",
-  "Q1107",
-  "Q95074",
-  "Q386724",
-  "Q43229",
-  "Q7889"
+  "Q5",       // human
+  "Q11424",   // film
+  "Q5398426", // television series
+  "Q15416",   // television program
+  "Q7889",    // video game
+  "Q1107",    // anime
+  "Q95074",   // fictional character
+  "Q43229",   // organization
+  "Q4830453"  // business
 ]);
+
+const FORBIDDEN_ENTITY_PATTERNS = [
+  "film",
+  "movie",
+  "television series",
+  "tv series",
+  "television program",
+  "video game",
+  "computer game",
+  "game boy",
+  "playstation",
+  "xbox",
+  "nintendo",
+  "fictional character",
+  "фильм",
+  "кинофильм",
+  "телесериал",
+  "мультсериал",
+  "компьютерная игра",
+  "видеоигра",
+  "игра для",
+  "персонаж"
+];
 
 const NOISE_TITLE_PATTERNS = [
   "summary",
@@ -142,10 +164,16 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+function containsForbiddenPattern(...values) {
+  const text = values.map(normalizeText).filter(Boolean).join(" ");
+  if (!text) return false;
+  return FORBIDDEN_ENTITY_PATTERNS.some((pattern) => text.includes(normalizeText(pattern)));
+}
+
 function isNoisyTitle(title = "") {
   const text = normalizeText(title);
   if (!text || text.length < 2) return true;
-  return NOISE_TITLE_PATTERNS.some((pattern) => text.includes(pattern));
+  return NOISE_TITLE_PATTERNS.some((pattern) => text.includes(normalizeText(pattern)));
 }
 
 function getYearFromDate(value = "") {
@@ -211,6 +239,13 @@ function getEntityDescriptionText(entity = {}) {
   ].map(cleanLower).filter(Boolean).join(" ");
 }
 
+function getSitelinkTitles(entity = {}) {
+  return [
+    entity?.sitelinks?.ruwiki?.title,
+    entity?.sitelinks?.enwiki?.title
+  ].map(clean).filter(Boolean);
+}
+
 function isAuthorEntity(entity = {}) {
   const typeIds = getClaimEntityIds(entity, ["P31"]);
   const description = getEntityDescriptionText(entity);
@@ -229,22 +264,31 @@ function isBookSeriesEntity(entity = {}) {
   return ["book series", "novel series", "literary series", "серия книг", "книжная серия", "цикл романов", "литературный цикл"].some((word) => description.includes(word));
 }
 
+function isForbiddenNonBookEntity(entity = {}) {
+  const typeIds = getEntityTypeIds(entity);
+  const description = getEntityDescriptionText(entity);
+  const sitelinks = getSitelinkTitles(entity).join(" ");
+
+  if (typeIds.some((id) => NON_BOOK_TYPE_IDS.has(id))) return true;
+  if (containsForbiddenPattern(description, sitelinks)) return true;
+
+  return false;
+}
+
 function isBookWorkEntity(entity = {}) {
   if (!entity?.id || entity.id === "-1") return false;
   if (isAuthorEntity(entity)) return false;
   if (isBookSeriesEntity(entity)) return false;
+  if (isForbiddenNonBookEntity(entity)) return false;
 
   const typeIds = getEntityTypeIds(entity);
   const description = getEntityDescriptionText(entity);
+  const hasAuthor = getClaimEntityIds(entity, ["P50"]).length > 0;
 
-  if (typeIds.some((id) => NON_BOOK_TYPE_IDS.has(id))) return false;
   if (typeIds.some((id) => BOOK_TYPE_IDS.has(id))) return true;
+  if (hasAuthor && ["book", "novel", "literary work", "written work", "роман", "книга", "литературное произведение", "пьеса", "рассказ", "повесть"].some((word) => description.includes(word))) return true;
 
-  if (["film", "movie", "television series", "video game", "fictional character", "фильм", "телесериал", "видеоигра", "персонаж"].some((word) => description.includes(word))) {
-    return false;
-  }
-
-  return ["book", "novel", "literary work", "written work", "роман", "книга", "литературное произведение", "пьеса", "рассказ", "повесть"].some((word) => description.includes(word));
+  return false;
 }
 
 function scoreTitleMatch({ query = "", title = "", titleRu = "", titleEn = "", aliases = [] } = {}) {
@@ -354,8 +398,8 @@ function normalizeBookItem(raw = {}, language = "ru") {
   if (!title) return null;
   if (isNoisyTitle(title) && !wikidataId) return null;
 
-  const descriptionRu = clean(raw.description_ru || raw?.meta?.description_ru || "");
-  const descriptionEn = clean(raw.description_en || raw?.meta?.description_en || raw?.meta?.synopsis || "");
+  const descriptionRu = containsForbiddenPattern(raw.description_ru) ? "" : clean(raw.description_ru || raw?.meta?.description_ru || "");
+  const descriptionEn = containsForbiddenPattern(raw.description_en) ? "" : clean(raw.description_en || raw?.meta?.description_en || raw?.meta?.synopsis || "");
   const coverUrl = clean(raw.cover_url);
 
   const base = {
@@ -443,9 +487,10 @@ async function fetchWikidataLabels(ids = []) {
   return map;
 }
 
-async function fetchWikipediaExtractByTitle(title = "", language = "ru") {
+async function fetchWikipediaExtractByExactSitelink(title = "", language = "ru") {
   const cleanTitle = clean(title);
   if (!cleanTitle) return null;
+  if (containsForbiddenPattern(cleanTitle)) return null;
 
   const apiUrl = language === "en" ? WIKIPEDIA_EN_API_URL : WIKIPEDIA_RU_API_URL;
   const url = new URL(apiUrl);
@@ -462,25 +507,31 @@ async function fetchWikipediaExtractByTitle(title = "", language = "ru") {
   const page = Object.values(payload?.query?.pages || {})[0];
   if (!page || page.missing) return null;
 
+  const extract = clean(page.extract);
+  const pageTitle = clean(page.title);
+  if (containsForbiddenPattern(pageTitle, extract)) return null;
+
   return {
-    title: clean(page.title),
-    extract: clean(page.extract),
+    title: pageTitle,
+    extract,
     image: clean(page?.original?.source)
   };
 }
 
-async function enrichWithWikipedia(items = []) {
-  const head = safeArray(items).slice(0, FAST_WIKIPEDIA_ENRICH_LIMIT);
-  const tail = safeArray(items).slice(FAST_WIKIPEDIA_ENRICH_LIMIT);
+async function enrichWithWikipediaSitelinksOnly(items = []) {
+  const head = safeArray(items).slice(0, WIKIPEDIA_ENRICH_LIMIT);
+  const tail = safeArray(items).slice(WIKIPEDIA_ENRICH_LIMIT);
 
   const results = await Promise.allSettled(head.map(async (item) => {
     const entity = item.__wikidataEntity || null;
-    const ruTitle = clean(entity?.sitelinks?.ruwiki?.title || item.title_ru || item.title_primary);
-    const enTitle = clean(entity?.sitelinks?.enwiki?.title || item.title_en || item.original_title);
+    const ruSitelink = clean(entity?.sitelinks?.ruwiki?.title);
+    const enSitelink = clean(entity?.sitelinks?.enwiki?.title);
+
     const [ru, en] = await Promise.allSettled([
-      item.description_ru ? null : fetchWikipediaExtractByTitle(ruTitle, "ru"),
-      item.description_en ? null : fetchWikipediaExtractByTitle(enTitle, "en")
+      item.description_ru || !ruSitelink ? null : fetchWikipediaExtractByExactSitelink(ruSitelink, "ru"),
+      item.description_en || !enSitelink ? null : fetchWikipediaExtractByExactSitelink(enSitelink, "en")
     ]);
+
     const ruPayload = ru.status === "fulfilled" ? ru.value : null;
     const enPayload = en.status === "fulfilled" ? en.value : null;
 
@@ -495,9 +546,9 @@ async function enrichWithWikipedia(items = []) {
         wikipedia_en_title: enPayload?.title || item.meta?.wikipedia_en_title || "",
         sources: {
           ...(item.meta?.sources || {}),
-          description_ru: ruPayload?.extract ? "wikipedia_ru" : item.meta?.sources?.description_ru || "",
-          description_en: enPayload?.extract ? "wikipedia_en" : item.meta?.sources?.description_en || "",
-          image: item.cover_url ? item.meta?.sources?.image || "" : (ruPayload?.image || enPayload?.image ? "wikipedia_pageimage" : "")
+          description_ru: ruPayload?.extract ? "wikipedia_ru_sitelink" : item.meta?.sources?.description_ru || "",
+          description_en: enPayload?.extract ? "wikipedia_en_sitelink" : item.meta?.sources?.description_en || "",
+          image: item.cover_url ? item.meta?.sources?.image || "" : (ruPayload?.image || enPayload?.image ? "wikipedia_pageimage_sitelink" : "")
         }
       }
     }, "ru");
@@ -516,8 +567,8 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map(), q
 
   const titleRu = clean(entity?.labels?.ru?.value);
   const titleEn = clean(entity?.labels?.en?.value);
-  const descriptionRu = clean(entity?.descriptions?.ru?.value);
-  const descriptionEn = clean(entity?.descriptions?.en?.value);
+  const descriptionRu = containsForbiddenPattern(entity?.descriptions?.ru?.value) ? "" : clean(entity?.descriptions?.ru?.value);
+  const descriptionEn = containsForbiddenPattern(entity?.descriptions?.en?.value) ? "" : clean(entity?.descriptions?.en?.value);
   const aliasesRu = safeArray(entity?.aliases?.ru).map((row) => clean(row?.value)).filter(Boolean);
   const aliasesEn = safeArray(entity?.aliases?.en).map((row) => clean(row?.value)).filter(Boolean);
   const authorIds = getClaimEntityIds(entity, ["P50"]);
@@ -555,6 +606,10 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map(), q
       source: "wikidata",
       wikidata_labels: { ru: titleRu, en: titleEn },
       wikidata_aliases: { ru: aliasesRu, en: aliasesEn },
+      wikidata_sitelinks: {
+        ru: clean(entity?.sitelinks?.ruwiki?.title),
+        en: clean(entity?.sitelinks?.enwiki?.title)
+      },
       author_names: authorNames,
       author_wikidata_ids: authorIds,
       series_name: seriesNames[0] || "",
@@ -674,7 +729,7 @@ async function fetchOpenLibraryBooks(query = "", language = "ru") {
     const description = await fetchOpenLibraryDescription(item.external_ids?.openlibrary_work).catch(() => "");
     return normalizeBookItem({
       ...item,
-      description_en: description,
+      description_en: containsForbiddenPattern(description) ? "" : description,
       meta: {
         ...(item.meta || {}),
         sources: { ...(item.meta?.sources || {}), description_en: description ? "openlibrary_work" : "" }
@@ -774,10 +829,9 @@ export async function runBooksSearch(query = "", options = {}) {
     ...safeArray(openLibrary.status === "fulfilled" ? openLibrary.value : [])
   ]);
 
-  const withWikipedia = await enrichWithWikipedia(sortBooks(merged)).catch(() => merged);
-  const withLocalized = await enrichBookSearchResults(withWikipedia, language).catch(() => withWikipedia);
+  const withWikipedia = await enrichWithWikipediaSitelinksOnly(sortBooks(merged)).catch(() => merged);
 
-  return sortBooks(dedupeBookResults(withLocalized))
+  return sortBooks(dedupeBookResults(withWikipedia))
     .slice(0, SEARCH_LIMITS?.PAGE_RESULTS || 30)
     .map(cleanForOutput);
 }
