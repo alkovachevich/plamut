@@ -14,6 +14,8 @@ const WIKIDATA_SEARCH_LIMIT = 18;
 const WIKIDATA_ENTITY_LIMIT = 45;
 const OPEN_LIBRARY_LIMIT = 16;
 const WIKIPEDIA_ENRICH_LIMIT = 5;
+const MIN_RU_DESCRIPTION_LENGTH = 90;
+const MIN_EN_DESCRIPTION_LENGTH = 90;
 
 const BOOK_TYPE_IDS = new Set([
   "Q571",      // book
@@ -44,7 +46,7 @@ const NON_BOOK_TYPE_IDS = new Set([
   "Q4830453"  // business
 ]);
 
-const FORBIDDEN_ENTITY_PATTERNS = [
+const FORBIDDEN_TITLE_PATTERNS = [
   "film",
   "movie",
   "television series",
@@ -65,6 +67,21 @@ const FORBIDDEN_ENTITY_PATTERNS = [
   "видеоигра",
   "игра для",
   "персонаж"
+];
+
+const WRONG_MEDIA_DESCRIPTION_PATTERNS = [
+  "компьютерная игра",
+  "видеоигра",
+  "игра для game boy",
+  "игра для playstation",
+  "игра для xbox",
+  "игра для nintendo",
+  "video game",
+  "computer game",
+  "game boy",
+  "playstation",
+  "xbox",
+  "nintendo"
 ];
 
 const NOISE_TITLE_PATTERNS = [
@@ -164,10 +181,28 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
-function containsForbiddenPattern(...values) {
+function containsForbiddenTitlePattern(...values) {
   const text = values.map(normalizeText).filter(Boolean).join(" ");
   if (!text) return false;
-  return FORBIDDEN_ENTITY_PATTERNS.some((pattern) => text.includes(normalizeText(pattern)));
+  return FORBIDDEN_TITLE_PATTERNS.some((pattern) => text.includes(normalizeText(pattern)));
+}
+
+function looksLikeWrongMediaDescription(value = "") {
+  const text = normalizeText(value);
+  if (!text) return false;
+
+  const firstChunk = text.slice(0, 240);
+  return WRONG_MEDIA_DESCRIPTION_PATTERNS.some((pattern) => firstChunk.includes(normalizeText(pattern)));
+}
+
+function hasUsefulRuDescription(value = "") {
+  const text = clean(value);
+  return text.length >= MIN_RU_DESCRIPTION_LENGTH && hasCyrillic(text) && !looksLikeWrongMediaDescription(text);
+}
+
+function hasUsefulEnDescription(value = "") {
+  const text = clean(value);
+  return text.length >= MIN_EN_DESCRIPTION_LENGTH && !looksLikeWrongMediaDescription(text);
 }
 
 function isNoisyTitle(title = "") {
@@ -270,7 +305,7 @@ function isForbiddenNonBookEntity(entity = {}) {
   const sitelinks = getSitelinkTitles(entity).join(" ");
 
   if (typeIds.some((id) => NON_BOOK_TYPE_IDS.has(id))) return true;
-  if (containsForbiddenPattern(description, sitelinks)) return true;
+  if (containsForbiddenTitlePattern(description, sitelinks)) return true;
 
   return false;
 }
@@ -398,8 +433,12 @@ function normalizeBookItem(raw = {}, language = "ru") {
   if (!title) return null;
   if (isNoisyTitle(title) && !wikidataId) return null;
 
-  const descriptionRu = containsForbiddenPattern(raw.description_ru) ? "" : clean(raw.description_ru || raw?.meta?.description_ru || "");
-  const descriptionEn = containsForbiddenPattern(raw.description_en) ? "" : clean(raw.description_en || raw?.meta?.description_en || raw?.meta?.synopsis || "");
+  const descriptionRu = looksLikeWrongMediaDescription(raw.description_ru)
+    ? ""
+    : clean(raw.description_ru || raw?.meta?.description_ru || "");
+  const descriptionEn = looksLikeWrongMediaDescription(raw.description_en)
+    ? ""
+    : clean(raw.description_en || raw?.meta?.description_en || raw?.meta?.synopsis || "");
   const coverUrl = clean(raw.cover_url);
 
   const base = {
@@ -490,7 +529,7 @@ async function fetchWikidataLabels(ids = []) {
 async function fetchWikipediaExtractByExactSitelink(title = "", language = "ru") {
   const cleanTitle = clean(title);
   if (!cleanTitle) return null;
-  if (containsForbiddenPattern(cleanTitle)) return null;
+  if (containsForbiddenTitlePattern(cleanTitle)) return null;
 
   const apiUrl = language === "en" ? WIKIPEDIA_EN_API_URL : WIKIPEDIA_RU_API_URL;
   const url = new URL(apiUrl);
@@ -509,7 +548,8 @@ async function fetchWikipediaExtractByExactSitelink(title = "", language = "ru")
 
   const extract = clean(page.extract);
   const pageTitle = clean(page.title);
-  if (containsForbiddenPattern(pageTitle, extract)) return null;
+  if (containsForbiddenTitlePattern(pageTitle)) return null;
+  if (looksLikeWrongMediaDescription(extract)) return null;
 
   return {
     title: pageTitle,
@@ -527,9 +567,12 @@ async function enrichWithWikipediaSitelinksOnly(items = []) {
     const ruSitelink = clean(entity?.sitelinks?.ruwiki?.title);
     const enSitelink = clean(entity?.sitelinks?.enwiki?.title);
 
+    const shouldFetchRu = Boolean(ruSitelink) && !hasUsefulRuDescription(item.description_ru);
+    const shouldFetchEn = Boolean(enSitelink) && !hasUsefulEnDescription(item.description_en);
+
     const [ru, en] = await Promise.allSettled([
-      item.description_ru || !ruSitelink ? null : fetchWikipediaExtractByExactSitelink(ruSitelink, "ru"),
-      item.description_en || !enSitelink ? null : fetchWikipediaExtractByExactSitelink(enSitelink, "en")
+      shouldFetchRu ? fetchWikipediaExtractByExactSitelink(ruSitelink, "ru") : null,
+      shouldFetchEn ? fetchWikipediaExtractByExactSitelink(enSitelink, "en") : null
     ]);
 
     const ruPayload = ru.status === "fulfilled" ? ru.value : null;
@@ -537,7 +580,7 @@ async function enrichWithWikipediaSitelinksOnly(items = []) {
 
     return normalizeBookItem({
       ...item,
-      description_ru: item.description_ru || ruPayload?.extract || "",
+      description_ru: ruPayload?.extract || item.description_ru || "",
       description_en: item.description_en || enPayload?.extract || "",
       cover_url: item.cover_url || ruPayload?.image || enPayload?.image || "",
       meta: {
@@ -567,8 +610,8 @@ function mapWikidataEntity(entity = {}, language = "ru", labelMap = new Map(), q
 
   const titleRu = clean(entity?.labels?.ru?.value);
   const titleEn = clean(entity?.labels?.en?.value);
-  const descriptionRu = containsForbiddenPattern(entity?.descriptions?.ru?.value) ? "" : clean(entity?.descriptions?.ru?.value);
-  const descriptionEn = containsForbiddenPattern(entity?.descriptions?.en?.value) ? "" : clean(entity?.descriptions?.en?.value);
+  const descriptionRu = looksLikeWrongMediaDescription(entity?.descriptions?.ru?.value) ? "" : clean(entity?.descriptions?.ru?.value);
+  const descriptionEn = looksLikeWrongMediaDescription(entity?.descriptions?.en?.value) ? "" : clean(entity?.descriptions?.en?.value);
   const aliasesRu = safeArray(entity?.aliases?.ru).map((row) => clean(row?.value)).filter(Boolean);
   const aliasesEn = safeArray(entity?.aliases?.en).map((row) => clean(row?.value)).filter(Boolean);
   const authorIds = getClaimEntityIds(entity, ["P50"]);
@@ -729,7 +772,7 @@ async function fetchOpenLibraryBooks(query = "", language = "ru") {
     const description = await fetchOpenLibraryDescription(item.external_ids?.openlibrary_work).catch(() => "");
     return normalizeBookItem({
       ...item,
-      description_en: containsForbiddenPattern(description) ? "" : description,
+      description_en: looksLikeWrongMediaDescription(description) ? "" : description,
       meta: {
         ...(item.meta || {}),
         sources: { ...(item.meta?.sources || {}), description_en: description ? "openlibrary_work" : "" }
