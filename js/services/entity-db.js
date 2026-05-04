@@ -89,6 +89,15 @@ function cleanLower(value = "") {
   return cleanText(value).toLowerCase();
 }
 
+function hasCyrillic(value = "") {
+  return /[А-Яа-яЁёІіЇїЄє]/.test(String(value || ""));
+}
+
+function hasUsefulRussianDescription(value = "") {
+  const text = cleanText(value);
+  return text.length >= 90 && hasCyrillic(text);
+}
+
 function normalizeCategory(value = "") {
   const category = cleanLower(value);
 
@@ -273,9 +282,9 @@ function setCachedUserMedia(userId, entityId, value) {
   });
 }
 
-function scheduleEntityEnrichmentSafely(entity = {}) {
+function scheduleEntityEnrichmentSafely(entity = {}, options = {}) {
   try {
-    schedulePostSaveMetadataEnrichment(entity);
+    schedulePostSaveMetadataEnrichment(entity, options);
   } catch (error) {
     console.warn("Post-save metadata enrichment scheduling skipped:", error);
   }
@@ -646,6 +655,63 @@ async function findDuplicateEntity(entity = {}) {
   }
 }
 
+async function patchExistingEntityFromIncoming(existing = {}, incoming = {}) {
+  if (!existing?.id) return existing;
+  if (isHardLockedEntity(existing)) return existing;
+  if (existing.category !== "books" || incoming.category !== "books") return existing;
+
+  const incomingRu = cleanText(incoming.description_ru);
+  const existingRu = cleanText(existing.description_ru);
+
+  if (!hasUsefulRussianDescription(incomingRu)) return existing;
+  if (hasUsefulRussianDescription(existingRu) && existingRu.length >= incomingRu.length) return existing;
+
+  const currentMeta = normalizeJson(existing.meta, {});
+  const incomingMeta = normalizeJson(incoming.meta, {});
+  const currentIds = normalizeJson(existing.external_ids, {});
+  const incomingIds = normalizeJson(incoming.external_ids, {});
+
+  const payload = {
+    title_ru: cleanText(existing.title_ru) || cleanText(incoming.title_ru),
+    description_ru: incomingRu,
+    cover_url: cleanText(existing.cover_url) || cleanText(incoming.cover_url),
+    external_ids: {
+      ...currentIds,
+      ...incomingIds
+    },
+    meta: {
+      ...currentMeta,
+      sources: {
+        ...normalizeJson(currentMeta.sources, {}),
+        ...normalizeJson(incomingMeta.sources, {})
+      },
+      metadata_status: "ready",
+      missing_fields: safeArray(currentMeta.missing_fields).filter((field) => field !== "description"),
+      additive_ru_description_updated_at: new Date().toISOString()
+    }
+  };
+
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from(MEDIA_ENTITIES_TABLE)
+      .update(payload)
+      .eq("id", existing.id)
+      .select("*")
+      .maybeSingle(),
+    "Безопасное обновление русского описания карточки",
+    WRITE_TIMEOUT_MS
+  ).catch((error) => ({ data: null, error }));
+
+  if (error) {
+    console.warn("Existing entity additive RU patch skipped:", error);
+    return existing;
+  }
+
+  return data || existing;
+}
+
 function buildAliasRows(entityId, aliases = [], source = "entity") {
   const normalizedSource = cleanText(source) || "entity";
   const seen = new Set();
@@ -708,10 +774,11 @@ async function insertEntity(entity = {}) {
     const existing = await findDuplicateEntity(normalized);
 
     if (existing?.id) {
-      setCachedEntity(existing);
-      await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
-      scheduleEntityEnrichmentSafely(existing);
-      return existing;
+      const patched = await patchExistingEntityFromIncoming(existing, normalized);
+      setCachedEntity(patched);
+      await saveAliases(patched.id, normalized.aliases, normalized.primary_source).catch(() => []);
+      scheduleEntityEnrichmentSafely(patched);
+      return patched;
     }
 
     const supabase = getSupabaseClient();
@@ -729,8 +796,9 @@ async function insertEntity(entity = {}) {
     if (error) {
       const duplicate = await findDuplicateEntity(normalized).catch(() => null);
       if (duplicate?.id) {
-        scheduleEntityEnrichmentSafely(duplicate);
-        return duplicate;
+        const patched = await patchExistingEntityFromIncoming(duplicate, normalized);
+        scheduleEntityEnrichmentSafely(patched);
+        return patched;
       }
       throw error;
     }
@@ -758,10 +826,11 @@ export async function saveEntityIfMissing(entity = {}) {
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) {
-    setCachedEntity(existing);
-    await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
-    scheduleEntityEnrichmentSafely(existing);
-    return existing;
+    const patched = await patchExistingEntityFromIncoming(existing, normalized);
+    setCachedEntity(patched);
+    await saveAliases(patched.id, normalized.aliases, normalized.primary_source).catch(() => []);
+    scheduleEntityEnrichmentSafely(patched);
+    return patched;
   }
 
   return insertEntity(normalized);
@@ -804,7 +873,7 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     const existing = await getExistingUserMedia(userId, entity.id);
 
     if (existing?.id) {
-      scheduleEntityEnrichmentSafely(existing.media_entities || entity);
+      scheduleEntityEnrichmentSafely(existing.media_entities || entity, { userId });
 
       return {
         alreadyExists: true,
@@ -837,7 +906,7 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     if (error) {
       const afterConflict = await getExistingUserMedia(userId, entity.id).catch(() => null);
       if (afterConflict?.id) {
-        scheduleEntityEnrichmentSafely(afterConflict.media_entities || entity);
+        scheduleEntityEnrichmentSafely(afterConflict.media_entities || entity, { userId });
 
         return {
           alreadyExists: true,
@@ -853,9 +922,13 @@ async function insertUserMedia({ userId, entity, status = "planned", folderName 
     const row = data || null;
 
     if (row?.id) {
-      setCachedUserMedia(userId, entity.id, row);
-      updateCachedLibraryItem(userId, row);
-      scheduleEntityEnrichmentSafely(row.media_entities || entity);
+      const rowWithPatchedEntity = {
+        ...row,
+        media_entities: row.media_entities || entity
+      };
+      setCachedUserMedia(userId, entity.id, rowWithPatchedEntity);
+      updateCachedLibraryItem(userId, rowWithPatchedEntity);
+      scheduleEntityEnrichmentSafely(rowWithPatchedEntity.media_entities || entity, { userId });
     }
 
     return {
@@ -891,13 +964,14 @@ export async function addToUserLibrary({
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) {
-    setCachedEntity(existing);
-    await saveAliases(existing.id, normalized.aliases, normalized.primary_source).catch(() => []);
-    scheduleEntityEnrichmentSafely(existing);
+    const patched = await patchExistingEntityFromIncoming(existing, normalized);
+    setCachedEntity(patched);
+    await saveAliases(patched.id, normalized.aliases, normalized.primary_source).catch(() => []);
+    scheduleEntityEnrichmentSafely(patched, { userId });
 
     return insertUserMedia({
       userId,
-      entity: existing,
+      entity: patched,
       status,
       folderName
     });
@@ -927,8 +1001,9 @@ export async function ensureEntityForLibrary(item = {}) {
   const existing = await findDuplicateEntity(normalized);
 
   if (existing?.id) {
-    scheduleEntityEnrichmentSafely(existing);
-    return existing;
+    const patched = await patchExistingEntityFromIncoming(existing, normalized);
+    scheduleEntityEnrichmentSafely(patched);
+    return patched;
   }
 
   return insertEntity(normalized);
