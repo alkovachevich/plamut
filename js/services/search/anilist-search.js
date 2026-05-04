@@ -1,8 +1,11 @@
 import { API_ENDPOINTS } from "../../config.js";
 import { compactString, safeArray, uniqueArray } from "../../utils.js";
+import { fetchBestWikipediaSummary } from "./wikipedia-source.js";
+import { fetchBestWikidataPatch, wikidataPatchLooksUseful } from "./wikidata-source.js";
 
 const ANILIST_LIMIT = 12;
 const SEARCH_TIMEOUT_MS = 9000;
+const LOCALIZED_ENRICH_LIMIT = 4;
 
 function fetchWithTimeout(url, options = {}, timeoutMs = SEARCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -71,6 +74,113 @@ function getYearFromJikan(item = {}) {
   return Number.isFinite(year) ? year : null;
 }
 
+function metadataStatusForItem(item = {}) {
+  return item.cover_url && (item.description_ru || item.description_en)
+    ? "partial"
+    : "needs_enrichment";
+}
+
+function titleCandidates(item = {}) {
+  return uniqueArray([
+    item.title,
+    item.title_primary,
+    item.title_ru,
+    item.title_en,
+    item.original_title,
+    ...safeArray(item.aliases)
+  ].map(clean).filter(Boolean));
+}
+
+function mergeLocalizedPatch(item = {}, patch = {}) {
+  if (!patch || typeof patch !== "object") return item;
+
+  const ids = item.external_ids || {};
+  const incomingWikidataId = clean(patch.wikidata_id || patch.external_ids?.wikidata || "");
+
+  const next = {
+    ...item,
+    title_ru: item.title_ru || clean(patch.title_ru),
+    title_en: item.title_en || clean(patch.title_en),
+    original_title: item.original_title || clean(patch.original_title),
+    year: item.year || patch.year || null,
+    cover_url: item.cover_url || clean(patch.cover_url),
+    description_ru: item.description_ru || clean(patch.description_ru || patch.extract_ru),
+    description_en: item.description_en || clean(patch.description_en || patch.extract_en),
+    aliases: uniqueArray([
+      ...safeArray(item.aliases),
+      ...safeArray(patch.aliases),
+      patch.title_ru,
+      patch.title_en,
+      patch.original_title
+    ].map(clean).filter(Boolean)),
+    external_ids: {
+      ...ids,
+      ...(incomingWikidataId
+        ? { wikidata: incomingWikidataId, wikidata_id: incomingWikidataId }
+        : {})
+    },
+    meta: {
+      ...(item.meta || {}),
+      ...(patch.meta || {}),
+      localized_enrichment: true,
+      metadata_status: "needs_enrichment"
+    }
+  };
+
+  next.meta.metadata_status = metadataStatusForItem(next);
+  return next;
+}
+
+function mapWikipediaSummaryToPatch(summary = {}, language = "ru") {
+  if (!summary) return null;
+
+  return {
+    title_ru: language === "ru" ? clean(summary.title) : "",
+    title_en: language === "en" ? clean(summary.title) : "",
+    description_ru: language === "ru" ? clean(summary.extract) : "",
+    description_en: language === "en" ? clean(summary.extract) : "",
+    cover_url: clean(summary.image),
+    aliases: [summary.title].filter(Boolean),
+    meta: {
+      [`wikipedia_${language}_loaded`]: true,
+      [`wikipedia_${language}_title`]: clean(summary.title),
+      [`wikipedia_${language}_source`]: clean(summary.source)
+    }
+  };
+}
+
+async function enrichAnimeMangaResults(items = [], language = "ru") {
+  const base = safeArray(items);
+  const head = base.slice(0, LOCALIZED_ENRICH_LIMIT);
+  const tail = base.slice(LOCALIZED_ENRICH_LIMIT);
+
+  const enrichedHead = [];
+
+  for (const item of head) {
+    let current = item;
+    const candidates = titleCandidates(item);
+
+    const wikidataPatch = await fetchBestWikidataPatch(candidates, language).catch(() => null);
+    if (wikidataPatchLooksUseful(wikidataPatch)) {
+      current = mergeLocalizedPatch(current, wikidataPatch);
+    }
+
+    if (!current.description_ru) {
+      const wikiRu = await fetchBestWikipediaSummary(titleCandidates(current), "ru").catch(() => null);
+      current = mergeLocalizedPatch(current, mapWikipediaSummaryToPatch(wikiRu, "ru"));
+    }
+
+    if (!current.description_en) {
+      const wikiEn = await fetchBestWikipediaSummary(titleCandidates(current), "en").catch(() => null);
+      current = mergeLocalizedPatch(current, mapWikipediaSummaryToPatch(wikiEn, "en"));
+    }
+
+    enrichedHead.push(current);
+  }
+
+  return [...enrichedHead, ...tail];
+}
+
 function mapAniListItem(media = {}, category = "anime", language = "ru") {
   const normalizedCategory = normalizeCategory(category);
   const id = media?.id ? String(media.id) : "";
@@ -120,7 +230,9 @@ function mapAniListItem(media = {}, category = "anime", language = "ru") {
 
     external_ids: {
       anilist: id,
-      mal: media?.idMal ? String(media.idMal) : null
+      anilist_id: id,
+      mal: media?.idMal ? String(media.idMal) : null,
+      mal_id: media?.idMal ? String(media.idMal) : null
     },
 
     primary_source: "anilist",
@@ -276,7 +388,8 @@ function mapJikanItem(item = {}, category = "anime") {
 
     external_ids: {
       anilist: null,
-      mal: malId
+      mal: malId,
+      mal_id: malId
     },
 
     primary_source: "jikan",
@@ -407,7 +520,8 @@ export async function runAniListCategorySearch(query = "", category = "anime", o
     const anilistResults = await fetchAniList(query, normalizedCategory, language);
 
     if (anilistResults.length) {
-      return dedupeAniListResults(anilistResults);
+      const deduped = dedupeAniListResults(anilistResults);
+      return enrichAnimeMangaResults(deduped, language).catch(() => deduped);
     }
 
     console.warn(`AniList ${normalizedCategory} returned empty results, trying Jikan fallback.`);
@@ -417,7 +531,8 @@ export async function runAniListCategorySearch(query = "", category = "anime", o
 
   try {
     const jikanResults = await fetchJikanFallback(query, normalizedCategory);
-    return dedupeAniListResults(jikanResults);
+    const deduped = dedupeAniListResults(jikanResults);
+    return enrichAnimeMangaResults(deduped, language).catch(() => deduped);
   } catch (error) {
     console.warn(`Jikan ${normalizedCategory} fallback failed:`, error);
     return [];
