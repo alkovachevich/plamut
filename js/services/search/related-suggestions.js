@@ -38,6 +38,13 @@ function cleanWikidataId(value = "") {
   return /^Q\d+$/i.test(id) ? id.toUpperCase() : "";
 }
 
+function cleanOwnerUserId(value = "") {
+  const id = clean(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ? id
+    : "";
+}
+
 function getEntityWikidataId(entity = {}) {
   const ids = normalizeJson(entity.external_ids, {});
   const meta = normalizeJson(entity.meta, {});
@@ -140,7 +147,7 @@ function mapEntityPatchForPayload(patch = {}) {
   };
 }
 
-async function buildDirectCandidates(entity = {}, wikidataEntity = {}) {
+async function buildDirectCandidates(entity = {}, wikidataEntity = {}, ownerUserId = "") {
   const candidates = [];
 
   DIRECT_RELATION_PROPERTIES.forEach((config) => {
@@ -151,6 +158,7 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}) {
       if (!cleanTargetId) return;
 
       candidates.push({
+        owner_user_id: ownerUserId,
         source_entity_id: entity.id,
         relation_type: config.relation_type,
         source: "wikidata",
@@ -171,11 +179,12 @@ async function buildDirectCandidates(entity = {}, wikidataEntity = {}) {
   return candidates;
 }
 
-async function buildReverseAdaptationCandidates(entity = {}) {
+async function buildReverseAdaptationCandidates(entity = {}, ownerUserId = "") {
   const sourceWikidataId = getEntityWikidataId(entity);
   const reverseIds = await fetchReverseAdaptationIds(sourceWikidataId);
 
   return reverseIds.map((targetId) => ({
+    owner_user_id: ownerUserId,
     source_entity_id: entity.id,
     relation_type: "adaptation",
     source: "wikidata",
@@ -230,9 +239,9 @@ function dedupeCandidates(candidates = []) {
 
   return safeArray(candidates).filter((candidate) => {
     const targetId = cleanWikidataId(candidate.wikidata_entity_id);
-    if (!candidate.source_entity_id || !targetId) return false;
+    if (!candidate.owner_user_id || !candidate.source_entity_id || !targetId) return false;
 
-    const key = `${candidate.source_entity_id}:${candidate.relation_type}:${targetId}`;
+    const key = `${candidate.owner_user_id}:${candidate.source_entity_id}:${candidate.relation_type}:${targetId}`;
     if (seen.has(key)) return false;
 
     seen.add(key);
@@ -245,7 +254,7 @@ async function saveCandidatesWithUpsert(supabase, candidates = []) {
     supabase
       .from(RELATION_CANDIDATES_TABLE)
       .upsert(candidates, {
-        onConflict: "source_entity_id,relation_type,wikidata_entity_id",
+        onConflict: "owner_user_id,source_entity_id,relation_type,wikidata_entity_id",
         ignoreDuplicates: false
       })
       .select("id"),
@@ -265,8 +274,11 @@ async function saveCandidatesWithInsertFallback(supabase, candidates = []) {
   );
 }
 
-export async function buildRelatedSuggestionsForEntity(entity = {}) {
+export async function buildRelatedSuggestionsForEntity(entity = {}, options = {}) {
+  const ownerUserId = cleanOwnerUserId(options.ownerUserId || options.userId || "");
+
   if (!entity?.id) return [];
+  if (!ownerUserId) return [];
   if (isProtectedEntity(entity)) return [];
 
   const wikidataId = getEntityWikidataId(entity);
@@ -276,8 +288,8 @@ export async function buildRelatedSuggestionsForEntity(entity = {}) {
   if (!wikidataEntity?.id) return [];
 
   const [direct, reverseAdaptations] = await Promise.allSettled([
-    buildDirectCandidates(entity, wikidataEntity),
-    buildReverseAdaptationCandidates(entity)
+    buildDirectCandidates(entity, wikidataEntity, ownerUserId),
+    buildReverseAdaptationCandidates(entity, ownerUserId)
   ]);
 
   const rawCandidates = [
@@ -288,8 +300,8 @@ export async function buildRelatedSuggestionsForEntity(entity = {}) {
   return enrichCandidatePayloads(dedupeCandidates(rawCandidates));
 }
 
-export async function saveRelatedSuggestionsForEntity(entity = {}) {
-  const candidates = await buildRelatedSuggestionsForEntity(entity);
+export async function saveRelatedSuggestionsForEntity(entity = {}, options = {}) {
+  const candidates = await buildRelatedSuggestionsForEntity(entity, options);
   if (!candidates.length) {
     return {
       saved: 0,
