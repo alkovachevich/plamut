@@ -64,10 +64,68 @@ create index if not exists relation_candidates_source_entity_idx
 create index if not exists relation_candidates_owner_idx
   on public.relation_candidates(owner_user_id, status, created_at desc);
 
--- Required for Supabase upsert(... onConflict: 'source_entity_id,relation_type,wikidata_entity_id').
--- Do not make this partial: PostgREST conflict inference needs a matching unique index.
+-- Required for Supabase upsert(... onConflict: 'owner_user_id,source_entity_id,relation_type,wikidata_entity_id').
+create unique index if not exists relation_candidates_owner_source_relation_wikidata_unique_idx
+  on public.relation_candidates(owner_user_id, source_entity_id, relation_type, wikidata_entity_id);
+
+-- Legacy unique index, safe to keep if already created by an earlier patch.
 create unique index if not exists relation_candidates_source_relation_wikidata_unique_idx
   on public.relation_candidates(source_entity_id, relation_type, wikidata_entity_id);
+
+alter table public.relation_candidates enable row level security;
+
+-- Idempotent RLS policies for user-owned lightweight suggestions.
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'relation_candidates'
+      and policyname = 'Users can view their relation candidates'
+  ) then
+    create policy "Users can view their relation candidates"
+      on public.relation_candidates
+      for select
+      using (auth.uid() = owner_user_id);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'relation_candidates'
+      and policyname = 'Users can insert their relation candidates'
+  ) then
+    create policy "Users can insert their relation candidates"
+      on public.relation_candidates
+      for insert
+      with check (auth.uid() = owner_user_id);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'relation_candidates'
+      and policyname = 'Users can update their relation candidates'
+  ) then
+    create policy "Users can update their relation candidates"
+      on public.relation_candidates
+      for update
+      using (auth.uid() = owner_user_id)
+      with check (auth.uid() = owner_user_id);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'relation_candidates'
+      and policyname = 'Users can delete their relation candidates'
+  ) then
+    create policy "Users can delete their relation candidates"
+      on public.relation_candidates
+      for delete
+      using (auth.uid() = owner_user_id);
+  end if;
+end $$;
 
 create index if not exists media_entities_canonical_key_idx
   on public.media_entities(canonical_key);
