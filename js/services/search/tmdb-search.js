@@ -43,6 +43,12 @@ function buildTmdbCover(path = "") {
   return value ? `${TMDB_IMAGE_BASE_URL}${value}` : "";
 }
 
+function buildTmdbCanonicalKey(category = "movies", id = "") {
+  const normalizedCategory = normalizeCategory(category);
+  const cleanId = clean(id);
+  return cleanId ? `${normalizedCategory}:tmdb:${cleanId}` : "";
+}
+
 function pickTitle(item = {}, category = "movies", language = "ru") {
   const normalizedCategory = normalizeCategory(category);
 
@@ -106,7 +112,7 @@ function mapTmdbItem(item = {}, category = "movies", language = "ru") {
   const descriptions = getLocalizedDescription(item, language);
 
   return {
-    canonical_key: `${normalizedCategory}:tmdb:${tmdbType}:${id}`,
+    canonical_key: buildTmdbCanonicalKey(normalizedCategory, id),
     category: normalizedCategory,
 
     title: title || originalTitle,
@@ -125,6 +131,7 @@ function mapTmdbItem(item = {}, category = "movies", language = "ru") {
 
     external_ids: {
       tmdb: id,
+      tmdb_id: id,
       imdb: null,
       wikidata: null
     },
@@ -183,7 +190,7 @@ async function fetchTmdbSearch(query = "", category = "movies", language = "ru")
 }
 
 async function fetchTmdbDetailsById(item = {}, language = "ru") {
-  const tmdbId = clean(item?.external_ids?.tmdb);
+  const tmdbId = clean(item?.external_ids?.tmdb || item?.external_ids?.tmdb_id);
   const tmdbType = item?.meta?.tmdb_type || getTmdbType(item.category);
 
   if (!tmdbId || !TMDB_API_KEY) return item;
@@ -210,7 +217,8 @@ async function fetchTmdbDetailsById(item = {}, language = "ru") {
     ...mapped,
     external_ids: {
       ...mapped.external_ids,
-      imdb: clean(payload?.external_ids?.imdb_id)
+      imdb: clean(payload?.external_ids?.imdb_id),
+      imdb_id: clean(payload?.external_ids?.imdb_id)
     },
     meta: {
       ...mapped.meta,
@@ -268,8 +276,8 @@ function mergeTmdbResults(primaryItems = [], fallbackItems = []) {
   [...safeArray(primaryItems), ...safeArray(fallbackItems)].forEach((item) => {
     if (!item?.canonical_key) return;
 
-    const key = item.external_ids?.tmdb
-      ? `${item.category}:tmdb:${item.external_ids.tmdb}`
+    const key = item.external_ids?.tmdb || item.external_ids?.tmdb_id
+      ? `${item.category}:tmdb:${item.external_ids.tmdb || item.external_ids.tmdb_id}`
       : `${item.category}:title:${compactString(item.title || item.original_title || "")}`;
 
     if (!map.has(key)) {
@@ -283,7 +291,10 @@ function mergeTmdbResults(primaryItems = [], fallbackItems = []) {
       ...existing,
       ...item,
 
-      canonical_key: existing.canonical_key || item.canonical_key,
+      canonical_key: buildTmdbCanonicalKey(
+        existing.category || item.category,
+        existing.external_ids?.tmdb || existing.external_ids?.tmdb_id || item.external_ids?.tmdb || item.external_ids?.tmdb_id
+      ) || existing.canonical_key || item.canonical_key,
       category: existing.category || item.category,
 
       title: existing.title || item.title,
